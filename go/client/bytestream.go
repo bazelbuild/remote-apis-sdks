@@ -14,7 +14,7 @@ import (
 // WriteBytes uploads a byte slice.
 func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
 	cancelCtx, cancel := context.WithCancel(ctx)
-	opts := c.rpcOpts()
+	opts := c.RPCOpts()
 	defer cancel()
 	closure := func() error {
 		// Use lower-level Write in order to not retry twice.
@@ -58,7 +58,7 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 		}
 		return nil
 	}
-	return c.retrier.do(cancelCtx, closure)
+	return c.Retrier.Do(cancelCtx, closure)
 }
 
 // ReadBytes fetches a resource's contents into a byte slice.
@@ -137,6 +137,6 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 		}
 		return nil
 	}
-	e = c.retrier.do(cancelCtx, closure)
+	e = c.Retrier.Do(cancelCtx, closure)
 	return n, e
 }
