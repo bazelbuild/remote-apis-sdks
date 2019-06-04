@@ -149,7 +149,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Key][]byt
 	}
 	closure := func() error {
 		var resp *repb.BatchUpdateBlobsResponse
-		err := c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			resp, e = c.cas.BatchUpdateBlobs(ctx, &repb.BatchUpdateBlobsRequest{
 				InstanceName: c.InstanceName,
 				Requests:     reqs,
@@ -168,7 +168,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Key][]byt
 			st := status.FromProto(r.Status)
 			if st.Code() != codes.OK {
 				e := st.Err()
-				if c.retrier.ShouldRetry(e) {
+				if c.Retrier.ShouldRetry(e) {
 					failedReqs = append(failedReqs, &repb.BatchUpdateBlobsRequest_Request{
 						Digest: r.Digest,
 						Data:   blobs[digest.ToKey(r.Digest)],
@@ -191,7 +191,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Key][]byt
 		}
 		return nil
 	}
-	return c.retrier.do(ctx, closure)
+	return c.Retrier.Do(ctx, closure)
 }
 
 // makeBatches splits a list of digests into batches of size no more than the maximum.
@@ -411,7 +411,7 @@ func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result [
 		}
 		return nil
 	}
-	if err := c.retrier.do(ctx, closure); err != nil {
+	if err := c.Retrier.Do(ctx, closure); err != nil {
 		return nil, err
 	}
 	return result, nil

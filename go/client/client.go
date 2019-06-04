@@ -51,14 +51,17 @@ const (
 type Client struct {
 	// InstanceName is the instance name for the targeted remote execution instance; e.g. for Google
 	// RBE: "projects/<foo>/instances/default_instance".
-	InstanceName   string
-	actionCache    regrpc.ActionCacheClient
-	byteStream     bsgrpc.ByteStreamClient
-	cas            regrpc.ContentAddressableStorageClient
-	execution      regrpc.ExecutionClient
-	capabilities   regrpc.CapabilitiesClient
-	operations     opgrpc.OperationsClient
-	retrier        *Retrier
+	InstanceName string
+	actionCache  regrpc.ActionCacheClient
+	byteStream   bsgrpc.ByteStreamClient
+	cas          regrpc.ContentAddressableStorageClient
+	execution    regrpc.ExecutionClient
+	capabilities regrpc.CapabilitiesClient
+	operations   opgrpc.OperationsClient
+	// Retrier is the Retrier that is used for RPCs made by this client.
+	//
+	// This field is logically "protected" and is intended for use by extensions of Client.
+	Retrier        *Retrier
 	chunkMaxSize   ChunkMaxSize
 	useBatchOps    UseBatchOps
 	casConcurrency CASConcurrency
@@ -251,14 +254,20 @@ func (d RPCTimeout) Apply(c *Client) {
 	c.rpcTimeout = time.Duration(d)
 }
 
-func (c *Client) rpcOpts() []grpc.CallOption {
+// RPCOpts returns the default RPC options that should be used for calls made with this client.
+//
+// This method is logically "protected" and is intended for use by extensions of Client.
+func (c *Client) RPCOpts() []grpc.CallOption {
 	if c.creds == nil {
 		return nil
 	}
 	return []grpc.CallOption{grpc.PerRPCCredentials(c.creds)}
 }
 
-func (c *Client) callWithTimeout(ctx context.Context, f func(ctx context.Context) error) error {
+// CallWithTimeout executes the given function f with a context that times out after an RPC timeout.
+//
+// This method is logically "protected" and is intended for use by extensions of Client.
+func (c *Client) CallWithTimeout(ctx context.Context, f func(ctx context.Context) error) error {
 	childCtx, cancel := context.WithTimeout(ctx, c.rpcTimeout)
 	defer cancel()
 	e := f(childCtx)
@@ -276,13 +285,13 @@ type Retrier struct {
 
 // Apply sets the client's retrier function to r.
 func (r *Retrier) Apply(c *Client) {
-	c.retrier = r
+	c.Retrier = r
 }
 
-// do executes f() with retries.
+// Do executes f() with retries.
 // It can be called with a nil receiver; in that case no retries are done (just a passthrough call
 // to f()).
-func (r *Retrier) do(ctx context.Context, f func() error) error {
+func (r *Retrier) Do(ctx context.Context, f func() error) error {
 	if r == nil {
 		return f()
 	}
@@ -316,9 +325,9 @@ func RetryTransient() *Retrier {
 
 // GetActionResult wraps the underlying call with specific client options.
 func (c *Client) GetActionResult(ctx context.Context, req *repb.GetActionResultRequest) (res *repb.ActionResult, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.actionCache.GetActionResult(ctx, req, opts...)
 			return e
 		})
@@ -331,9 +340,9 @@ func (c *Client) GetActionResult(ctx context.Context, req *repb.GetActionResultR
 
 // UpdateActionResult wraps the underlying call with specific client options.
 func (c *Client) UpdateActionResult(ctx context.Context, req *repb.UpdateActionResultRequest) (res *repb.ActionResult, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.actionCache.UpdateActionResult(ctx, req, opts...)
 			return e
 		})
@@ -346,8 +355,8 @@ func (c *Client) UpdateActionResult(ctx context.Context, req *repb.UpdateActionR
 
 // Read wraps the underlying call with specific client options.
 func (c *Client) Read(ctx context.Context, req *bspb.ReadRequest) (res bsgrpc.ByteStream_ReadClient, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
 		res, e = c.byteStream.Read(ctx, req, opts...)
 		return e
 	})
@@ -359,8 +368,8 @@ func (c *Client) Read(ctx context.Context, req *bspb.ReadRequest) (res bsgrpc.By
 
 // Write wraps the underlying call with specific client options.
 func (c *Client) Write(ctx context.Context) (res bsgrpc.ByteStream_WriteClient, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
 		res, e = c.byteStream.Write(ctx, opts...)
 		return e
 	})
@@ -372,9 +381,9 @@ func (c *Client) Write(ctx context.Context) (res bsgrpc.ByteStream_WriteClient, 
 
 // QueryWriteStatus wraps the underlying call with specific client options.
 func (c *Client) QueryWriteStatus(ctx context.Context, req *bspb.QueryWriteStatusRequest) (res *bspb.QueryWriteStatusResponse, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.byteStream.QueryWriteStatus(ctx, req, opts...)
 			return e
 		})
@@ -387,9 +396,9 @@ func (c *Client) QueryWriteStatus(ctx context.Context, req *bspb.QueryWriteStatu
 
 // FindMissingBlobs wraps the underlying call with specific client options.
 func (c *Client) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (res *repb.FindMissingBlobsResponse, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.cas.FindMissingBlobs(ctx, req, opts...)
 			return e
 		})
@@ -404,9 +413,9 @@ func (c *Client) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlob
 // NOTE that its retry logic ignores the per-blob errors embedded in the response; you probably want
 // to use BatchWriteBlobs() instead.
 func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (res *repb.BatchUpdateBlobsResponse, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.cas.BatchUpdateBlobs(ctx, req, opts...)
 			return e
 		})
@@ -420,9 +429,9 @@ func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlob
 // BatchReadBlobs wraps the underlying call with specific client options.
 // NOTE that its retry logic ignores the per-blob errors embedded in the response.
 func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (res *repb.BatchReadBlobsResponse, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.cas.BatchReadBlobs(ctx, req, opts...)
 			return e
 		})
@@ -435,8 +444,8 @@ func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReq
 
 // GetTree wraps the underlying call with specific client options.
 func (c *Client) GetTree(ctx context.Context, req *repb.GetTreeRequest) (res regrpc.ContentAddressableStorage_GetTreeClient, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
 		res, e = c.cas.GetTree(ctx, req, opts...)
 		return e
 	})
@@ -448,8 +457,8 @@ func (c *Client) GetTree(ctx context.Context, req *repb.GetTreeRequest) (res reg
 
 // Execute wraps the underlying call with specific client options.
 func (c *Client) Execute(ctx context.Context, req *repb.ExecuteRequest) (res regrpc.Execution_ExecuteClient, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
 		res, e = c.execution.Execute(ctx, req, opts...)
 		return e
 	})
@@ -461,8 +470,8 @@ func (c *Client) Execute(ctx context.Context, req *repb.ExecuteRequest) (res reg
 
 // WaitExecution wraps the underlying call with specific client options.
 func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionRequest) (res regrpc.Execution_ExecuteClient, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
 		res, e = c.execution.WaitExecution(ctx, req, opts...)
 		return e
 	})
@@ -474,9 +483,9 @@ func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionReque
 
 // GetCapabilities wraps the underlying call with specific client options.
 func (c *Client) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.capabilities.GetCapabilities(ctx, req, opts...)
 			return e
 		})
@@ -489,9 +498,9 @@ func (c *Client) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesR
 
 // GetOperation wraps the underlying call with specific client options.
 func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest) (res *oppb.Operation, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.operations.GetOperation(ctx, req, opts...)
 			return e
 		})
@@ -504,9 +513,9 @@ func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest
 
 // ListOperations wraps the underlying call with specific client options.
 func (c *Client) ListOperations(ctx context.Context, req *oppb.ListOperationsRequest) (res *oppb.ListOperationsResponse, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.operations.ListOperations(ctx, req, opts...)
 			return e
 		})
@@ -519,9 +528,9 @@ func (c *Client) ListOperations(ctx context.Context, req *oppb.ListOperationsReq
 
 // CancelOperation wraps the underlying call with specific client options.
 func (c *Client) CancelOperation(ctx context.Context, req *oppb.CancelOperationRequest) (res *emptypb.Empty, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.operations.CancelOperation(ctx, req, opts...)
 			return e
 		})
@@ -534,9 +543,9 @@ func (c *Client) CancelOperation(ctx context.Context, req *oppb.CancelOperationR
 
 // DeleteOperation wraps the underlying call with specific client options.
 func (c *Client) DeleteOperation(ctx context.Context, req *oppb.DeleteOperationRequest) (res *emptypb.Empty, err error) {
-	opts := c.rpcOpts()
-	err = c.retrier.do(ctx, func() (e error) {
-		return c.callWithTimeout(ctx, func(ctx context.Context) (e error) {
+	opts := c.RPCOpts()
+	err = c.Retrier.Do(ctx, func() (e error) {
+		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			res, e = c.operations.DeleteOperation(ctx, req, opts...)
 			return e
 		})
