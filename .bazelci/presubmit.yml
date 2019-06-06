@@ -13,8 +13,10 @@ tasks:
     shell_commands:
       - "echo +++ Installing go"
       - "echo running as `whoami` in `pwd`"
-      - "ls -la"
       - "wget https://dl.google.com/go/go1.12.5.linux-amd64.tar.gz"
+      - "ls -la"
+      - "ls -la /"
+      - "ls -la /usr"
       - "tar -C /usr/local -xzf go1.12.5.linux-amd64.tar.gz"
       - "export PATH=$PATH:/usr/local/go/bin"
       - "echo +++ Running go build"
