@@ -12,9 +12,11 @@ tasks:
     name: "go build / test"
     shell_commands:
       - "echo +++ Installing go"
-      - "echo running as $USER in `pwd`"
+      - "echo running as `whomai` in `pwd`"
       - "ls -la"
-      - "wget https://dl.google.com/go/go1.12.5.linux-amd64.tar.gz && tar -C /usr/local -xzf go1.12.5.linux-amd64.tar.gz && export PATH=$PATH:/usr/local/go/bin"
+      - "wget https://dl.google.com/go/go1.12.5.linux-amd64.tar.gz"
+      - "tar -C /usr/local -xzf go1.12.5.linux-amd64.tar.gz"
+      - "export PATH=$PATH:/usr/local/go/bin"
       - "echo +++ Running go build"
       - "go build ./..."
       - "echo +++ Running go test"
