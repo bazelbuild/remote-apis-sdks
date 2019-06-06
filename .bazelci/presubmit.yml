@@ -6,3 +6,10 @@ tasks:
           - "//..."
       test_targets:
           - "//..."
+# Check that "go build / test" works, too.
+  ubuntu1804_gobuild:
+    platform: ubuntu1804
+    name: "go build / test"
+    shell_commands:
+      - "echo +++ Running go build"
+      - "go test"
