@@ -11,10 +11,6 @@ tasks:
     platform: ubuntu1804
     name: "go build / test"
     shell_commands:
-      - "echo +++ Installing go"
-      - "wget https://dl.google.com/go/go1.12.5.linux-amd64.tar.gz"
-      - "mkdir go_distro_dir && tar -C `pwd`/go_distro_dir -xzf go1.12.5.linux-amd64.tar.gz"
-      - "export PATH=$PATH:`pwd`/go_distro_dir/go/bin"
       - "echo +++ Running go build"
       - "go build ./..."
       - "echo +++ Running go test"
