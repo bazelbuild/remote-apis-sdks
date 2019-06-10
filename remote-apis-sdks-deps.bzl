@@ -7,7 +7,7 @@
 #    urls = ["https://github.com/bazelbuild/rules_go/releases/download/0.18.3/rules_go-0.18.3.tar.gz"],
 #)
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
-go_rules_dependencies()
+gazelle_dependencies()
 
 def remote_apis_sdks_go_deps():
   """Load dependencies needed to depend on the Go Remote Execution SDK."""
