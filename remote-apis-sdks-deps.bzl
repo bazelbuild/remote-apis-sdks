@@ -1,6 +1,5 @@
 """Load dependencies needed to depend on the remote-apis-sdks repo."""
 
-
 # TODO(foox): Unsure if we need to load the bazel rules here, or if the load() in the WORKSPACE is sufficient.
 http_archive(
     name = "io_bazel_rules_go",
@@ -9,7 +8,6 @@ http_archive(
 )
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
 go_rules_dependencies()
-
 
 def remote_apis_sdks_go_deps():
   """Load dependencies needed to depend on the Go Remote Execution SDK."""
