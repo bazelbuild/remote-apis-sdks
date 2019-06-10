@@ -11,10 +11,12 @@ http_archive(
 )
 
 # Gazelle.
-http_archive(
+# gazelle:repository_macro remote-apis-sdks-deps.bzl%remote_apis_sdks_go_deps
+# TODO: switch this to an http_archive once a new Gazelle version (past 0.17) is released.
+git_repository(
     name = "bazel_gazelle",
-    sha256 = "3c681998538231a2d24d0c07ed5a7658cb72bfb5fd4bf9911157c0e9ac6a2687",
-    urls = ["https://github.com/bazelbuild/bazel-gazelle/releases/download/0.17.0/bazel-gazelle-0.17.0.tar.gz"],
+    commit = "4f524f20aff5ae9b00ecaabbf43c3e8c9804bd0b",
+    remote = "https://github.com/bazelbuild/bazel-gazelle",
 )
 
 load("@io_bazel_rules_go//go:deps.bzl", "go_rules_dependencies", "go_register_toolchains")
@@ -42,13 +44,15 @@ load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
 
 grpc_deps()
 
-# Go dependencies.
-#
-# Add or update repos using Gazelle:
+# Go dependencies, add or update repos using Gazelle:
 #  * For more details: https://github.com/bazelbuild/bazel-gazelle#update-repos
 #  * Invoke with:
-#    bazel run //:gazelle -- update-repos example.com/new/repo -to_macro remote-apis-sdks-deps.bzl%remote_apis_sdks_go_deps
-load ("//:remote-apis-sdks-deps.bzl", "remote_apis_sdks_go_deps")
+#    bazel run //:gazelle -- update-repos \
+#      -to_macro remote-apis-sdks-deps.bzl%remote_apis_sdks_go_deps example.com/new/repo
+#  * NOTE that you also need to manually add an if statement around the
+#    auto-added `go_repository` as with the other repos.
+load("//:remote-apis-sdks-deps.bzl", "remote_apis_sdks_go_deps")
+
 remote_apis_sdks_go_deps()
 
 # Needed for the googleapis protos used by com_github_bazelbuild_remote_apis
@@ -66,7 +70,9 @@ go_repository(
     commit = "c0682f068a6044f395a7e28526abe1de56beffa8",
     importpath = "github.com/bazelbuild/remote-apis",
 )
+
 load("@com_github_bazelbuild_remote_apis//:repository_rules.bzl", "switched_rules_by_language")
+
 switched_rules_by_language(
     name = "bazel_remote_apis_imports",
     go = True,
