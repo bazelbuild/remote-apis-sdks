@@ -1,4 +1,5 @@
 load("@bazel_gazelle//:def.bzl", "gazelle")
 
 # gazelle:prefix github.com/bazelbuild/remote-apis-sdks
+# gazelle:repository_macro remote-apis-sdks-deps.bzl%remote_apis_sdks_go_deps
 gazelle(name = "gazelle")
