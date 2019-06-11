@@ -65,3 +65,9 @@ def remote_apis_sdks_go_deps():
             commit = "8b1b92947f46224e3b97bb1a3a5b0382be00d31e",
             importpath = "github.com/pborman/uuid",
         )
+    if "com_github_bazelbuild_remote_apis" not in native.existing_rules():
+        go_repository(
+            name = "com_github_bazelbuild_remote_apis",
+            commit = "c0682f068a6044f395a7e28526abe1de56beffa8",
+            importpath = "github.com/bazelbuild/remote-apis",
+        )
