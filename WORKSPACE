@@ -42,11 +42,9 @@ load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
 
 grpc_deps()
 
-# Go dependencies.
-#
-# Add or update repos using Gazelle:
-# https://github.com/bazelbuild/bazel-gazelle#update-repos
-
+# Go dependencies, add or update repos using Gazelle:
+#  * For more details: https://github.com/bazelbuild/bazel-gazelle#update-repos
+#  * Also manually update the repo in remote-apis-sdks-deps.bzl.
 go_repository(
     name = "com_github_pkg_errors",
     commit = "27936f6d90f9c8e1145f11ed52ffffbfdb9e0af7",
