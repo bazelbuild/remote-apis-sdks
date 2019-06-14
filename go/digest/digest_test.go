@@ -221,19 +221,6 @@ func TestNewFromHash(t *testing.T) {
 	}
 }
 
-func TestFilterDuplicateDigests(t *testing.T) {
-	t.Parallel()
-	d1 := TestNew("10", 0)
-	d2 := TestNew("20", 0)
-	d3 := TestNew("30", 0)
-	d4 := TestNew("40", 0)
-	actual := FilterDuplicates([]*repb.Digest{d1, d2, d1, d3, d1, d4, d4, d1})
-	expected := []*repb.Digest{d1, d2, d3, d4}
-	if !reflect.DeepEqual(actual, expected) {
-		t.Errorf("Expected %v, but got %v", expected, actual)
-	}
-}
-
 func TestToFromKey(t *testing.T) {
 	t.Parallel()
 	digests := []*repb.Digest{

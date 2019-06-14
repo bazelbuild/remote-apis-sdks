@@ -161,21 +161,6 @@ func FromKey(k Key) *repb.Digest {
 	return &repb.Digest{Hash: k.hash, SizeBytes: k.size}
 }
 
-// FilterDuplicates filters out the duplicates in a list of digests
-func FilterDuplicates(digests []*repb.Digest) []*repb.Digest {
-	seen := make(map[Key]bool, len(digests))
-	filtered := make([]*repb.Digest, 0, len(digests))
-	for _, digest := range digests {
-		digestStr := ToKey(digest)
-		if seen[digestStr] {
-			continue
-		}
-		seen[digestStr] = true
-		filtered = append(filtered, digest)
-	}
-	return filtered
-}
-
 // mustNew panics on error; it should only be called either when
 // all inputs have been validated already in this package or in
 // a test context (ie NewTest)
