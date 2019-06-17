@@ -22,7 +22,7 @@ import (
 // WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
 // result of PackageTree. Unlike with the single-item functions, it first queries the CAS to
 // see which blobs are missing and only uploads those that are.
-func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Key][]byte) error {
+func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
 	if c.casConcurrency <= 0 {
 		return fmt.Errorf("CASConcurrency should be at least 1")
 	}
@@ -30,9 +30,9 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Key][]byte) er
 		logInterval = 25
 	)
 
-	var dgs []*repb.Digest
-	for k := range blobs {
-		dgs = append(dgs, digest.FromKey(k))
+	var dgs []digest.Digest
+	for d := range blobs {
+		dgs = append(dgs, d)
 	}
 
 	missing, err := c.MissingBlobs(ctx, dgs)
@@ -40,33 +40,34 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Key][]byte) er
 		return err
 	}
 	log.V(1).Infof("%d blobs to store", len(missing))
-	var batches [][]*repb.Digest
+	var batches [][]digest.Digest
 	if c.useBatchOps {
 		batches = makeBatches(missing)
 	} else {
 		log.V(1).Info("uploading them individually")
 		for i := range missing {
+			log.V(2).Infof("creating single batch of blob %s", missing[i])
 			batches = append(batches, missing[i:i+1])
 		}
 	}
 
 	eg, eCtx := errgroup.WithContext(ctx)
-	todo := make(chan []*repb.Digest, c.casConcurrency)
+	todo := make(chan []digest.Digest, c.casConcurrency)
 	for i := 0; i < int(c.casConcurrency) && i < len(batches); i++ {
 		eg.Go(func() error {
 			for batch := range todo {
 				if len(batch) > 1 {
 					log.V(2).Infof("uploading batch of %d blobs", len(batch))
-					bchMap := make(map[digest.Key][]byte)
+					bchMap := make(map[digest.Digest][]byte)
 					for _, dg := range batch {
-						bchMap[digest.ToKey(dg)] = blobs[digest.ToKey(dg)]
+						bchMap[dg] = blobs[dg]
 					}
 					if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
 						return err
 					}
 				} else {
-					log.V(2).Info("uploading single blob")
-					if _, err := c.WriteBlob(eCtx, blobs[digest.ToKey(batch[0])]); err != nil {
+					log.V(2).Infof("uploading single blob with digest %s", batch[0])
+					if _, err := c.WriteBlob(eCtx, blobs[batch[0]]); err != nil {
 						return err
 					}
 				}
@@ -98,20 +99,20 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Key][]byte) er
 }
 
 // WriteProto marshals and writes a proto.
-func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (*repb.Digest, error) {
+func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Digest, error) {
 	bytes, err := proto.Marshal(msg)
 	if err != nil {
-		return nil, err
+		return digest.Empty, err
 	}
 	return c.WriteBlob(ctx, bytes)
 }
 
 // WriteBlob uploads a blob to the CAS.
-func (c *Client) WriteBlob(ctx context.Context, blob []byte) (*repb.Digest, error) {
-	dg := digest.FromBlob(blob)
-	name := c.ResourceNameWrite(dg.Hash, dg.SizeBytes)
+func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
+	dg := digest.NewFromBlob(blob)
+	name := c.ResourceNameWrite(dg.Hash, dg.Size)
 	if err := c.WriteBytes(ctx, name, blob); err != nil {
-		return nil, err
+		return dg, err
 	}
 	return dg, nil
 }
@@ -130,14 +131,13 @@ const (
 // maximum total size for a batch upload, which is about 4 MB (see MaxBatchSz). Digests must be
 // computed in advance by the caller. In case multiple errors occur during the blob upload, the
 // last error will be returned.
-func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Key][]byte) error {
+func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
 	var reqs []*repb.BatchUpdateBlobsRequest_Request
 	var sz int64
 	for k, b := range blobs {
-		dg := digest.FromKey(k)
-		sz += dg.SizeBytes
+		sz += k.Size
 		reqs = append(reqs, &repb.BatchUpdateBlobsRequest_Request{
-			Digest: dg,
+			Digest: k.ToProto(),
 			Data:   b,
 		})
 	}
@@ -171,7 +171,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Key][]byt
 				if c.Retrier.ShouldRetry(e) {
 					failedReqs = append(failedReqs, &repb.BatchUpdateBlobsRequest_Request{
 						Digest: r.Digest,
-						Data:   blobs[digest.ToKey(r.Digest)],
+						Data:   blobs[digest.NewFromProtoUnvalidated(r.Digest)],
 					})
 					retriableError = e
 				} else {
@@ -187,7 +187,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Key][]byt
 			if allRetriable {
 				return retriableError // Retriable errors only, retry the failed requests.
 			}
-			return fmt.Errorf("uploading blobs as part of a batch resulted in %d failures, including blob %s: %s", numErrs, digest.ToString(errDg), errMsg)
+			return fmt.Errorf("uploading blobs as part of a batch resulted in %d failures, including blob %s: %s", numErrs, errDg, errMsg)
 		}
 		return nil
 	}
@@ -205,18 +205,18 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Key][]byt
 // The input list is sorted in-place; additionally, any blob bigger than the maximum will be put in
 // a batch of its own and the caller will need to ensure that it is uploaded with Write, not batch
 // operations.
-func makeBatches(dgs []*repb.Digest) [][]*repb.Digest {
-	var batches [][]*repb.Digest
+func makeBatches(dgs []digest.Digest) [][]digest.Digest {
+	var batches [][]digest.Digest
 	log.V(1).Infof("Batching %d digests", len(dgs))
 	sort.Slice(dgs, func(i, j int) bool {
-		return dgs[i].SizeBytes < dgs[j].SizeBytes
+		return dgs[i].Size < dgs[j].Size
 	})
 	for len(dgs) > 0 {
-		batch := []*repb.Digest{dgs[len(dgs)-1]}
+		batch := []digest.Digest{dgs[len(dgs)-1]}
 		dgs = dgs[:len(dgs)-1]
-		sz := batch[0].SizeBytes
-		for len(dgs) > 0 && len(batch) < MaxBatchDigests && dgs[0].SizeBytes <= MaxBatchSz-sz { // dg.SizeBytes+sz possibly overflows so subtract instead.
-			sz += dgs[0].SizeBytes
+		sz := batch[0].Size
+		for len(dgs) > 0 && len(batch) < MaxBatchDigests && dgs[0].Size <= MaxBatchSz-sz { // dg.Size+sz possibly overflows so subtract instead.
+			sz += dgs[0].Size
 			batch = append(batch, dgs[0])
 			dgs = dgs[1:]
 		}
@@ -228,16 +228,16 @@ func makeBatches(dgs []*repb.Digest) [][]*repb.Digest {
 }
 
 // ReadBlob fetches a blob from the CAS into a byte slice.
-func (c *Client) ReadBlob(ctx context.Context, d *repb.Digest) ([]byte, error) {
-	return c.readBlob(ctx, d.Hash, d.SizeBytes, 0, 0)
+func (c *Client) ReadBlob(ctx context.Context, d digest.Digest) ([]byte, error) {
+	return c.readBlob(ctx, d.Hash, d.Size, 0, 0)
 }
 
 // ReadBlobRange fetches a partial blob from the CAS into a byte slice, starting from offset bytes
 // and including at most limit bytes (or no limit if limit==0). The offset must be non-negative and
 // no greater than the size of the entire blob. The limit must not be negative, but offset+limit may
 // be greater than the size of the entire blob.
-func (c *Client) ReadBlobRange(ctx context.Context, d *repb.Digest, offset, limit int64) ([]byte, error) {
-	return c.readBlob(ctx, d.Hash, d.SizeBytes, offset, limit)
+func (c *Client) ReadBlobRange(ctx context.Context, d digest.Digest, offset, limit int64) ([]byte, error) {
+	return c.readBlob(ctx, d.Hash, d.Size, offset, limit)
 }
 
 func (c *Client) readBlob(ctx context.Context, hash string, sizeBytes, offset, limit int64) ([]byte, error) {
@@ -269,8 +269,8 @@ func (c *Client) readBlob(ctx context.Context, hash string, sizeBytes, offset, l
 
 // ReadBlobToFile fetches a blob with a provided digest name from the CAS, saving it into a file.
 // It returns the number of bytes read.
-func (c *Client) ReadBlobToFile(ctx context.Context, d *repb.Digest, fpath string) (int64, error) {
-	return c.readBlobToFile(ctx, d.Hash, d.SizeBytes, fpath)
+func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath string) (int64, error) {
+	return c.readBlobToFile(ctx, d.Hash, d.Size, fpath)
 }
 
 func (c *Client) readBlobToFile(ctx context.Context, hash string, sizeBytes int64, fpath string) (int64, error) {
@@ -286,8 +286,8 @@ func (c *Client) readBlobToFile(ctx context.Context, hash string, sizeBytes int6
 
 // ReadBlobStreamed fetches a blob with a provided digest from the CAS.
 // It streams into an io.Writer, and returns the number of bytes read.
-func (c *Client) ReadBlobStreamed(ctx context.Context, d *repb.Digest, w io.Writer) (int64, error) {
-	return c.readBlobStreamed(ctx, d.Hash, d.SizeBytes, 0, 0, w)
+func (c *Client) ReadBlobStreamed(ctx context.Context, d digest.Digest, w io.Writer) (int64, error) {
+	return c.readBlobStreamed(ctx, d.Hash, d.Size, 0, 0, w)
 }
 
 func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, offset, limit int64, w io.Writer) (int64, error) {
@@ -307,12 +307,12 @@ func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, o
 
 // MissingBlobs queries the CAS to determine if it has the listed blobs. It returns a list of the
 // missing blobs.
-func (c *Client) MissingBlobs(ctx context.Context, ds []*repb.Digest) ([]*repb.Digest, error) {
+func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest.Digest, error) {
 	if c.casConcurrency <= 0 {
 		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
-	var batches [][]*repb.Digest
-	var missing []*repb.Digest
+	var batches [][]digest.Digest
+	var missing []digest.Digest
 	var resultMutex sync.Mutex
 	const (
 		logInterval   = 25
@@ -323,7 +323,10 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []*repb.Digest) ([]*repb.D
 		if len(ds) < maxQueryLimit {
 			batchSize = len(ds)
 		}
-		batch := ds[0:batchSize]
+		var batch []digest.Digest
+		for i := 0; i < batchSize; i++ {
+			batch = append(batch, ds[i])
+		}
 		ds = ds[batchSize:]
 		log.V(2).Infof("created query batch of %d blobs", len(batch))
 		batches = append(batches, batch)
@@ -331,20 +334,26 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []*repb.Digest) ([]*repb.D
 	log.V(1).Infof("%d query batches created", len(batches))
 
 	eg, eCtx := errgroup.WithContext(ctx)
-	todo := make(chan []*repb.Digest, c.casConcurrency)
+	todo := make(chan []digest.Digest, c.casConcurrency)
 	for i := 0; i < int(c.casConcurrency) && i < len(batches); i++ {
 		eg.Go(func() error {
 			for batch := range todo {
+				var batchPb []*repb.Digest
+				for _, dg := range batch {
+					batchPb = append(batchPb, dg.ToProto())
+				}
 				req := &repb.FindMissingBlobsRequest{
 					InstanceName: c.InstanceName,
-					BlobDigests:  batch,
+					BlobDigests:  batchPb,
 				}
 				resp, err := c.FindMissingBlobs(eCtx, req)
 				if err != nil {
 					return err
 				}
 				resultMutex.Lock()
-				missing = append(missing, resp.MissingBlobDigests...)
+				for _, d := range resp.MissingBlobDigests {
+					missing = append(missing, digest.NewFromProtoUnvalidated(d))
+				}
 				resultMutex.Unlock()
 				if eCtx.Err() != nil {
 					return eCtx.Err()
@@ -424,7 +433,7 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 	for _, file := range ar.OutputFiles {
 		outs[file.Path] = &Output{
 			Path:         file.Path,
-			Digest:       digest.ToKey(file.Digest),
+			Digest:       digest.NewFromProtoUnvalidated(file.Digest),
 			IsExecutable: file.IsExecutable,
 		}
 	}
@@ -441,7 +450,7 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 		}
 	}
 	for _, dir := range ar.OutputDirectories {
-		if blob, err := c.ReadBlob(ctx, dir.TreeDigest); err == nil {
+		if blob, err := c.ReadBlob(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest)); err == nil {
 			tree := &repb.Tree{}
 			if err := proto.Unmarshal(blob, tree); err != nil {
 				return nil, err

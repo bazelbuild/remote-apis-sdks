@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
+
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
@@ -149,7 +150,7 @@ func TestRead(t *testing.T) {
 			}
 
 			if tc.offset == 0 && tc.limit == 0 {
-				got, err := c.ReadBlob(ctx, digest.FromBlob(want))
+				got, err := c.ReadBlob(ctx, digest.NewFromBlob(want))
 				if err != nil {
 					t.Errorf("c.ReadBlob(ctx, digest) gave error %s, want nil", err)
 				}
@@ -158,7 +159,7 @@ func TestRead(t *testing.T) {
 				}
 			}
 
-			got, err := c.ReadBlobRange(ctx, digest.FromBlob(fake.blob), tc.offset, tc.limit)
+			got, err := c.ReadBlobRange(ctx, digest.NewFromBlob(fake.blob), tc.offset, tc.limit)
 			if err != nil {
 				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave error %s, want nil", tc.offset, tc.limit, err)
 			}
@@ -220,8 +221,9 @@ func TestWrite(t *testing.T) {
 			if diff := cmp.Diff(tc.blob, fake.buf, cmp.Comparer(bytes.Equal)); diff != "" {
 				t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs (-sent, +received):\n%s", diff)
 			}
-			if diff := cmp.Diff(digest.FromBlob(tc.blob), gotDg); diff != "" {
-				t.Errorf("c.WriteBlob(ctx, blob) had diff on digest returned (want -> got):\n%s", diff)
+			dg := digest.NewFromBlob(tc.blob)
+			if dg != gotDg {
+				t.Errorf("c.WriteBlob(ctx, blob) had diff on digest returned (want %s, got %s)", dg, gotDg)
 			}
 		})
 	}
@@ -251,53 +253,53 @@ func TestMissingBlobs(t *testing.T) {
 	tests := []struct {
 		name string
 		// present is the digests present in the CAS.
-		present []*repb.Digest
+		present []digest.Digest
 		// input is the digests given to MissingBlobs.
-		input []*repb.Digest
+		input []digest.Digest
 		// want is the returned list of digests.
-		want []*repb.Digest
+		want []digest.Digest
 	}{
 		{
 			name:    "none present",
 			present: nil,
-			input: []*repb.Digest{
-				digest.FromBlob([]byte("foo")),
-				digest.FromBlob([]byte("bar")),
-				digest.FromBlob([]byte("baz")),
+			input: []digest.Digest{
+				digest.NewFromBlob([]byte("foo")),
+				digest.NewFromBlob([]byte("bar")),
+				digest.NewFromBlob([]byte("baz")),
 			},
-			want: []*repb.Digest{
-				digest.FromBlob([]byte("foo")),
-				digest.FromBlob([]byte("bar")),
-				digest.FromBlob([]byte("baz")),
+			want: []digest.Digest{
+				digest.NewFromBlob([]byte("foo")),
+				digest.NewFromBlob([]byte("bar")),
+				digest.NewFromBlob([]byte("baz")),
 			},
 		},
 		{
 			name: "all present",
-			present: []*repb.Digest{
-				digest.FromBlob([]byte("baz")),
-				digest.FromBlob([]byte("foo")),
-				digest.FromBlob([]byte("bar")),
+			present: []digest.Digest{
+				digest.NewFromBlob([]byte("baz")),
+				digest.NewFromBlob([]byte("foo")),
+				digest.NewFromBlob([]byte("bar")),
 			},
-			input: []*repb.Digest{
-				digest.FromBlob([]byte("foo")),
-				digest.FromBlob([]byte("bar")),
-				digest.FromBlob([]byte("baz")),
+			input: []digest.Digest{
+				digest.NewFromBlob([]byte("foo")),
+				digest.NewFromBlob([]byte("bar")),
+				digest.NewFromBlob([]byte("baz")),
 			},
 			want: nil,
 		},
 		{
 			name: "some present",
-			present: []*repb.Digest{
-				digest.FromBlob([]byte("foo")),
-				digest.FromBlob([]byte("bar")),
+			present: []digest.Digest{
+				digest.NewFromBlob([]byte("foo")),
+				digest.NewFromBlob([]byte("bar")),
 			},
-			input: []*repb.Digest{
-				digest.FromBlob([]byte("foo")),
-				digest.FromBlob([]byte("bar")),
-				digest.FromBlob([]byte("baz")),
+			input: []digest.Digest{
+				digest.NewFromBlob([]byte("foo")),
+				digest.NewFromBlob([]byte("bar")),
+				digest.NewFromBlob([]byte("baz")),
 			},
-			want: []*repb.Digest{
-				digest.FromBlob([]byte("baz")),
+			want: []digest.Digest{
+				digest.NewFromBlob([]byte("baz")),
 			},
 		},
 	}
@@ -305,10 +307,10 @@ func TestMissingBlobs(t *testing.T) {
 	printCfg := &pretty.Config{Compact: true}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fake.blobs = make(map[digest.Key][]byte)
+			fake.blobs = make(map[digest.Digest][]byte)
 			for _, dg := range tc.present {
 				// We don't care about blob content in this test so just include nil values.
-				fake.blobs[digest.ToKey(dg)] = nil
+				fake.blobs[dg] = nil
 			}
 			t.Logf("CAS contains digests %s", printCfg.Sprint(tc.present))
 			got, err := c.MissingBlobs(ctx, tc.input)
@@ -395,16 +397,16 @@ func TestWriteBlobs(t *testing.T) {
 			ub.Apply(c)
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
-					fake.blobs = make(map[digest.Key][]byte)
+					fake.blobs = make(map[digest.Digest][]byte)
 					fake.batchReqs = 0
 					fake.writeReqs = 0
 					for _, blob := range tc.present {
 						// We don't care about blob content in this test so just include nil values.
-						fake.blobs[digest.ToKey(digest.FromBlob(blob))] = nil
+						fake.blobs[digest.NewFromBlob(blob)] = nil
 					}
-					input := make(map[digest.Key][]byte)
+					input := make(map[digest.Digest][]byte)
 					for _, blob := range tc.input {
-						input[digest.ToKey(digest.FromBlob(blob))] = blob
+						input[digest.NewFromBlob(blob)] = blob
 					}
 
 					err := c.WriteBlobs(ctx, input)
@@ -413,18 +415,18 @@ func TestWriteBlobs(t *testing.T) {
 					}
 
 					for _, blob := range tc.present {
-						dg := digest.FromBlob(blob)
-						if gotBlob := fake.blobs[digest.ToKey(dg)]; gotBlob != nil {
-							t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, digest.ToString(dg))
+						dg := digest.NewFromBlob(blob)
+						if gotBlob := fake.blobs[dg]; gotBlob != nil {
+							t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
 						}
 						// Remove this from the input map so we don't iterate it below.
-						delete(input, digest.ToKey(dg))
+						delete(input, dg)
 					}
 					for dg, blob := range input {
 						if gotBlob, ok := fake.blobs[dg]; !ok {
-							t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, digest.ToString(digest.FromKey(dg)))
+							t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
 						} else if diff := cmp.Diff(blob, gotBlob); diff != "" {
-							t.Errorf("blob %v with digest %s had diff on uploaded blob:\n%s", blob, digest.ToString(digest.FromKey(dg)), diff)
+							t.Errorf("blob %v with digest %s had diff on uploaded blob:\n%s", blob, dg, diff)
 						}
 					}
 				})
@@ -496,14 +498,14 @@ func TestWriteBlobsBatching(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fake.blobs = make(map[digest.Key][]byte)
+			fake.blobs = make(map[digest.Digest][]byte)
 			fake.writeReqs = 0
 			fake.batchReqs = 0
-			blobs := make(map[digest.Key][]byte)
+			blobs := make(map[digest.Digest][]byte)
 			for i, sz := range tc.sizes {
 				blob := make([]byte, int(sz))
 				blob[0] = byte(i) // Ensure blobs are distinct
-				blobs[digest.ToKey(digest.FromBlob(blob))] = blob
+				blobs[digest.NewFromBlob(blob)] = blob
 			}
 
 			err := c.WriteBlobs(ctx, blobs)
@@ -511,12 +513,11 @@ func TestWriteBlobsBatching(t *testing.T) {
 				t.Fatalf("c.WriteBlobs(ctx, inputs) gave error %s, expected nil", err)
 			}
 
-			for k, blob := range blobs {
-				dg := digest.FromKey(k)
-				if gotBlob, ok := fake.blobs[k]; !ok {
-					t.Errorf("blob of size %d with digest %s was not uploaded, expected it to be present in the CAS", dg.SizeBytes, digest.ToString(dg))
+			for d, blob := range blobs {
+				if gotBlob, ok := fake.blobs[d]; !ok {
+					t.Errorf("blob with digest %s was not uploaded, expected it to be present in the CAS", d)
 				} else if diff := cmp.Diff(blob, gotBlob, cmp.Comparer(bytes.Equal)); diff != "" {
-					t.Errorf("blob of size %d with digest %s had diff on uploaded blob:\n%s", dg.SizeBytes, digest.ToString(dg), diff)
+					t.Errorf("blob with digest %s had diff on uploaded blob:\n%s", d, diff)
 				}
 			}
 			if fake.batchReqs != tc.batchReqs {
@@ -555,23 +556,23 @@ func TestFlattenActionOutputs(t *testing.T) {
 	barDigest := digest.TestNew("1002", 2)
 	dirB := &repb.Directory{
 		Files: []*repb.FileNode{
-			{Name: "foo", Digest: fooDigest, IsExecutable: true},
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
 		},
 	}
-	bDigest := digest.TestFromProto(dirB)
+	bDigest := digest.TestNewFromMessage(dirB)
 	dirA := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
-			{Name: "b", Digest: bDigest},
+			{Name: "b", Digest: bDigest.ToProto()},
 		},
 		Files: []*repb.FileNode{
-			{Name: "bar", Digest: barDigest},
+			{Name: "bar", Digest: barDigest.ToProto()},
 		},
 	}
-	aDigest := digest.TestFromProto(dirA)
+	aDigest := digest.TestNewFromMessage(dirA)
 	root := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
-			{Name: "a", Digest: aDigest},
-			{Name: "b", Digest: bDigest},
+			{Name: "a", Digest: aDigest.ToProto()},
+			{Name: "b", Digest: bDigest.ToProto()},
 		},
 	}
 	tree := &repb.Tree{
@@ -582,7 +583,7 @@ func TestFlattenActionOutputs(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed marshalling Tree: %s", err)
 	}
-	treeDigest := digest.FromBlob(treeBlob)
+	treeDigest := digest.NewFromBlob(treeBlob)
 	treeA := &repb.Tree{
 		Root:     dirA,
 		Children: []*repb.Directory{dirB},
@@ -591,20 +592,20 @@ func TestFlattenActionOutputs(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed marshalling Tree: %s", err)
 	}
-	treeADigest := digest.FromBlob(treeABlob)
-	fake.blobs = make(map[digest.Key][]byte)
-	fake.blobs[digest.ToKey(treeDigest)] = treeBlob
-	fake.blobs[digest.ToKey(treeADigest)] = treeABlob
+	treeADigest := digest.NewFromBlob(treeABlob)
+	fake.blobs = make(map[digest.Digest][]byte)
+	fake.blobs[treeDigest] = treeBlob
+	fake.blobs[treeADigest] = treeABlob
 	ar := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
-			&repb.OutputFile{Path: "foo", Digest: fooDigest}},
+			&repb.OutputFile{Path: "foo", Digest: fooDigest.ToProto()}},
 		OutputFileSymlinks: []*repb.OutputSymlink{
 			&repb.OutputSymlink{Path: "x/bar", Target: "../dir/a/bar"}},
 		OutputDirectorySymlinks: []*repb.OutputSymlink{
 			&repb.OutputSymlink{Path: "x/a", Target: "../dir/a"}},
 		OutputDirectories: []*repb.OutputDirectory{
-			&repb.OutputDirectory{Path: "dir", TreeDigest: treeDigest},
-			&repb.OutputDirectory{Path: "dir2", TreeDigest: treeADigest},
+			&repb.OutputDirectory{Path: "dir", TreeDigest: treeDigest.ToProto()},
+			&repb.OutputDirectory{Path: "dir2", TreeDigest: treeADigest.ToProto()},
 		},
 	}
 	outputs, err := c.FlattenActionOutputs(ctx, ar)
@@ -612,12 +613,12 @@ func TestFlattenActionOutputs(t *testing.T) {
 		t.Errorf("error in FlattenActionOutputs: %s", err)
 	}
 	wantOutputs := map[string]*client.Output{
-		"dir/a/b/foo": &client.Output{Digest: digest.ToKey(fooDigest), IsExecutable: true},
-		"dir/a/bar":   &client.Output{Digest: digest.ToKey(barDigest)},
-		"dir/b/foo":   &client.Output{Digest: digest.ToKey(fooDigest), IsExecutable: true},
-		"dir2/b/foo":  &client.Output{Digest: digest.ToKey(fooDigest), IsExecutable: true},
-		"dir2/bar":    &client.Output{Digest: digest.ToKey(barDigest)},
-		"foo":         &client.Output{Digest: digest.ToKey(fooDigest)},
+		"dir/a/b/foo": &client.Output{Digest: fooDigest, IsExecutable: true},
+		"dir/a/bar":   &client.Output{Digest: barDigest},
+		"dir/b/foo":   &client.Output{Digest: fooDigest, IsExecutable: true},
+		"dir2/b/foo":  &client.Output{Digest: fooDigest, IsExecutable: true},
+		"dir2/bar":    &client.Output{Digest: barDigest},
+		"foo":         &client.Output{Digest: fooDigest},
 		"x/a":         &client.Output{SymlinkTarget: "../dir/a"},
 		"x/bar":       &client.Output{SymlinkTarget: "../dir/a/bar"},
 	}
