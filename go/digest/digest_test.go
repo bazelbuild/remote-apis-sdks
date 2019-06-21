@@ -2,6 +2,9 @@ package digest
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -191,6 +194,27 @@ func TestTestNewFromMessage(t *testing.T) {
 	dGot := TestNewFromMessage(msg)
 	if dGot != dWant {
 		t.Errorf("TestNewFromMessage(%v) = (%v, _), want (%v, _)", msg, dGot, dWant)
+	}
+}
+
+func TestNewFromFile(t *testing.T) {
+	t.Parallel()
+	testDir, err := ioutil.TempDir("", "tmp")
+	if err != nil {
+		t.Fatalf(`ioutil.TempDir("", "tmp") returned %v, want nil`, err)
+	}
+	defer os.RemoveAll(testDir)
+	path := filepath.Join(testDir, "input")
+	if err := ioutil.WriteFile(path, []byte{1, 2, 3}, os.FileMode(0666)); err != nil {
+		t.Fatalf("ioutil.WriteFile(%v, _, _) = %v, want nil", path, err)
+	}
+	dWant := TestNew("039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81", 3)
+	dGot, err := NewFromFile(path)
+	if err != nil {
+		t.Errorf("NewFromFile(%v) = (_, %v), want (_, nil)", path, err)
+	}
+	if dGot != dWant {
+		t.Errorf("NewFromFile(%v) = (%v, _), want (%v, _)", path, dGot, dWant)
 	}
 }
 
