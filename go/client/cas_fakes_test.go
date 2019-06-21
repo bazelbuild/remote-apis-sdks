@@ -11,7 +11,6 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
-	"github.com/google/go-cmp/cmp"
 	"github.com/pborman/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -51,9 +50,9 @@ func (f *fakeReader) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadSe
 	if len(path) != 4 || path[0] != "instance" || path[1] != "blobs" {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs/<hash>/<size>\"")
 	}
-	dg := digest.FromBlob(f.blob)
-	if path[2] != dg.Hash || path[3] != strconv.FormatInt(dg.SizeBytes, 10) {
-		return status.Errorf(codes.NotFound, "test fake only has blob with digest %s, but %s/%s was requested", digest.ToString(dg), path[2], path[3])
+	dg := digest.NewFromBlob(f.blob)
+	if path[2] != dg.Hash || path[3] != strconv.FormatInt(dg.Size, 10) {
+		return status.Errorf(codes.NotFound, "test fake only has blob with digest %s, but %s/%s was requested", dg, path[2], path[3])
 	}
 
 	offset := req.ReadOffset
@@ -128,7 +127,10 @@ func (f *fakeWriter) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
 	}
-	dg := &repb.Digest{Hash: path[4], SizeBytes: size}
+	dg, e := digest.New(path[4], size)
+	if e != nil {
+		return status.Error(codes.InvalidArgument, "test fake expected valid digest as part of resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+	}
 	if uuid.Parse(path[2]) == nil {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
 	}
@@ -171,11 +173,11 @@ func (f *fakeWriter) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	}
 
 	f.buf = buf.Bytes()
-	recvDg := digest.FromBlob(f.buf)
-	if diff := cmp.Diff(dg, recvDg); diff != "" {
-		return status.Errorf(codes.InvalidArgument, "mismatched digest with diff:\n%s", diff)
+	cDg := digest.NewFromBlob(f.buf)
+	if dg != cDg {
+		return status.Errorf(codes.InvalidArgument, "mismatched digest: received %s, computed %s", dg, cDg)
 	}
-	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: dg.SizeBytes})
+	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: dg.Size})
 }
 
 func (f *fakeWriter) Read(*bspb.ReadRequest, bsgrpc.ByteStream_ReadServer) error {
@@ -190,7 +192,7 @@ func (f *fakeWriter) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusReq
 // in a map. It also counts the number of requests to store received, for validating batching logic.
 type fakeCAS struct {
 	// blobs is the list of blobs that are considered present in the CAS.
-	blobs     map[digest.Key][]byte
+	blobs     map[digest.Digest][]byte
 	mu        sync.RWMutex
 	batchReqs int
 	writeReqs int
@@ -205,7 +207,7 @@ func (f *fakeCAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlo
 	}
 	resp := new(repb.FindMissingBlobsResponse)
 	for _, dg := range req.BlobDigests {
-		if _, ok := f.blobs[digest.ToKey(dg)]; !ok {
+		if _, ok := f.blobs[digest.NewFromProtoUnvalidated(dg)]; !ok {
 			resp.MissingBlobDigests = append(resp.MissingBlobDigests, dg)
 		}
 	}
@@ -231,17 +233,17 @@ func (f *fakeCAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlo
 
 	var resps []*repb.BatchUpdateBlobsResponse_Response
 	for _, r := range req.Requests {
-		dg := digest.FromBlob(r.Data)
-		key := digest.ToKey(dg)
-		if key != digest.ToKey(r.Digest) {
+		dg := digest.NewFromBlob(r.Data)
+		rdg := digest.NewFromProtoUnvalidated(r.Digest)
+		if dg != rdg {
 			resps = append(resps, &repb.BatchUpdateBlobsResponse_Response{
 				Digest: r.Digest,
 				Status: status.Newf(codes.InvalidArgument, "Digest mismatch: digest of data was %s but digest of content was %s",
-					digest.ToString(dg), digest.ToString(r.Digest)).Proto(),
+					dg, rdg).Proto(),
 			})
 			continue
 		}
-		f.blobs[key] = r.Data
+		f.blobs[dg] = r.Data
 		resps = append(resps, &repb.BatchUpdateBlobsResponse_Response{
 			Digest: r.Digest,
 			Status: status.New(codes.OK, "").Proto(),
@@ -282,7 +284,10 @@ func (f *fakeCAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
 	}
-	dg := &repb.Digest{Hash: path[4], SizeBytes: size}
+	dg, err := digest.New(path[4], size)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, "test fake expected a valid digest as part of the resource name: \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+	}
 	if uuid.Parse(path[2]) == nil {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
 	}
@@ -324,13 +329,12 @@ func (f *fakeCAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 		return status.Errorf(codes.InvalidArgument, "reached end of stream before the client finished writing")
 	}
 
-	f.blobs[digest.ToKey(dg)] = buf.Bytes()
-	recvDg := digest.FromBlob(f.blobs[digest.ToKey(dg)])
-	if diff := cmp.Diff(dg, recvDg); diff != "" {
-		delete(f.blobs, digest.ToKey(dg))
-		return status.Errorf(codes.InvalidArgument, "mismatched digest with diff:\n%s", diff)
+	f.blobs[dg] = buf.Bytes()
+	cDg := digest.NewFromBlob(buf.Bytes())
+	if dg != cDg {
+		return status.Errorf(codes.InvalidArgument, "mismatched digest: received %s, computed %s", dg, cDg)
 	}
-	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: dg.SizeBytes})
+	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: dg.Size})
 }
 
 func (f *fakeCAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
@@ -347,9 +351,9 @@ func (f *fakeCAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServe
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs/<hash>/<size>\"")
 	}
 	dg := digest.TestNew(path[2], int64(size))
-	blob, ok := f.blobs[digest.ToKey(dg)]
+	blob, ok := f.blobs[dg]
 	if !ok {
-		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", digest.ToString(dg))
+		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", dg)
 	}
 
 	return stream.Send(&bspb.ReadResponse{Data: blob})

@@ -36,8 +36,8 @@ type Action struct {
 	EnvVars map[string]string
 	// InputRoot and InputFiles contain the details of the input tree, in remote execution format.
 	// They should normally be constructed through the PackageTree function.
-	InputRoot  *repb.Digest
-	InputFiles map[digest.Key][]byte
+	InputRoot  digest.Digest
+	InputFiles map[digest.Digest][]byte
 	// OutputFiles is a list of output files requested (full paths).
 	OutputFiles []string
 	// OutputDirs is a list of output directories requested (full paths).
@@ -151,8 +151,8 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	}
 
 	reAc := &repb.Action{
-		CommandDigest:   comDg,
-		InputRootDigest: ac.InputRoot,
+		CommandDigest:   comDg.ToProto(),
+		InputRootDigest: ac.InputRoot.ToProto(),
 		DoNotCache:      ac.DoNotCache,
 	}
 	// Only set timeout if it's non-zero, because Timeout needs to be nil for the server to use a
@@ -165,7 +165,7 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	if err != nil {
 		return nil, nil, gerrors.WithMessage(err, "marshalling Action proto")
 	}
-	acDg := digest.FromBlob(acBlob)
+	acDg := digest.NewFromBlob(acBlob).ToProto()
 
 	// If the result is cacheable, check if it's already in the cache.
 	if !ac.DoNotCache || !ac.SkipCache {
