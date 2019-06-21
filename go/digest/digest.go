@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -113,6 +115,25 @@ func NewFromString(s string) (Digest, error) {
 		return Empty, fmt.Errorf("invalid size in digest %s: %s", s, err)
 	}
 	return New(pair[0], size)
+}
+
+// NewFromFile computes a file digest from a path.
+// It returns an error if there was a problem accessing the file.
+func NewFromFile(path string) (Digest, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Empty, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	size, err := io.Copy(h, f)
+	if err != nil {
+		return Empty, err
+	}
+	return Digest {
+		Hash: hex.EncodeToString(h.Sum(nil)),
+		Size: size,
+	}, nil
 }
 
 // TestNew is like New but also pads your hash with zeros if it is shorter than the required length,
