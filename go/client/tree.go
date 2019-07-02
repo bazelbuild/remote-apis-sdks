@@ -3,11 +3,15 @@ package client
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/golang/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -19,6 +23,80 @@ import (
 type FileTree struct {
 	Files map[string][]byte
 	Dirs  map[string]*FileTree
+}
+
+// shouldIgnore returns whether a given input should be excluded based on the given InputExclusions,
+func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusion) bool {
+	for _, r := range excl {
+		if r.Type != command.UnspecifiedInputType && r.Type != t {
+			continue
+		}
+		if m, _ := regexp.MatchString(r.Regex, inp); m {
+			return true
+		}
+	}
+	return false
+}
+
+// loadFiles reads all files specified by the given InputSpec (descending into subdirectories
+// recursively), and loads their contents into the provided map.
+func loadFiles(execRoot string, is *command.InputSpec, path string, fs map[string][]byte) error {
+	absPath := filepath.Join(execRoot, path)
+	fi, err := os.Stat(absPath)
+	if err != nil {
+		return err
+	}
+	var t command.InputType
+	switch mode := fi.Mode(); {
+	case mode.IsDir():
+		t = command.DirectoryInputType
+	case mode.IsRegular():
+		t = command.FileInputType
+	default:
+		return fmt.Errorf("unsupported input type: %s, %v", absPath, mode)
+	}
+
+	if shouldIgnore(absPath, t, is.InputExclusions) {
+		return nil
+	}
+	if t == command.FileInputType {
+		b, err := ioutil.ReadFile(absPath)
+		if err != nil {
+			return err
+		}
+		fs[path] = b
+		return nil
+	}
+	// Directory
+	files, err := ioutil.ReadDir(absPath)
+	if err != nil {
+		return err
+	}
+
+	for _, f := range files {
+		if e := loadFiles(execRoot, is, filepath.Join(path, f.Name()), fs); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// BuildTreeFromInputs builds a FileTree out of a command.InputSpec.
+// TODO(olaola): there are a few problems with this function. The biggest is the memory usage: it
+// loads all file contents into memory (but this applies to the entire current rc.Client interface!)
+// In addition:
+// * It does not use a file digest cache.
+// * It ignores empty directory trees, only packaging/uploading files and their parents.
+// * It does not ignore missing inputs (we might want it as a temporary hack!)
+// * It handles input symlinks by creating copies instead of using RE API symlinks.
+func BuildTreeFromInputs(execRoot string, is *command.InputSpec) (*FileTree, error) {
+	fs := make(map[string][]byte)
+	for _, i := range is.Inputs {
+		if e := loadFiles(execRoot, is, i, fs); e != nil {
+			return nil, e
+		}
+	}
+	return BuildTree(fs), nil
 }
 
 // BuildTree builds a FileTree out of a list of files. The tree isn't checked for validity if it is

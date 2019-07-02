@@ -1,10 +1,14 @@
 package client_test
 
 import (
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/kylelemons/godebug/pretty"
@@ -105,6 +109,244 @@ func TestBuildTree(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
 			got := client.BuildTree(tc.input)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("client.BuildTree(%+v) gave diff (-want +got):\n%s", tc.input, diff)
+			}
+		})
+	}
+}
+
+type inputPath struct {
+	path          string
+	fileContents  []byte
+	isSymlink     bool
+	isAbsolute    bool
+	symlinkTarget string
+}
+
+func construct(dir string, ips []*inputPath) error {
+	for _, ip := range ips {
+		path := filepath.Join(dir, ip.path)
+		if ip.isSymlink {
+			target := ip.symlinkTarget
+			if ip.isAbsolute {
+				target = filepath.Join(dir, target)
+			}
+			if err := os.Symlink(target, path); err != nil {
+				return err
+			}
+			continue
+		}
+		// Regular file.
+		if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+			return err
+		}
+		if err := ioutil.WriteFile(path, ip.fileContents, 0777); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestBuildTreeFromInputs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		desc  string
+		input []*inputPath
+		spec  *command.InputSpec
+		want  *client.FileTree
+	}{
+		{
+			desc:  "empty",
+			input: nil,
+			spec:  &command.InputSpec{},
+			want:  &client.FileTree{},
+		},
+		{
+			desc: "nested",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				{path: "a/b/bar.txt", fileContents: []byte("bar")},
+				{path: "a/b/baz.txt", fileContents: []byte("baz")},
+				{path: "b/bla.txt", fileContents: []byte("bla")},
+				{path: "bla.txt", fileContents: []byte("bla")},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a", "b", "bla.txt"},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bla.txt": []byte("bla")},
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+						Dirs: map[string]*client.FileTree{
+							"b": &client.FileTree{
+								Files: map[string][]byte{
+									"bar.txt": []byte("bar"),
+									"baz.txt": []byte("baz"),
+								},
+							},
+						},
+					},
+					"b": &client.FileTree{Files: map[string][]byte{"bla.txt": []byte("bla")}},
+				},
+			},
+		},
+		{
+			desc: "file_absolute_symlink",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				// The absolute symlink target will actually point to the absolute path of a/foo.txt.
+				{path: "bla.txt", isSymlink: true, isAbsolute: true, symlinkTarget: "a/foo.txt"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a/foo.txt", "bla.txt"},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bla.txt": []byte("foo")},
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+		{
+			desc: "file_relative_symlink",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				{path: "bla.txt", isSymlink: true, symlinkTarget: "a/foo.txt"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a/foo.txt", "bla.txt"},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bla.txt": []byte("foo")},
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+		{
+			desc: "dir_relative_symlink",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				{path: "b", isSymlink: true, symlinkTarget: "a"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a/foo.txt", "b"},
+			},
+			want: &client.FileTree{
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+					"b": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+		{
+			desc: "dir_absolute_symlink",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				// The absolute symlink target will actually point to the absolute path of a.
+				{path: "b", isSymlink: true, isAbsolute: true, symlinkTarget: "a"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a/foo.txt", "b"},
+			},
+			want: &client.FileTree{
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+					"b": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+		{
+			desc: "file_exclusions",
+			input: []*inputPath{
+				{path: "a/foo", fileContents: []byte("foo")},
+				{path: "a/b/bar.txt", fileContents: []byte("bar")},
+				{path: "txt/a", fileContents: []byte("a")},
+				{path: "a/b/baz.txt", fileContents: []byte("baz")},
+				{path: "b/bla", fileContents: []byte("bla")},
+				{path: "bla.txt", fileContents: []byte("bla")},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a", "b", "txt", "bla.txt"},
+				InputExclusions: []*command.InputExclusion{
+					&command.InputExclusion{Regex: `txt$`, Type: command.FileInputType},
+				},
+			},
+			want: &client.FileTree{
+				Dirs: map[string]*client.FileTree{
+					"a":   &client.FileTree{Files: map[string][]byte{"foo": []byte("foo")}},
+					"b":   &client.FileTree{Files: map[string][]byte{"bla": []byte("bla")}},
+					"txt": &client.FileTree{Files: map[string][]byte{"a": []byte("a")}},
+				},
+			},
+		},
+		{
+			desc: "dir_exclusions",
+			input: []*inputPath{
+				{path: "b/a", fileContents: []byte("ba")},
+				{path: "a/x", fileContents: []byte("x")},
+				{path: "c/d/aa/x", fileContents: []byte("x")},
+				{path: "bla", fileContents: []byte("bla")},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a", "b", "bla"},
+				InputExclusions: []*command.InputExclusion{
+					&command.InputExclusion{Regex: "a$", Type: command.DirectoryInputType},
+				},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bla": []byte("bla")},
+				Dirs: map[string]*client.FileTree{
+					"b": &client.FileTree{Files: map[string][]byte{"a": []byte("ba")}},
+				},
+			},
+		},
+		{
+			desc: "all_type_exclusions",
+			input: []*inputPath{
+				{path: "b/a", fileContents: []byte("ba")},
+				{path: "a/x", fileContents: []byte("x")},
+				{path: "c/d/aa/x", fileContents: []byte("x")},
+				{path: "bla", fileContents: []byte("bla")},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a", "b", "bla"},
+				InputExclusions: []*command.InputExclusion{
+					&command.InputExclusion{Regex: "a$", Type: command.UnspecifiedInputType},
+				},
+			},
+			want: &client.FileTree{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			root, err := ioutil.TempDir("", tc.desc)
+			if err != nil {
+				t.Fatalf("failed to make temp dir: %v", err)
+			}
+			defer os.RemoveAll(root)
+			if err := construct(root, tc.input); err != nil {
+				t.Fatalf("failed to construct input dir structure: %v", err)
+			}
+			got, err := client.BuildTreeFromInputs(root, tc.spec)
+			if err != nil {
+				t.Fatalf("BuildTreeFromInputs(%s, %v) = _, %v want _, nil", root, tc.spec, err)
+			}
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("client.BuildTree(%+v) gave diff (-want +got):\n%s", tc.input, diff)
 			}
