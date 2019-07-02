@@ -21,12 +21,12 @@ func TestStableId_SameCommands(t *testing.T) {
 			label: "inputs",
 			A: &Command{
 				InputSpec: &InputSpec{
-					Inputs:	[]string{"a", "b", "c"},
+					Inputs: []string{"a", "b", "c"},
 				},
 			},
 			B: &Command{
 				InputSpec: &InputSpec{
-					Inputs:	[]string{"c", "b", "a"},
+					Inputs: []string{"c", "b", "a"},
 				},
 			},
 		},
@@ -52,12 +52,12 @@ func TestStableId_SameCommands(t *testing.T) {
 			label: "environment",
 			A: &Command{
 				InputSpec: &InputSpec{
-					EnvironmentVariables:	map[string]string{"a": "1", "b": "2", "c": "3"},
+					EnvironmentVariables: map[string]string{"a": "1", "b": "2", "c": "3"},
 				},
 			},
 			B: &Command{
 				InputSpec: &InputSpec{
-					EnvironmentVariables:	map[string]string{"c": "3", "b": "2", "a": "1"},
+					EnvironmentVariables: map[string]string{"c": "3", "b": "2", "a": "1"},
 				},
 			},
 		},
@@ -84,10 +84,10 @@ func TestStableId_SameCommands(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		aId := tc.A.stableId()
-		bId := tc.B.stableId()
-		if aId != bId {
-			t.Errorf("%s: stableId of %v = %s different from %v = %s", tc.label, tc.A, aId, tc.B, bId)
+		aID := tc.A.stableID()
+		bID := tc.B.stableID()
+		if aID != bID {
+			t.Errorf("%s: stableID of %v = %s different from %v = %s", tc.label, tc.A, aID, tc.B, bID)
 		}
 	}
 }
@@ -100,44 +100,44 @@ func TestStableId_DifferentCommands(t *testing.T) {
 	}{
 		{
 			label: "args",
-			A: &Command{ Args: []string{"a", "b"}},
-			B: &Command{ Args: []string{"b", "a"}},
+			A:     &Command{Args: []string{"a", "b"}},
+			B:     &Command{Args: []string{"b", "a"}},
 		},
 		{
 			label: "exec root",
-			A: &Command{ ExecRoot: "a"},
-			B: &Command{ ExecRoot: "b"},
+			A:     &Command{ExecRoot: "a"},
+			B:     &Command{ExecRoot: "b"},
 		},
 		{
 			label: "working dir",
-			A: &Command{ WorkingDir: "a"},
-			B: &Command{ WorkingDir: "b"},
+			A:     &Command{WorkingDir: "a"},
+			B:     &Command{WorkingDir: "b"},
 		},
 		{
 			label: "output files",
-			A: &Command{ OutputFiles: []string{"a", "b", "c"}},
-			B: &Command{ OutputFiles: []string{"c", "b", "c"}},
+			A:     &Command{OutputFiles: []string{"a", "b", "c"}},
+			B:     &Command{OutputFiles: []string{"c", "b", "c"}},
 		},
 		{
 			label: "output dirs",
-			A: &Command{ OutputDirs: []string{"a", "b", "c"}},
-			B: &Command{ OutputDirs: []string{"c", "b", "c"}},
+			A:     &Command{OutputDirs: []string{"a", "b", "c"}},
+			B:     &Command{OutputDirs: []string{"c", "b", "c"}},
 		},
 		{
 			label: "platform",
-			A: &Command{ Platform: map[string]string{"a": "1", "b": "2", "c": "3"}},
-			B: &Command{ Platform: map[string]string{"c": "3", "b": "2", "a": "10"}},
+			A:     &Command{Platform: map[string]string{"a": "1", "b": "2", "c": "3"}},
+			B:     &Command{Platform: map[string]string{"c": "3", "b": "2", "a": "10"}},
 		},
 		{
 			label: "inputs",
 			A: &Command{
 				InputSpec: &InputSpec{
-					Inputs:	[]string{"a", "b", "c"},
+					Inputs: []string{"a", "b", "c"},
 				},
 			},
 			B: &Command{
 				InputSpec: &InputSpec{
-					Inputs:	[]string{"c", "b", "a1"},
+					Inputs: []string{"c", "b", "a1"},
 				},
 			},
 		},
@@ -145,12 +145,12 @@ func TestStableId_DifferentCommands(t *testing.T) {
 			label: "environment",
 			A: &Command{
 				InputSpec: &InputSpec{
-					EnvironmentVariables:	map[string]string{"a": "1", "b": "2", "c": "3"},
+					EnvironmentVariables: map[string]string{"a": "1", "b": "2", "c": "3"},
 				},
 			},
 			B: &Command{
 				InputSpec: &InputSpec{
-					EnvironmentVariables:	map[string]string{"c": "3", "b": "2", "a": "10"},
+					EnvironmentVariables: map[string]string{"c": "3", "b": "2", "a": "10"},
 				},
 			},
 		},
@@ -177,10 +177,10 @@ func TestStableId_DifferentCommands(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		aId := tc.A.stableId()
-		bId := tc.B.stableId()
-		if aId == bId {
-			t.Errorf("%s: stableId of %v = %s is same as %v", tc.label, tc.A, aId, tc.B)
+		aID := tc.A.stableID()
+		bID := tc.B.stableID()
+		if aID == bID {
+			t.Errorf("%s: stableID of %v = %s is same as %v", tc.label, tc.A, aID, tc.B)
 		}
 	}
 }
@@ -193,13 +193,13 @@ func TestFillDefaultFieldValues_Empty(t *testing.T) {
 		t.Fatal("{}.Identifiers = nil, expected filled")
 	}
 
-	if c.Identifiers.CommandId == "" {
+	if c.Identifiers.CommandID == "" {
 		t.Errorf("did not fill command id for empty command")
 	}
 	if c.Identifiers.ToolName == "" {
 		t.Errorf("did not fill tool name for empty command, expected \"remote-client\"")
 	}
-	if c.Identifiers.InvocationId == "" {
+	if c.Identifiers.InvocationID == "" {
 		t.Errorf("did not generate invocation id for empty command")
 	}
 	if c.InputSpec == nil {
@@ -209,10 +209,10 @@ func TestFillDefaultFieldValues_Empty(t *testing.T) {
 
 func TestFillDefaultFieldValues_PreserveExisting(t *testing.T) {
 	t.Parallel()
-	ids := &Identifiers {
-		CommandId: "bla",
-		ToolName: "foo",
-		InvocationId: "bar",
+	ids := &Identifiers{
+		CommandID:    "bla",
+		ToolName:     "foo",
+		InvocationID: "bar",
 	}
 	inputSpec := &InputSpec{}
 	c := &Command{InputSpec: inputSpec, Identifiers: ids}
@@ -221,14 +221,14 @@ func TestFillDefaultFieldValues_PreserveExisting(t *testing.T) {
 		t.Fatal("command.Identifiers address not preserved")
 	}
 
-	if c.Identifiers.CommandId != "bla" {
-		t.Errorf("did not preserve CommandId: got %s, expected bla", c.Identifiers.CommandId)
+	if c.Identifiers.CommandID != "bla" {
+		t.Errorf("did not preserve CommandID: got %s, expected bla", c.Identifiers.CommandID)
 	}
 	if c.Identifiers.ToolName != "foo" {
-		t.Errorf("did not preserve CommandId: got %s, expected foo", c.Identifiers.ToolName)
+		t.Errorf("did not preserve CommandID: got %s, expected foo", c.Identifiers.ToolName)
 	}
-	if c.Identifiers.InvocationId != "bar" {
-		t.Errorf("did not preserve CommandId: got %s, expected bar", c.Identifiers.InvocationId)
+	if c.Identifiers.InvocationID != "bar" {
+		t.Errorf("did not preserve CommandID: got %s, expected bar", c.Identifiers.InvocationID)
 	}
 	if c.InputSpec != inputSpec {
 		t.Fatal("command.InputSpec address not preserved")
@@ -238,39 +238,39 @@ func TestFillDefaultFieldValues_PreserveExisting(t *testing.T) {
 func TestValidate_Errors(t *testing.T) {
 	t.Parallel()
 	testcases := []struct {
-		label string
-		Command  *Command
+		label   string
+		Command *Command
 	}{
 		{
 			label: "missing args",
 			Command: &Command{
 				Identifiers: &Identifiers{},
-				ExecRoot: "a",
-				InputSpec: &InputSpec{},
+				ExecRoot:    "a",
+				InputSpec:   &InputSpec{},
 			},
 		},
 		{
 			label: "missing input spec",
 			Command: &Command{
 				Identifiers: &Identifiers{},
-				Args: []string{"a"},
-				ExecRoot: "a",
+				Args:        []string{"a"},
+				ExecRoot:    "a",
 			},
 		},
 		{
 			label: "missing exec root",
 			Command: &Command{
 				Identifiers: &Identifiers{},
-				Args: []string{"a"},
-				InputSpec: &InputSpec{},
+				Args:        []string{"a"},
+				InputSpec:   &InputSpec{},
 			},
 		},
 		{
 			label: "missing identifiers",
 			Command: &Command{
-				Args: []string{"a"},
+				Args:      []string{"a"},
 				InputSpec: &InputSpec{},
-				ExecRoot: "a",
+				ExecRoot:  "a",
 			},
 		},
 	}
@@ -293,9 +293,9 @@ func TestValidate_Success(t *testing.T) {
 	t.Parallel()
 	c := &Command{
 		Identifiers: &Identifiers{},
-		Args: []string{"a"},
-		ExecRoot: "a",
-		InputSpec: &InputSpec{},
+		Args:        []string{"a"},
+		ExecRoot:    "a",
+		InputSpec:   &InputSpec{},
 	}
 	if err := c.Validate(); err != nil {
 		t.Errorf("expected Validate of %v = nil, got %v", c, err)

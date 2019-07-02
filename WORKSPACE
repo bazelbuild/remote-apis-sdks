@@ -124,7 +124,9 @@ go_repository(
     commit = "c0682f068a6044f395a7e28526abe1de56beffa8",
     importpath = "github.com/bazelbuild/remote-apis",
 )
+
 load("@com_github_bazelbuild_remote_apis//:repository_rules.bzl", "switched_rules_by_language")
+
 switched_rules_by_language(
     name = "bazel_remote_apis_imports",
     go = True,

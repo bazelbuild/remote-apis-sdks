@@ -130,7 +130,7 @@ func NewFromFile(path string) (Digest, error) {
 	if err != nil {
 		return Empty, err
 	}
-	return Digest {
+	return Digest{
 		Hash: hex.EncodeToString(h.Sum(nil)),
 		Size: size,
 	}, nil
