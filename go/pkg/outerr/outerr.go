@@ -9,6 +9,7 @@ import (
 	log "github.com/golang/glog"
 )
 
+// OutErr is a general consumer of stdout and stderr.
 type OutErr interface {
 	WriteOut([]byte)
 	WriteErr([]byte)
@@ -24,15 +25,17 @@ func NewStreamOutErr(out, err io.Writer) *StreamOutErr {
 	return &StreamOutErr{out, err}
 }
 
-// A constant wrapping the standard stdout/stderr streams.
+// SystemOutErr is a constant wrapping the standard stdout/stderr streams.
 var SystemOutErr = NewStreamOutErr(os.Stdout, os.Stderr)
 
+// WriteOut writes the given bytes to stdout.
 func (s *StreamOutErr) WriteOut(buf []byte) {
 	if _, e := s.OutWriter.Write(buf); e != nil {
 		log.Errorf("error writing to stdout stream: %v", e)
 	}
 }
 
+// WriteErr writes the given bytes to stderr.
 func (s *StreamOutErr) WriteErr(buf []byte) {
 	if _, e := s.ErrWriter.Write(buf); e != nil {
 		log.Errorf("error writing to stdout stream: %v", e)
@@ -52,10 +55,12 @@ func NewRecordingOutErr() *RecordingOutErr {
 	return res
 }
 
+// GetStdout returns the full recorded stdout contents.
 func (s *RecordingOutErr) GetStdout() []byte {
 	return s.out.Bytes()
 }
 
+// GetStderr returns the full recorded stderr contents.
 func (s *RecordingOutErr) GetStderr() []byte {
 	return s.err.Bytes()
 }

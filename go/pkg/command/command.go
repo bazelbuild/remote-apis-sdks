@@ -17,13 +17,13 @@ import (
 type InputType int
 
 const (
-	// Any input type will match.
+	// UnspecifiedInputType means any input type will match.
 	UnspecifiedInputType InputType = iota
 
-	// Only directories match.
+	// DirectoryInputType means only directories match.
 	DirectoryInputType
 
-	// Only files match.
+	// FileInputType means only files match.
 	FileInputType
 )
 
@@ -57,24 +57,25 @@ type InputSpec struct {
 	EnvironmentVariables map[string]string
 }
 
+// Identifiers is a group of identifiers of a command.
 type Identifiers struct {
-	// An optional id to use to identify a command.
-	CommandId string
+	// CommandID is an optional id to use to identify a command.
+	CommandID string
 
-	// An optional id to use to identify an invocation spanning multiple commands.
-	InvocationId string
+	// InvocationID is an optional id to use to identify an invocation spanning multiple commands.
+	InvocationID string
 
-	// An optional id to use to identify a build spanning multiple invocations.
-	CorrelatedInvocationId string
+	// CorrelatedInvocationID is an optional id to use to identify a build spanning multiple invocations.
+	CorrelatedInvocationID string
 
-	// An optional tool name to pass to the remote server for logging.
+	// ToolName is an optional tool name to pass to the remote server for logging.
 	ToolName string
 
-	// An optional tool version to pass to the remote server for logging.
+	// ToolVersion is an optional tool version to pass to the remote server for logging.
 	ToolVersion string
 
-	// A UUID generated for a particular execution of this command.
-	ExecutionId string
+	// ExecutionID is a UUID generated for a particular execution of this command.
+	ExecutionID string
 }
 
 // Command encompasses the complete information required to execute a command remotely.
@@ -84,32 +85,32 @@ type Command struct {
 	// Identifiers used to identify this command to be passed to RE.
 	Identifiers *Identifiers
 
-	// Required: command line elements to execute.
+	// Args (required): command line elements to execute.
 	Args []string
 
-	// An absolute path to the execution root of the command. All the other paths are
+	// ExecRoot is an absolute path to the execution root of the command. All the other paths are
 	// specified relatively to this path.
 	ExecRoot string
 
-	// The working directory, relative to the exec root, for the command to run
-	// in. It must be a directory which exists in the input tree. If it is left
-	// empty, then the action is run from the exec root.
+	// WorkingDir is the working directory, relative to the exec root, for the command to run
+	// in. It must be a directory which exists in the input tree. If it is left empty, then the
+	// action is run from the exec root.
 	WorkingDir string
 
-	// The command inputs.
+	// InputSpec: the command inputs.
 	InputSpec *InputSpec
 
-	// The command output files.
+	// OutputFiles are the command output files.
 	OutputFiles []string
 
-	// The command output directories.
+	// OutputDirs are the command output directories.
 	// The files and directories will likely be merged into a single Outputs field in the future.
 	OutputDirs []string
 
-	// Optional duration to wait for command execution before timing out.
+	// Timeout is an optional duration to wait for command execution before timing out.
 	Timeout time.Duration
 
-	// The platform to use for the execution.
+	// Platform is the platform to use for the execution.
 	Platform map[string]string
 }
 
@@ -143,7 +144,7 @@ func (c *Command) Validate() error {
 	if c == nil {
 		return nil
 	}
-	if c.Args == nil {
+	if len(c.Args) == 0 {
 		return errors.New("missing command arguments")
 	}
 	if c.ExecRoot == "" {
@@ -155,11 +156,12 @@ func (c *Command) Validate() error {
 	if c.Identifiers == nil {
 		return errors.New("missing command identifiers")
 	}
+	// TODO(olaola): make Platform required?
 	return nil
 }
 
 // Generates a stable id for the command.
-func (c *Command) stableId() string {
+func (c *Command) stableID() string {
 	var buf []byte
 	marshallSlice(c.Args, &buf)
 	buf = append(buf, []byte(c.ExecRoot)...)
@@ -196,14 +198,14 @@ func (c *Command) FillDefaultFieldValues() {
 	if c.Identifiers == nil {
 		c.Identifiers = &Identifiers{}
 	}
-	if c.Identifiers.CommandId == "" {
-		c.Identifiers.CommandId = c.stableId()
+	if c.Identifiers.CommandID == "" {
+		c.Identifiers.CommandID = c.stableID()
 	}
 	if c.Identifiers.ToolName == "" {
 		c.Identifiers.ToolName = "remote-client"
 	}
-	if c.Identifiers.InvocationId == "" {
-		c.Identifiers.InvocationId = uuid.New()
+	if c.Identifiers.InvocationID == "" {
+		c.Identifiers.InvocationID = uuid.New()
 	}
 	if c.InputSpec == nil {
 		c.InputSpec = &InputSpec{}
@@ -235,28 +237,36 @@ func DefaultExecutionOptions() *ExecutionOptions {
 type ResultStatus int
 
 const (
-	// Command executed successfully.
-	SuccessResultStatus ResultStatus = iota
+	// UnspecifiedResultStatus is an invalid value, should not be used.
+	UnspecifiedResultStatus ResultStatus = iota
 
-	// Command was a cache hit.
+	// SuccessResultStatus indicates that the command executed successfully.
+	SuccessResultStatus
+
+	// CacheHitResultStatus indicates that the command was a cache hit.
 	CacheHitResultStatus
 
-	// Command exceeded its specified deadline.
+	// NonZeroExitResultStatus indicates that the command executed with a non zero exit code.
+	NonZeroExitResultStatus
+
+	// TimeoutResultStatus indicates that the command exceeded its specified deadline.
 	TimeoutResultStatus
 
-	// The execution was interrupted.
+	// InterruptedResultStatus indicates that the command execution was interrupted.
 	InterruptedResultStatus
 
-	// An error occurred on the remote server.
+	// RemoteErrorResultStatus indicates that an error occurred on the remote server.
 	RemoteErrorResultStatus
 
-	// An error occurred locally.
+	// LocalErrorResultStatus indicates that an error occurred locally.
 	LocalErrorResultStatus
 )
 
 var resultStatuses = [...]string{
+	"UnspecifiedResultStatus",
 	"SuccessResultStatus",
 	"CacheHitResultStatus",
+	"NonZeroExitResultStatus",
 	"TimeoutResultStatus",
 	"InterruptedResultStatus",
 	"RemoteErrorResultStatus",
@@ -264,7 +274,7 @@ var resultStatuses = [...]string{
 }
 
 func (s ResultStatus) String() string {
-	if SuccessResultStatus <= s && s <= LocalErrorResultStatus {
+	if UnspecifiedResultStatus <= s && s <= LocalErrorResultStatus {
 		return resultStatuses[s]
 	}
 	return fmt.Sprintf("InvalidResultStatus(%d)", s)
