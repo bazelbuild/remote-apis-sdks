@@ -9,12 +9,10 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
-
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/internal/test/fakes"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/kylelemons/godebug/pretty"
 	"google.golang.org/grpc"
 
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -32,7 +30,7 @@ func TestRead(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := &fakeReader{}
+	fake := &fakes.Reader{}
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	go server.Serve(listener)
 	defer server.Stop()
@@ -47,51 +45,51 @@ func TestRead(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		fake   fakeReader
+		fake   fakes.Reader
 		offset int64
 		limit  int64
 		want   []byte // If nil, fake.blob is expected by default.
 	}{
 		{
 			name: "empty blob, 10 chunks",
-			fake: fakeReader{
-				blob:   []byte{},
-				chunks: []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			fake: fakes.Reader{
+				Blob:   []byte{},
+				Chunks: []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 			},
 		},
 		{
 			name: "blob 'foobar', 1 chunk",
-			fake: fakeReader{
-				blob:   []byte("foobar"),
-				chunks: []int{6},
+			fake: fakes.Reader{
+				Blob:   []byte("foobar"),
+				Chunks: []int{6},
 			},
 		},
 		{
 			name: "blob 'foobar', 3 evenly sized chunks",
-			fake: fakeReader{
-				blob:   []byte("foobar"),
-				chunks: []int{2, 2, 2},
+			fake: fakes.Reader{
+				Blob:   []byte("foobar"),
+				Chunks: []int{2, 2, 2},
 			},
 		},
 		{
 			name: "blob 'foobar', 3 unequal chunks",
-			fake: fakeReader{
-				blob:   []byte("foobar"),
-				chunks: []int{1, 3, 2},
+			fake: fakes.Reader{
+				Blob:   []byte("foobar"),
+				Chunks: []int{1, 3, 2},
 			},
 		},
 		{
 			name: "blob 'foobar', 2 chunks with 0-sized chunk between",
-			fake: fakeReader{
-				blob:   []byte("foobar"),
-				chunks: []int{3, 0, 3},
+			fake: fakes.Reader{
+				Blob:   []byte("foobar"),
+				Chunks: []int{3, 0, 3},
 			},
 		},
 		{
 			name: "blob 'foobarbaz', partial read spanning multiple chunks",
-			fake: fakeReader{
-				blob:   []byte("foobarbaz"),
-				chunks: []int{3, 0, 3, 3},
+			fake: fakes.Reader{
+				Blob:   []byte("foobarbaz"),
+				Chunks: []int{3, 0, 3, 3},
 			},
 			offset: 2,
 			limit:  5,
@@ -99,9 +97,9 @@ func TestRead(t *testing.T) {
 		},
 		{
 			name: "blob 'foobar', partial read within chunk",
-			fake: fakeReader{
-				blob:   []byte("foobar"),
-				chunks: []int{6},
+			fake: fakes.Reader{
+				Blob:   []byte("foobar"),
+				Chunks: []int{6},
 			},
 			offset: 2,
 			limit:  3,
@@ -109,9 +107,9 @@ func TestRead(t *testing.T) {
 		},
 		{
 			name: "blob 'foobar', partial read from start",
-			fake: fakeReader{
-				blob:   []byte("foobar"),
-				chunks: []int{3, 3},
+			fake: fakes.Reader{
+				Blob:   []byte("foobar"),
+				Chunks: []int{3, 3},
 			},
 			offset: 0,
 			limit:  5,
@@ -119,9 +117,9 @@ func TestRead(t *testing.T) {
 		},
 		{
 			name: "blob 'foobar', partial read with no limit",
-			fake: fakeReader{
-				blob:   []byte("foobar"),
-				chunks: []int{3, 3},
+			fake: fakes.Reader{
+				Blob:   []byte("foobar"),
+				Chunks: []int{3, 3},
 			},
 			offset: 2,
 			limit:  0,
@@ -129,9 +127,9 @@ func TestRead(t *testing.T) {
 		},
 		{
 			name: "blob 'foobar', partial read with limit extending beyond end of blob",
-			fake: fakeReader{
-				blob:   []byte("foobar"),
-				chunks: []int{3, 3},
+			fake: fakes.Reader{
+				Blob:   []byte("foobar"),
+				Chunks: []int{3, 3},
 			},
 			offset: 2,
 			limit:  8,
@@ -142,11 +140,11 @@ func TestRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			*fake = tc.fake
-			fake.validate(t)
+			fake.Validate(t)
 
 			want := tc.want
 			if want == nil {
-				want = fake.blob
+				want = fake.Blob
 			}
 
 			if tc.offset == 0 && tc.limit == 0 {
@@ -154,17 +152,17 @@ func TestRead(t *testing.T) {
 				if err != nil {
 					t.Errorf("c.ReadBlob(ctx, digest) gave error %s, want nil", err)
 				}
-				if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
-					t.Errorf("c.ReadBlob(ctx, digest) gave diff (-want, +got):\n%s", diff)
+				if !bytes.Equal(want, got) {
+					t.Errorf("c.ReadBlob(ctx, digest) gave diff: want %v, got %v", want, got)
 				}
 			}
 
-			got, err := c.ReadBlobRange(ctx, digest.NewFromBlob(fake.blob), tc.offset, tc.limit)
+			got, err := c.ReadBlobRange(ctx, digest.NewFromBlob(fake.Blob), tc.offset, tc.limit)
 			if err != nil {
 				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave error %s, want nil", tc.offset, tc.limit, err)
 			}
-			if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
-				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave diff (-want, +got):\n%s", tc.offset, tc.limit, diff)
+			if !bytes.Equal(want, got) {
+				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave diff: want %v, got %v", tc.offset, tc.limit, want, got)
 			}
 		})
 	}
@@ -178,7 +176,7 @@ func TestWrite(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := &fakeWriter{}
+	fake := &fakes.Writer{}
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	go server.Serve(listener)
 	defer server.Stop()
@@ -215,11 +213,11 @@ func TestWrite(t *testing.T) {
 			if err != nil {
 				t.Errorf("c.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
 			}
-			if fake.err != nil {
-				t.Errorf("c.WriteBlob(ctx, blob) caused the server to return error %s (possibly unseen by c)", fake.err)
+			if fake.Err != nil {
+				t.Errorf("c.WriteBlob(ctx, blob) caused the server to return error %s (possibly unseen by c)", fake.Err)
 			}
-			if diff := cmp.Diff(tc.blob, fake.buf, cmp.Comparer(bytes.Equal)); diff != "" {
-				t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs (-sent, +received):\n%s", diff)
+			if !bytes.Equal(tc.blob, fake.Buf) {
+				t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs, want %v, got %v:", tc.blob, fake.Buf)
 			}
 			dg := digest.NewFromBlob(tc.blob)
 			if dg != gotDg {
@@ -237,7 +235,7 @@ func TestMissingBlobs(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := &fakeCAS{}
+	fake := fakes.NewCas()
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
 	defer server.Stop()
@@ -252,8 +250,8 @@ func TestMissingBlobs(t *testing.T) {
 
 	tests := []struct {
 		name string
-		// present is the digests present in the CAS.
-		present []digest.Digest
+		// present is the blobs present in the CAS.
+		present []string
 		// input is the digests given to MissingBlobs.
 		input []digest.Digest
 		// want is the returned list of digests.
@@ -274,12 +272,8 @@ func TestMissingBlobs(t *testing.T) {
 			},
 		},
 		{
-			name: "all present",
-			present: []digest.Digest{
-				digest.NewFromBlob([]byte("baz")),
-				digest.NewFromBlob([]byte("foo")),
-				digest.NewFromBlob([]byte("bar")),
-			},
+			name:    "all present",
+			present: []string{"foo", "bar", "baz"},
 			input: []digest.Digest{
 				digest.NewFromBlob([]byte("foo")),
 				digest.NewFromBlob([]byte("bar")),
@@ -288,11 +282,8 @@ func TestMissingBlobs(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "some present",
-			present: []digest.Digest{
-				digest.NewFromBlob([]byte("foo")),
-				digest.NewFromBlob([]byte("bar")),
-			},
+			name:    "some present",
+			present: []string{"foo", "bar"},
 			input: []digest.Digest{
 				digest.NewFromBlob([]byte("foo")),
 				digest.NewFromBlob([]byte("bar")),
@@ -304,21 +295,19 @@ func TestMissingBlobs(t *testing.T) {
 		},
 	}
 
-	printCfg := &pretty.Config{Compact: true}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fake.blobs = make(map[digest.Digest][]byte)
-			for _, dg := range tc.present {
-				// We don't care about blob content in this test so just include nil values.
-				fake.blobs[dg] = nil
+			fake.Clear()
+			for _, s := range tc.present {
+				fake.Put([]byte(s))
 			}
-			t.Logf("CAS contains digests %s", printCfg.Sprint(tc.present))
+			t.Logf("CAS contains digests of %s", tc.present)
 			got, err := c.MissingBlobs(ctx, tc.input)
 			if err != nil {
-				t.Errorf("c.MissingBlobs(ctx, %s) gave error %s, expected nil", printCfg.Sprint(tc.input), err)
+				t.Errorf("c.MissingBlobs(ctx, %v) gave error %s, expected nil", tc.input, err)
 			}
 			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("c.MissingBlobs(ctx, %s) gave diff (want -> got):\n%s", printCfg.Sprint(tc.input), diff)
+				t.Errorf("c.MissingBlobs(ctx, %v) gave diff (want -> got):\n%s", tc.input, diff)
 			}
 		})
 	}
@@ -332,7 +321,7 @@ func TestWriteBlobs(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := &fakeCAS{}
+	fake := fakes.NewCas()
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
@@ -361,7 +350,7 @@ func TestWriteBlobs(t *testing.T) {
 		name string
 		// input is the blobs to try to store; they're converted to a file map by the test
 		input [][]byte
-		// present is the blobs already present in the CAS; they're pre-loaded into the fakeCAS object
+		// present is the blobs already present in the CAS; they're pre-loaded into the fakes.CAS object
 		// and the test verifies no attempt was made to upload them.
 		present [][]byte
 	}{
@@ -397,12 +386,9 @@ func TestWriteBlobs(t *testing.T) {
 			ub.Apply(c)
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
-					fake.blobs = make(map[digest.Digest][]byte)
-					fake.batchReqs = 0
-					fake.writeReqs = 0
+					fake.Clear()
 					for _, blob := range tc.present {
-						// We don't care about blob content in this test so just include nil values.
-						fake.blobs[digest.NewFromBlob(blob)] = nil
+						fake.Put(blob)
 					}
 					input := make(map[digest.Digest][]byte)
 					for _, blob := range tc.input {
@@ -416,17 +402,17 @@ func TestWriteBlobs(t *testing.T) {
 
 					for _, blob := range tc.present {
 						dg := digest.NewFromBlob(blob)
-						if gotBlob := fake.blobs[dg]; gotBlob != nil {
+						if fake.GetBlobWrites(dg) > 0 {
 							t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
 						}
 						// Remove this from the input map so we don't iterate it below.
 						delete(input, dg)
 					}
 					for dg, blob := range input {
-						if gotBlob, ok := fake.blobs[dg]; !ok {
+						if gotBlob, ok := fake.Get(dg); !ok {
 							t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
-						} else if diff := cmp.Diff(blob, gotBlob); diff != "" {
-							t.Errorf("blob %v with digest %s had diff on uploaded blob:\n%s", blob, dg, diff)
+						} else if !bytes.Equal(blob, gotBlob) {
+							t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
 						}
 					}
 				})
@@ -443,7 +429,7 @@ func TestWriteBlobsBatching(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := &fakeCAS{}
+	fake := fakes.NewCas()
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
@@ -498,9 +484,7 @@ func TestWriteBlobsBatching(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fake.blobs = make(map[digest.Digest][]byte)
-			fake.writeReqs = 0
-			fake.batchReqs = 0
+			fake.Clear()
 			blobs := make(map[digest.Digest][]byte)
 			for i, sz := range tc.sizes {
 				blob := make([]byte, int(sz))
@@ -514,17 +498,17 @@ func TestWriteBlobsBatching(t *testing.T) {
 			}
 
 			for d, blob := range blobs {
-				if gotBlob, ok := fake.blobs[d]; !ok {
+				if gotBlob, ok := fake.Get(d); !ok {
 					t.Errorf("blob with digest %s was not uploaded, expected it to be present in the CAS", d)
-				} else if diff := cmp.Diff(blob, gotBlob, cmp.Comparer(bytes.Equal)); diff != "" {
-					t.Errorf("blob with digest %s had diff on uploaded blob:\n%s", d, diff)
+				} else if !bytes.Equal(blob, gotBlob) {
+					t.Errorf("blob with digest %s had diff on uploaded blob: wanted %v, got %v", d, blob, gotBlob)
 				}
 			}
-			if fake.batchReqs != tc.batchReqs {
-				t.Errorf("%d requests were made to BatchUpdateBlobs, wanted %d", fake.batchReqs, tc.batchReqs)
+			if fake.GetBatchReqs() != tc.batchReqs {
+				t.Errorf("%d requests were made to BatchUpdateBlobs, wanted %d", fake.GetBatchReqs(), tc.batchReqs)
 			}
-			if fake.writeReqs != tc.writeReqs {
-				t.Errorf("%d requests were made to Write, wanted %d", fake.writeReqs, tc.writeReqs)
+			if fake.GetWriteReqs() != tc.writeReqs {
+				t.Errorf("%d requests were made to Write, wanted %d", fake.GetWriteReqs(), tc.writeReqs)
 			}
 		})
 	}
@@ -538,7 +522,7 @@ func TestFlattenActionOutputs(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := &fakeCAS{}
+	fake := fakes.NewCas()
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
@@ -583,7 +567,6 @@ func TestFlattenActionOutputs(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed marshalling Tree: %s", err)
 	}
-	treeDigest := digest.NewFromBlob(treeBlob)
 	treeA := &repb.Tree{
 		Root:     dirA,
 		Children: []*repb.Directory{dirB},
@@ -592,10 +575,8 @@ func TestFlattenActionOutputs(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed marshalling Tree: %s", err)
 	}
-	treeADigest := digest.NewFromBlob(treeABlob)
-	fake.blobs = make(map[digest.Digest][]byte)
-	fake.blobs[treeDigest] = treeBlob
-	fake.blobs[treeADigest] = treeABlob
+	treeDigest := fake.Put(treeBlob)
+	treeADigest := fake.Put(treeABlob)
 	ar := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
 			&repb.OutputFile{Path: "foo", Digest: fooDigest.ToProto()}},

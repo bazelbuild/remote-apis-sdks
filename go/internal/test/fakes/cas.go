@@ -1,4 +1,4 @@
-package client_test
+package fakes
 
 import (
 	"bytes"
@@ -21,44 +21,45 @@ import (
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
-// fakeReader implements ByteStream's Read interface, returning one blob.
-type fakeReader struct {
-	// blob is the blob being read.
-	blob []byte
-	// chunks is a list of chunk sizes, in the order they are produced. The sum must be equal to the
+// Reader implements ByteStream's Read interface, returning one blob.
+type Reader struct {
+	// Blob is the blob being read.
+	Blob []byte
+	// Chunks is a list of chunk sizes, in the order they are produced. The sum must be equal to the
 	// length of blob.
-	chunks []int
+	Chunks []int
 }
 
-// validate ensures that a fakeReader has the chunk sizes set correctly.
-func (f *fakeReader) validate(t *testing.T) {
+// Validate ensures that a Reader has the chunk sizes set correctly.
+func (f *Reader) Validate(t *testing.T) {
 	t.Helper()
 	sum := 0
-	for _, c := range f.chunks {
+	for _, c := range f.Chunks {
 		if c < 0 {
 			t.Errorf("Invalid chunk specification: chunk with negative size %d", c)
 		}
 		sum += c
 	}
-	if sum != len(f.blob) {
-		t.Errorf("Invalid chunk specification: chunk sizes sum to %d but blob is length %d", sum, len(f.blob))
+	if sum != len(f.Blob) {
+		t.Errorf("Invalid chunk specification: chunk sizes sum to %d but blob is length %d", sum, len(f.Blob))
 	}
 }
 
-func (f *fakeReader) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
+// Read implements the corresponding RE API function.
+func (f *Reader) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	path := strings.Split(req.ResourceName, "/")
 	if len(path) != 4 || path[0] != "instance" || path[1] != "blobs" {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs/<hash>/<size>\"")
 	}
-	dg := digest.NewFromBlob(f.blob)
+	dg := digest.NewFromBlob(f.Blob)
 	if path[2] != dg.Hash || path[3] != strconv.FormatInt(dg.Size, 10) {
 		return status.Errorf(codes.NotFound, "test fake only has blob with digest %s, but %s/%s was requested", dg, path[2], path[3])
 	}
 
 	offset := req.ReadOffset
 	limit := req.ReadLimit
-	blob := f.blob
-	chunks := f.chunks
+	blob := f.Blob
+	chunks := f.Chunks
 	for len(chunks) > 0 {
 		buf := blob[:chunks[0]]
 		if offset >= int64(len(buf)) {
@@ -87,26 +88,29 @@ func (f *fakeReader) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadSe
 	return nil
 }
 
-func (f *fakeReader) Write(bsgrpc.ByteStream_WriteServer) error {
+// Write implements the corresponding RE API function.
+func (f *Reader) Write(bsgrpc.ByteStream_WriteServer) error {
 	return status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
-func (f *fakeReader) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest) (*bspb.QueryWriteStatusResponse, error) {
+// QueryWriteStatus implements the corresponding RE API function.
+func (f *Reader) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest) (*bspb.QueryWriteStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
-// fakeWriter expects to receive Write calls and fills the buffer.
-type fakeWriter struct {
-	// buf is a buffer that is set to the contents of a Write call after one is received.
-	buf []byte
-	// err is a copy of the error returned by Write.
-	err error
+// Writer expects to receive Write calls and fills the buffer.
+type Writer struct {
+	// Buf is a buffer that is set to the contents of a Write call after one is received.
+	Buf []byte
+	// Err is a copy of the error returned by Write.
+	Err error
 }
 
-func (f *fakeWriter) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
+// Write implements the corresponding RE API function.
+func (f *Writer) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	// Store the error so we can verify that the client didn't drop the stream early, meaning the
 	// request won't error.
-	defer func() { f.err = err }()
+	defer func() { f.Err = err }()
 
 	off := int64(0)
 	buf := new(bytes.Buffer)
@@ -172,33 +176,86 @@ func (f *fakeWriter) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 		return status.Errorf(codes.InvalidArgument, "reached end of stream before the client finished writing")
 	}
 
-	f.buf = buf.Bytes()
-	cDg := digest.NewFromBlob(f.buf)
+	f.Buf = buf.Bytes()
+	cDg := digest.NewFromBlob(f.Buf)
 	if dg != cDg {
 		return status.Errorf(codes.InvalidArgument, "mismatched digest: received %s, computed %s", dg, cDg)
 	}
 	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: dg.Size})
 }
 
-func (f *fakeWriter) Read(*bspb.ReadRequest, bsgrpc.ByteStream_ReadServer) error {
+// Read implements the corresponding RE API function.
+func (f *Writer) Read(*bspb.ReadRequest, bsgrpc.ByteStream_ReadServer) error {
 	return status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
-func (f *fakeWriter) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest) (*bspb.QueryWriteStatusResponse, error) {
+// QueryWriteStatus implements the corresponding RE API function.
+func (f *Writer) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest) (*bspb.QueryWriteStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
-// fakeMultiCAS is a fake CAS that implements FindMissingBlobs, Read and Write, storing stored blobs
+// CAS is a fake CAS that implements FindMissingBlobs, Read and Write, storing stored blobs
 // in a map. It also counts the number of requests to store received, for validating batching logic.
-type fakeCAS struct {
-	// blobs is the list of blobs that are considered present in the CAS.
+type CAS struct {
 	blobs     map[digest.Digest][]byte
+	reads     map[digest.Digest]int
+	writes    map[digest.Digest]int
 	mu        sync.RWMutex
 	batchReqs int
 	writeReqs int
 }
 
-func (f *fakeCAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
+// NewCas returns a new empty fake CAS.
+func NewCas() *CAS {
+	c := &CAS{}
+	c.Clear()
+	return c
+}
+
+// Clear removes all results from the cache.
+func (f *CAS) Clear() {
+	f.blobs = make(map[digest.Digest][]byte)
+	f.reads = make(map[digest.Digest]int)
+	f.writes = make(map[digest.Digest]int)
+	f.batchReqs = 0
+	f.writeReqs = 0
+}
+
+// Put adds a given blob to the cache and returns its digest.
+func (f *CAS) Put(blob []byte) digest.Digest {
+	d := digest.NewFromBlob(blob)
+	f.blobs[d] = blob
+	return d
+}
+
+// Get returns the bytes corresponding to the given digest, and whether it was found.
+func (f *CAS) Get(d digest.Digest) ([]byte, bool) {
+	res, ok := f.blobs[d]
+	return res, ok
+}
+
+// GetBlobReads returns the total number of read requests for a particular digest.
+func (f *CAS) GetBlobReads(d digest.Digest) int {
+	return f.reads[d]
+}
+
+// GetBlobWrites returns the total number of update requests for a particular digest.
+func (f *CAS) GetBlobWrites(d digest.Digest) int {
+	return f.writes[d]
+}
+
+// GetBatchReqs returns the total number of BatchUpdateBlobs requests to this fake.
+func (f *CAS) GetBatchReqs() int {
+	return f.batchReqs
+}
+
+// GetWriteReqs returns the total number of Write requests to this fake.
+func (f *CAS) GetWriteReqs() int {
+	return f.writeReqs
+}
+
+// FindMissingBlobs implements the corresponding RE API function.
+func (f *CAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -214,7 +271,8 @@ func (f *fakeCAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlo
 	return resp, nil
 }
 
-func (f *fakeCAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (*repb.BatchUpdateBlobsResponse, error) {
+// BatchUpdateBlobs implements the corresponding RE API function.
+func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (*repb.BatchUpdateBlobsResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.batchReqs++
@@ -244,6 +302,7 @@ func (f *fakeCAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlo
 			continue
 		}
 		f.blobs[dg] = r.Data
+		f.writes[dg]++
 		resps = append(resps, &repb.BatchUpdateBlobsResponse_Response{
 			Digest: r.Digest,
 			Status: status.New(codes.OK, "").Proto(),
@@ -252,15 +311,18 @@ func (f *fakeCAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlo
 	return &repb.BatchUpdateBlobsResponse{Responses: resps}, nil
 }
 
-func (f *fakeCAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (*repb.BatchReadBlobsResponse, error) {
+// BatchReadBlobs implements the corresponding RE API function.
+func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (*repb.BatchReadBlobsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
-func (f *fakeCAS) GetTree(*repb.GetTreeRequest, regrpc.ContentAddressableStorage_GetTreeServer) error {
+// GetTree implements the corresponding RE API function.
+func (f *CAS) GetTree(*repb.GetTreeRequest, regrpc.ContentAddressableStorage_GetTreeServer) error {
 	return status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
-func (f *fakeCAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
+// Write implements the corresponding RE API function.
+func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.writeReqs++
@@ -330,6 +392,7 @@ func (f *fakeCAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	}
 
 	f.blobs[dg] = buf.Bytes()
+	f.writes[dg]++
 	cDg := digest.NewFromBlob(buf.Bytes())
 	if dg != cDg {
 		return status.Errorf(codes.InvalidArgument, "mismatched digest: received %s, computed %s", dg, cDg)
@@ -337,7 +400,8 @@ func (f *fakeCAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: dg.Size})
 }
 
-func (f *fakeCAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
+// Read implements the corresponding RE API function.
+func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	if req.ReadOffset != 0 || req.ReadLimit != 0 {
 		return status.Error(codes.Unimplemented, "test fake does not implement read_offset or limit")
 	}
@@ -352,6 +416,7 @@ func (f *fakeCAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServe
 	}
 	dg := digest.TestNew(path[2], int64(size))
 	blob, ok := f.blobs[dg]
+	f.reads[dg]++
 	if !ok {
 		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", dg)
 	}
@@ -359,6 +424,7 @@ func (f *fakeCAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServe
 	return stream.Send(&bspb.ReadResponse{Data: blob})
 }
 
-func (f *fakeCAS) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest) (*bspb.QueryWriteStatusResponse, error) {
+// QueryWriteStatus implements the corresponding RE API function.
+func (f *CAS) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest) (*bspb.QueryWriteStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "test fake does not implement method")
 }
