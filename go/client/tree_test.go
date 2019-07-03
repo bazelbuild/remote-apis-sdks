@@ -331,6 +331,24 @@ func TestBuildTreeFromInputs(t *testing.T) {
 			},
 			want: &client.FileTree{},
 		},
+		{
+			desc: "virtual inputs",
+			input: nil,
+			spec: &command.InputSpec{
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "a/foo.txt", Contents: []byte("foo")},
+					&command.VirtualInput{Path: "bar.txt", Contents: []byte("bar")},
+				},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bar.txt": []byte("bar")},
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
