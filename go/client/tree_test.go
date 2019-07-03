@@ -345,7 +345,7 @@ func TestBuildTreeFromInputs(t *testing.T) {
 			}
 			got, err := client.BuildTreeFromInputs(root, tc.spec)
 			if err != nil {
-				t.Fatalf("BuildTreeFromInputs(%s, %v) = _, %v want _, nil", root, tc.spec, err)
+				t.Errorf("BuildTreeFromInputs(%s, %v) = _, %v want _, nil", root, tc.spec, err)
 			}
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("client.BuildTree(%+v) gave diff (-want +got):\n%s", tc.input, diff)
