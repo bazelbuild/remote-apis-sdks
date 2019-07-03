@@ -653,12 +653,6 @@ func TestDownloadActionOutputs(t *testing.T) {
 
 	fooDigest := fake.Put([]byte("foo"))
 	barDigest := fake.Put([]byte("bar"))
-	dirB := &repb.Directory{
-		Files: []*repb.FileNode{
-			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
-		},
-	}
-	bDigest := digest.TestNewFromMessage(dirB)
 	dirA := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
 			{Name: "b", Digest: bDigest.ToProto()},
@@ -668,6 +662,12 @@ func TestDownloadActionOutputs(t *testing.T) {
 		},
 	}
 	aDigest := digest.TestNewFromMessage(dirA)
+	dirB := &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
+		},
+	}
+	bDigest := digest.TestNewFromMessage(dirB)
 	root := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
 			{Name: "a", Digest: aDigest.ToProto()},
@@ -680,7 +680,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	}
 	treeBlob, err := proto.Marshal(tree)
 	if err != nil {
-		t.Errorf("failed marshalling Tree: %s", err)
+		t.Fatalf("failed marshalling Tree: %s", err)
 	}
 	treeA := &repb.Tree{
 		Root:     dirA,
@@ -688,7 +688,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	}
 	treeABlob, err := proto.Marshal(treeA)
 	if err != nil {
-		t.Errorf("failed marshalling Tree: %s", err)
+		t.Fatalf("failed marshalling Tree: %s", err)
 	}
 	treeDigest := fake.Put(treeBlob)
 	treeADigest := fake.Put(treeABlob)
@@ -711,7 +711,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	defer os.RemoveAll(execRoot)
 	err = c.DownloadActionOutputs(ctx, ar, execRoot)
 	if err != nil {
-		t.Fatalf("error in DownloadActionOutputs: %s", err)
+		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
 	wantOutputs := []struct {
 		path          string

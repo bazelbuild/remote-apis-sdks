@@ -46,9 +46,9 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	if c.useBatchOps {
 		batches = makeBatches(missing)
 	} else {
-		log.V(2).Info("uploading them individually")
+		log.V(2).Info("Uploading them individually")
 		for i := range missing {
-			log.V(3).Infof("creating single batch of blob %s", missing[i])
+			log.V(3).Infof("Creating single batch of blob %s", missing[i])
 			batches = append(batches, missing[i:i+1])
 		}
 	}
@@ -59,7 +59,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 		eg.Go(func() error {
 			for batch := range todo {
 				if len(batch) > 1 {
-					log.V(3).Infof("uploading batch of %d blobs", len(batch))
+					log.V(3).Infof("Uploading batch of %d blobs", len(batch))
 					bchMap := make(map[digest.Digest][]byte)
 					for _, dg := range batch {
 						bchMap[dg] = blobs[dg]
@@ -68,7 +68,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 						return err
 					}
 				} else {
-					log.V(3).Infof("uploading single blob with digest %s", batch[0])
+					log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 					if _, err := c.WriteBlob(eCtx, blobs[batch[0]]); err != nil {
 						return err
 					}
@@ -222,7 +222,7 @@ func makeBatches(dgs []digest.Digest) [][]digest.Digest {
 			batch = append(batch, dgs[0])
 			dgs = dgs[1:]
 		}
-		log.V(3).Infof("created batch of %d blobs with total size %d", len(batch), sz)
+		log.V(3).Infof("Created batch of %d blobs with total size %d", len(batch), sz)
 		batches = append(batches, batch)
 	}
 	log.V(2).Infof("%d batches created", len(batches))
@@ -330,10 +330,10 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 			batch = append(batch, ds[i])
 		}
 		ds = ds[batchSize:]
-		log.V(3).Infof("created query batch of %d blobs", len(batch))
+		log.V(3).Infof("Created query batch of %d blobs", len(batch))
 		batches = append(batches, batch)
 	}
-	log.V(2).Infof("%d query batches created", len(batches))
+	log.V(3).Infof("%d query batches created", len(batches))
 
 	eg, eCtx := errgroup.WithContext(ctx)
 	todo := make(chan []digest.Digest, c.casConcurrency)
@@ -370,7 +370,7 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 		case todo <- batches[0]:
 			batches = batches[1:]
 			if len(batches)%logInterval == 0 {
-				log.V(2).Infof("%d missing batches left to query", len(batches))
+				log.V(3).Infof("%d missing batches left to query", len(batches))
 			}
 		case <-eCtx.Done():
 			close(todo)
@@ -378,9 +378,9 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 		}
 	}
 	close(todo)
-	log.V(2).Info("Waiting for remaining query jobs")
+	log.V(3).Info("Waiting for remaining query jobs")
 	err := eg.Wait()
-	log.V(2).Info("Done")
+	log.V(3).Info("Done")
 	return missing, err
 }
 
