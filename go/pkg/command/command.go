@@ -290,6 +290,56 @@ type Result struct {
 	Err error
 }
 
+// LocalErrorExitCode is an exit code corresponding to an local error.
+const LocalErrorExitCode = 35
+
+// TimeoutExitCode is an exit code corresponding to the command timing out remotely.
+const TimeoutExitCode = /*SIGNAL_BASE=*/ 128 + /*SIGALRM=*/ 14
+
+// RemoteErrorExitCode is an exit code corresponding to an remote server error.
+const RemoteErrorExitCode = 45
+
+// InterruptedExitCode is an exit code corresponding to an execution interruption by the user.
+const InterruptedExitCode = 8
+
+// NewLocalErrorResult constructs a Result from a local error.
+func NewLocalErrorResult(err error) *Result {
+	return &Result{
+		ExitCode: LocalErrorExitCode,
+		Status:   LocalErrorResultStatus,
+		Err:      err,
+	}
+}
+
+// NewRemoteErrorResult constructs a Result from a remote error.
+func NewRemoteErrorResult(err error) *Result {
+	return &Result{
+		ExitCode: RemoteErrorExitCode,
+		Status:   RemoteErrorResultStatus,
+		Err:      err,
+	}
+}
+
+// NewFromExitCode constructs a Result from a given command exit code.
+func NewFromExitCode(exitCode int) *Result {
+	st := SuccessResultStatus
+	if exitCode != 0 {
+		st = NonZeroExitResultStatus
+	}
+	return &Result{
+		ExitCode: exitCode,
+		Status:   st,
+	}
+}
+
+// NewTimeoutResult constructs a new result for a timeout-exceeded command.
+func NewTimeoutResult() *Result {
+	return &Result{
+		ExitCode: TimeoutExitCode,
+		Status:   TimeoutResultStatus,
+	}
+}
+
 // Metadata is general information associated with a Command execution.
 type Metadata struct {
 	// CommandDigest is a digest of the command being executed. It can be used

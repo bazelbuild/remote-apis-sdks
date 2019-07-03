@@ -97,7 +97,8 @@ func (c *Client) ExecuteAction(ctx context.Context, ac *Action) (*repb.ActionRes
 	return res, nil
 }
 
-func (c *Client) checkActionCache(ctx context.Context, acDg *repb.Digest) (*repb.ActionResult, error) {
+// CheckActionCache queries remote action cache, returning an ActionResult or nil if it doesn't exist.
+func (c *Client) CheckActionCache(ctx context.Context, acDg *repb.Digest) (*repb.ActionResult, error) {
 	res, err := c.GetActionResult(ctx, &repb.GetActionResultRequest{
 		InstanceName: c.InstanceName,
 		ActionDigest: acDg,
@@ -170,7 +171,7 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	// If the result is cacheable, check if it's already in the cache.
 	if !ac.DoNotCache || !ac.SkipCache {
 		log.V(1).Info("Checking cache")
-		res, err := c.checkActionCache(ctx, acDg)
+		res, err := c.CheckActionCache(ctx, acDg)
 		if err != nil {
 			return nil, nil, err
 		}
