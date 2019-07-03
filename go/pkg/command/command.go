@@ -45,6 +45,13 @@ type InputExclusion struct {
 	Type InputType
 }
 
+// VirtualInput represents an input that does not actually exist as a file on disk, but we want
+// to stage it as a file on disk for the command execution.
+type VirtualInput struct {
+	// The path for the input file to be staged at, relative to the ExecRoot.
+	Path string
+}
+
 // InputSpec represents all the required inputs to a remote command.
 type InputSpec struct {
 	// Input paths (files or directories) that need to be present for the command execution.
