@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
@@ -622,6 +625,161 @@ func TestFlattenActionOutputs(t *testing.T) {
 		}
 		if wantOut.SymlinkTarget != got.SymlinkTarget {
 			t.Errorf("FlattenActionOutputs gave symlink target diff on %s: want %s, got: %s", path, wantOut.SymlinkTarget, got.SymlinkTarget)
+		}
+	}
+}
+
+func TestDownloadActionOutputs(t *testing.T) {
+	ctx := context.Background()
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("Cannot listen: %v", err)
+	}
+	defer listener.Close()
+	server := grpc.NewServer()
+	fake := fakes.NewCAS()
+	bsgrpc.RegisterByteStreamServer(server, fake)
+	regrpc.RegisterContentAddressableStorageServer(server, fake)
+	go server.Serve(listener)
+	defer server.Stop()
+	c, err := client.Dial(ctx, instance, client.DialParams{
+		Service:    listener.Addr().String(),
+		NoSecurity: true,
+	}, client.UseBatchOps(true))
+	if err != nil {
+		t.Fatalf("Error connecting to server: %v", err)
+	}
+	defer c.Close()
+
+	fooDigest := fake.Put([]byte("foo"))
+	barDigest := fake.Put([]byte("bar"))
+	dirB := &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
+		},
+	}
+	bDigest := digest.TestNewFromMessage(dirB)
+	dirA := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "b", Digest: bDigest.ToProto()},
+		},
+		Files: []*repb.FileNode{
+			{Name: "bar", Digest: barDigest.ToProto()},
+		},
+	}
+	aDigest := digest.TestNewFromMessage(dirA)
+	root := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "a", Digest: aDigest.ToProto()},
+			{Name: "b", Digest: bDigest.ToProto()},
+		},
+	}
+	tree := &repb.Tree{
+		Root:     root,
+		Children: []*repb.Directory{dirA, dirB},
+	}
+	treeBlob, err := proto.Marshal(tree)
+	if err != nil {
+		t.Errorf("failed marshalling Tree: %s", err)
+	}
+	treeA := &repb.Tree{
+		Root:     dirA,
+		Children: []*repb.Directory{dirB},
+	}
+	treeABlob, err := proto.Marshal(treeA)
+	if err != nil {
+		t.Errorf("failed marshalling Tree: %s", err)
+	}
+	treeDigest := fake.Put(treeBlob)
+	treeADigest := fake.Put(treeABlob)
+	ar := &repb.ActionResult{
+		OutputFiles: []*repb.OutputFile{
+			&repb.OutputFile{Path: "foo", Digest: fooDigest.ToProto()}},
+		OutputFileSymlinks: []*repb.OutputSymlink{
+			&repb.OutputSymlink{Path: "x/bar", Target: "../dir/a/bar"}},
+		OutputDirectorySymlinks: []*repb.OutputSymlink{
+			&repb.OutputSymlink{Path: "x/a", Target: "../dir/a"}},
+		OutputDirectories: []*repb.OutputDirectory{
+			&repb.OutputDirectory{Path: "dir", TreeDigest: treeDigest.ToProto()},
+			&repb.OutputDirectory{Path: "dir2", TreeDigest: treeADigest.ToProto()},
+		},
+	}
+	execRoot, err := ioutil.TempDir("", "DownloadOuts")
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(execRoot)
+	err = c.DownloadActionOutputs(ctx, ar, execRoot)
+	if err != nil {
+		t.Fatalf("error in DownloadActionOutputs: %s", err)
+	}
+	wantOutputs := []struct {
+		path          string
+		isExecutable  bool
+		contents      []byte
+		symlinkTarget string
+	}{
+		{
+			path:         "dir/a/b/foo",
+			isExecutable: true,
+			contents:     []byte("foo"),
+		},
+		{
+			path:     "dir/a/bar",
+			contents: []byte("bar"),
+		},
+		{
+			path:         "dir/b/foo",
+			isExecutable: true,
+			contents:     []byte("foo"),
+		},
+		{
+			path:         "dir2/b/foo",
+			isExecutable: true,
+			contents:     []byte("foo"),
+		},
+		{
+			path:     "dir2/bar",
+			contents: []byte("bar"),
+		},
+		{
+			path:     "foo",
+			contents: []byte("foo"),
+		},
+		{
+			path:          "x/a",
+			symlinkTarget: "../dir/a",
+		},
+		{
+			path:          "x/bar",
+			symlinkTarget: "../dir/a/bar",
+		},
+	}
+	for _, out := range wantOutputs {
+		path := filepath.Join(execRoot, out.path)
+		fi, err := os.Lstat(path)
+		if err != nil {
+			t.Errorf("expected output %s is missing", path)
+		}
+		if out.symlinkTarget != "" {
+			if fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("expected %s to be a symlink, got %v", path, fi.Mode())
+			}
+			target, e := os.Readlink(path)
+			if e != nil {
+				t.Errorf("expected %s to be a symlink, got error reading symlink: %v", path, err)
+			}
+			if target != out.symlinkTarget {
+				t.Errorf("expected %s to be a symlink to %s, got %s", path, out.symlinkTarget, target)
+			}
+		} else {
+			contents, err := ioutil.ReadFile(path)
+			if err != nil {
+				t.Errorf("error reading from %s: %v", path, err)
+			}
+			if !bytes.Equal(contents, out.contents) {
+				t.Errorf("expected %s to contain %v, got %v", path, out.contents, contents)
+			}
 		}
 	}
 }
