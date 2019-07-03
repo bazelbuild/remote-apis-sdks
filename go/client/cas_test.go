@@ -653,6 +653,12 @@ func TestDownloadActionOutputs(t *testing.T) {
 
 	fooDigest := fake.Put([]byte("foo"))
 	barDigest := fake.Put([]byte("bar"))
+	dirB := &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
+		},
+	}
+	bDigest := digest.TestNewFromMessage(dirB)
 	dirA := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
 			{Name: "b", Digest: bDigest.ToProto()},
@@ -662,12 +668,6 @@ func TestDownloadActionOutputs(t *testing.T) {
 		},
 	}
 	aDigest := digest.TestNewFromMessage(dirA)
-	dirB := &repb.Directory{
-		Files: []*repb.FileNode{
-			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
-		},
-	}
-	bDigest := digest.TestNewFromMessage(dirB)
 	root := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
 			{Name: "a", Digest: aDigest.ToProto()},
