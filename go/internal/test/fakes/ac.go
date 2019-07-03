@@ -3,6 +3,7 @@ package fakes
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"google.golang.org/grpc/codes"
@@ -13,6 +14,7 @@ import (
 
 // ActionCache implements the RE ActionCache interface, storing fixed results.
 type ActionCache struct {
+	mu        sync.RWMutex
 	results map[digest.Digest]*repb.ActionResult
 	reads   map[digest.Digest]int
 	writes  map[digest.Digest]int
@@ -27,6 +29,8 @@ func NewActionCache() *ActionCache {
 
 // Clear removes all results from the cache.
 func (c *ActionCache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.results = make(map[digest.Digest]*repb.ActionResult)
 	c.reads = make(map[digest.Digest]int)
 	c.writes = make(map[digest.Digest]int)
@@ -41,11 +45,15 @@ func (c *ActionCache) PutAction(ac *repb.Action, res *repb.ActionResult) digest.
 
 // Put sets a fake result for a given action digest.
 func (c *ActionCache) Put(d digest.Digest, res *repb.ActionResult) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.results[d] = res
 }
 
 // Get returns a previously saved fake result for the given action digest.
 func (c *ActionCache) Get(d digest.Digest) *repb.ActionResult {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	res, ok := c.results[d]
 	if !ok {
 		return nil
@@ -66,6 +74,8 @@ func (c *ActionCache) GetWrites(d digest.Digest) int {
 
 // GetActionResult returns a stored result, if it was found.
 func (c *ActionCache) GetActionResult(ctx context.Context, req *repb.GetActionResultRequest) (res *repb.ActionResult, err error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	dg, err := digest.NewFromProto(req.ActionDigest)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid digest received: %v", req.ActionDigest))
@@ -79,6 +89,8 @@ func (c *ActionCache) GetActionResult(ctx context.Context, req *repb.GetActionRe
 
 // UpdateActionResult sets/updates a given result.
 func (c *ActionCache) UpdateActionResult(ctx context.Context, req *repb.UpdateActionResultRequest) (res *repb.ActionResult, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	dg, err := digest.NewFromProto(req.ActionDigest)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid digest received: %v", req.ActionDigest))
