@@ -235,7 +235,7 @@ func TestMissingBlobs(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := fakes.NewCas()
+	fake := fakes.NewCAS()
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
 	defer server.Stop()
@@ -321,7 +321,7 @@ func TestWriteBlobs(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := fakes.NewCas()
+	fake := fakes.NewCAS()
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
@@ -429,7 +429,7 @@ func TestWriteBlobsBatching(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := fakes.NewCas()
+	fake := fakes.NewCAS()
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
@@ -522,7 +522,7 @@ func TestFlattenActionOutputs(t *testing.T) {
 	}
 	defer listener.Close()
 	server := grpc.NewServer()
-	fake := fakes.NewCas()
+	fake := fakes.NewCAS()
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)

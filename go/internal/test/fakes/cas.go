@@ -205,8 +205,8 @@ type CAS struct {
 	writeReqs int
 }
 
-// NewCas returns a new empty fake CAS.
-func NewCas() *CAS {
+// NewCAS returns a new empty fake CAS.
+func NewCAS() *CAS {
 	c := &CAS{}
 	c.Clear()
 	return c

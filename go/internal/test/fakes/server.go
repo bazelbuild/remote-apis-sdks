@@ -13,7 +13,7 @@ import (
 // Server is a configurable fake in-process RBE server for use in integration tests.
 type Server struct {
 	Exec        *Exec
-	Cas         *CAS
+	CAS         *CAS
 	ActionCache *ActionCache
 	listener    net.Listener
 	srv         *grpc.Server
@@ -21,16 +21,16 @@ type Server struct {
 
 // NewServer creates a server that is ready to accept requests.
 func NewServer() (s *Server, err error) {
-	cas := NewCas()
+	cas := NewCAS()
 	ac := NewActionCache()
-	s = &Server{Exec: NewExec(ac, cas), Cas: cas, ActionCache: ac}
+	s = &Server{Exec: NewExec(ac, cas), CAS: cas, ActionCache: ac}
 	s.listener, err = net.Listen("tcp", ":0")
 	if err != nil {
 		return nil, err
 	}
 	s.srv = grpc.NewServer()
-	bsgrpc.RegisterByteStreamServer(s.srv, s.Cas)
-	regrpc.RegisterContentAddressableStorageServer(s.srv, s.Cas)
+	bsgrpc.RegisterByteStreamServer(s.srv, s.CAS)
+	regrpc.RegisterContentAddressableStorageServer(s.srv, s.CAS)
 	regrpc.RegisterActionCacheServer(s.srv, s.ActionCache)
 	regrpc.RegisterExecutionServer(s.srv, s.Exec)
 	go s.srv.Serve(s.listener)
@@ -39,7 +39,7 @@ func NewServer() (s *Server, err error) {
 
 // Clear clears the fake results.
 func (s *Server) Clear() {
-	s.Cas.Clear()
+	s.CAS.Clear()
 	s.ActionCache.Clear()
 	s.Exec.Clear()
 }
