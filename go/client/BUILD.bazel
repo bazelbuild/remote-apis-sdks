@@ -41,7 +41,6 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
-        "cas_fakes_test.go",
         "cas_test.go",
         "exec_test.go",
         "retries_test.go",
@@ -50,6 +49,7 @@ go_test(
     embed = [":go_default_library"],
     deps = [
         "//go/digest:go_default_library",
+        "//go/internal/test/fakes:go_default_library",
         "//go/pkg/command:go_default_library",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
@@ -57,7 +57,6 @@ go_test(
         "@com_github_google_go_cmp//cmp:go_default_library",
         "@com_github_google_go_cmp//cmp/cmpopts:go_default_library",
         "@com_github_kylelemons_godebug//pretty:go_default_library",
-        "@com_github_pborman_uuid//:go_default_library",
         "@go_googleapis//google/bytestream:bytestream_go_proto",
         "@go_googleapis//google/longrunning:longrunning_go_proto",
         "@go_googleapis//google/rpc:status_go_proto",
