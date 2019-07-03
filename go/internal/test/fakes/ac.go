@@ -14,7 +14,7 @@ import (
 
 // ActionCache implements the RE ActionCache interface, storing fixed results.
 type ActionCache struct {
-	mu        sync.RWMutex
+	mu      sync.RWMutex
 	results map[digest.Digest]*repb.ActionResult
 	reads   map[digest.Digest]int
 	writes  map[digest.Digest]int

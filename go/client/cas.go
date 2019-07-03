@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 
@@ -39,14 +41,14 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	if err != nil {
 		return err
 	}
-	log.V(1).Infof("%d blobs to store", len(missing))
+	log.V(2).Infof("%d blobs to store", len(missing))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
 		batches = makeBatches(missing)
 	} else {
-		log.V(1).Info("uploading them individually")
+		log.V(2).Info("Uploading them individually")
 		for i := range missing {
-			log.V(2).Infof("creating single batch of blob %s", missing[i])
+			log.V(3).Infof("Creating single batch of blob %s", missing[i])
 			batches = append(batches, missing[i:i+1])
 		}
 	}
@@ -57,7 +59,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 		eg.Go(func() error {
 			for batch := range todo {
 				if len(batch) > 1 {
-					log.V(2).Infof("uploading batch of %d blobs", len(batch))
+					log.V(3).Infof("Uploading batch of %d blobs", len(batch))
 					bchMap := make(map[digest.Digest][]byte)
 					for _, dg := range batch {
 						bchMap[dg] = blobs[dg]
@@ -66,7 +68,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 						return err
 					}
 				} else {
-					log.V(2).Infof("uploading single blob with digest %s", batch[0])
+					log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 					if _, err := c.WriteBlob(eCtx, blobs[batch[0]]); err != nil {
 						return err
 					}
@@ -84,7 +86,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 		case todo <- batches[0]:
 			batches = batches[1:]
 			if len(batches)%logInterval == 0 {
-				log.V(1).Infof("%d batches left to store", len(batches))
+				log.V(2).Infof("%d batches left to store", len(batches))
 			}
 		case <-eCtx.Done():
 			close(todo)
@@ -92,9 +94,9 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 		}
 	}
 	close(todo)
-	log.V(1).Info("Waiting for remaining jobs")
+	log.V(2).Info("Waiting for remaining jobs")
 	err = eg.Wait()
-	log.V(1).Info("Done")
+	log.V(2).Info("Done")
 	return err
 }
 
@@ -207,7 +209,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 // operations.
 func makeBatches(dgs []digest.Digest) [][]digest.Digest {
 	var batches [][]digest.Digest
-	log.V(1).Infof("Batching %d digests", len(dgs))
+	log.V(2).Infof("Batching %d digests", len(dgs))
 	sort.Slice(dgs, func(i, j int) bool {
 		return dgs[i].Size < dgs[j].Size
 	})
@@ -220,10 +222,10 @@ func makeBatches(dgs []digest.Digest) [][]digest.Digest {
 			batch = append(batch, dgs[0])
 			dgs = dgs[1:]
 		}
-		log.V(2).Infof("created batch of %d blobs with total size %d", len(batch), sz)
+		log.V(3).Infof("Created batch of %d blobs with total size %d", len(batch), sz)
 		batches = append(batches, batch)
 	}
-	log.V(1).Infof("%d batches created", len(batches))
+	log.V(2).Infof("%d batches created", len(batches))
 	return batches
 }
 
@@ -328,10 +330,10 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 			batch = append(batch, ds[i])
 		}
 		ds = ds[batchSize:]
-		log.V(2).Infof("created query batch of %d blobs", len(batch))
+		log.V(3).Infof("Created query batch of %d blobs", len(batch))
 		batches = append(batches, batch)
 	}
-	log.V(1).Infof("%d query batches created", len(batches))
+	log.V(3).Infof("%d query batches created", len(batches))
 
 	eg, eCtx := errgroup.WithContext(ctx)
 	todo := make(chan []digest.Digest, c.casConcurrency)
@@ -368,7 +370,7 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 		case todo <- batches[0]:
 			batches = batches[1:]
 			if len(batches)%logInterval == 0 {
-				log.V(1).Infof("%d missing batches left to query", len(batches))
+				log.V(3).Infof("%d missing batches left to query", len(batches))
 			}
 		case <-eCtx.Done():
 			close(todo)
@@ -376,9 +378,9 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 		}
 	}
 	close(todo)
-	log.V(1).Info("Waiting for remaining query jobs")
+	log.V(3).Info("Waiting for remaining query jobs")
 	err := eg.Wait()
-	log.V(1).Info("Done")
+	log.V(3).Info("Done")
 	return missing, err
 }
 
@@ -465,4 +467,41 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 		}
 	}
 	return outs, nil
+}
+
+// DownloadActionOutputs downloads the output files and directories in the given action result.
+func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string) error {
+	outs, err := c.FlattenActionOutputs(ctx, resPb)
+	if err != nil {
+		return err
+	}
+	var symlinks []*Output
+	for _, out := range outs {
+		path := filepath.Join(execRoot, out.Path)
+		// TODO(olaola): fix the (upstream) bug that this doesn't download empty directory trees.
+		// TODO(olaola): download results in parallel and batches.
+		if err := os.MkdirAll(filepath.Dir(path), os.FileMode(0777)); err != nil {
+			return err
+		}
+		// We create the symbolic links after all regular downloads are finished, because dangling
+		// links will not work.
+		if out.SymlinkTarget != "" {
+			symlinks = append(symlinks, out)
+			continue
+		}
+		if _, err := c.ReadBlobToFile(ctx, out.Digest, path); err != nil {
+			return err
+		}
+		if out.IsExecutable {
+			if err := os.Chmod(path, os.FileMode(0777)); err != nil {
+				return err
+			}
+		}
+	}
+	for _, out := range symlinks {
+		if err := os.Symlink(out.SymlinkTarget, filepath.Join(execRoot, out.Path)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
