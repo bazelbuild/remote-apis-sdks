@@ -74,8 +74,8 @@ func (c *ActionCache) GetWrites(d digest.Digest) int {
 
 // GetActionResult returns a stored result, if it was found.
 func (c *ActionCache) GetActionResult(ctx context.Context, req *repb.GetActionResultRequest) (res *repb.ActionResult, err error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	dg, err := digest.NewFromProto(req.ActionDigest)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid digest received: %v", req.ActionDigest))

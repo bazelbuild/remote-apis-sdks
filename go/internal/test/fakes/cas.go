@@ -223,8 +223,8 @@ func (f *CAS) Clear() {
 
 // Put adds a given blob to the cache and returns its digest.
 func (f *CAS) Put(blob []byte) digest.Digest {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	d := digest.NewFromBlob(blob)
 	f.blobs[d] = blob
 	return d
@@ -404,8 +404,8 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 
 // Read implements the corresponding RE API function.
 func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if req.ReadOffset != 0 || req.ReadLimit != 0 {
 		return status.Error(codes.Unimplemented, "test fake does not implement read_offset or limit")
 	}
