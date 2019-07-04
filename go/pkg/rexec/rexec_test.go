@@ -37,7 +37,7 @@ func newTestEnv(t *testing.T) (*Client, *fakes.Server, string, func()) {
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
-	return New(grpcClient, nil), s, execRoot, func() {
+	return &Client{&NoopFileDigestCache{}, grpcClient}, s, execRoot, func() {
 		grpcClient.Close()
 		s.Stop()
 		os.RemoveAll(execRoot)

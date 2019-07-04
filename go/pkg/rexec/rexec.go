@@ -25,9 +25,11 @@ type FileDigestCache interface {
 	Get(string) (digest.Digest, error)
 }
 
-type noopFileDigestCache struct{}
+// NoopFileDigestCache is a non-caching cache (always returns a cache miss).
+type NoopFileDigestCache struct{}
 
-func (c *noopFileDigestCache) Get(path string) (digest.Digest, error) {
+// Get computes the digest from the file contents.
+func (c *NoopFileDigestCache) Get(path string) (digest.Digest, error) {
 	return digest.NewFromFile(path)
 }
 
@@ -35,17 +37,6 @@ func (c *noopFileDigestCache) Get(path string) (digest.Digest, error) {
 type Client struct {
 	FileDigestCache FileDigestCache
 	GrpcClient      *rc.Client
-}
-
-// New returns a new Client object.
-func New(grpcClient *rc.Client, cache FileDigestCache) *Client {
-	if cache == nil {
-		cache = &noopFileDigestCache{}
-	}
-	return &Client{
-		FileDigestCache: cache,
-		GrpcClient:      grpcClient,
-	}
 }
 
 func buildCommand(cmd *command.Command) *repb.Command {
@@ -74,46 +65,43 @@ func buildCommand(cmd *command.Command) *repb.Command {
 }
 
 func (c *Client) downloadOutErr(ctx context.Context, resPb *repb.ActionResult, oe outerr.OutErr) error {
-	if resPb.StdoutRaw != nil {
-		oe.WriteOut(resPb.StdoutRaw)
-	} else if resPb.StdoutDigest != nil {
-		dg, err := digest.NewFromProto(resPb.StdoutDigest)
-		if err != nil {
-			return err
-		}
-		stdout, err := c.GrpcClient.ReadBlob(ctx, dg)
-		if err != nil {
-			return err
-		}
-		oe.WriteOut(stdout)
+	downloads := []struct {
+		raw   []byte
+		dgPb  *repb.Digest
+		write func([]byte)
+	}{
+		{raw: resPb.StdoutRaw, dgPb: resPb.StdoutDigest, write: oe.WriteOut},
+		{raw: resPb.StderrRaw, dgPb: resPb.StderrDigest, write: oe.WriteErr},
 	}
-	if resPb.StderrRaw != nil {
-		oe.WriteErr(resPb.StderrRaw)
-	} else if resPb.StderrDigest != nil {
-		dg, err := digest.NewFromProto(resPb.StderrDigest)
-		if err != nil {
-			return err
+	for _, d := range downloads {
+		if d.raw != nil {
+			d.write(d.raw)
+		} else if d.dgPb != nil {
+			dg, err := digest.NewFromProto(d.dgPb)
+			if err != nil {
+				return err
+			}
+			bytes, err := c.GrpcClient.ReadBlob(ctx, dg)
+			if err != nil {
+				return err
+			}
+			d.write(bytes)
 		}
-		stderr, err := c.GrpcClient.ReadBlob(ctx, dg)
-		if err != nil {
-			return err
-		}
-		oe.WriteErr(stderr)
 	}
 	return nil
 }
 
 func (c *Client) downloadResults(ctx context.Context, resPb *repb.ActionResult, execRoot string, downloadOutputs bool, oe outerr.OutErr) *command.Result {
 	if err := c.downloadOutErr(ctx, resPb, oe); err != nil {
-		command.NewLocalErrorResult(err)
+		return command.NewRemoteErrorResult(err)
 	}
 	if downloadOutputs {
 		if err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, execRoot); err != nil {
-			return command.NewLocalErrorResult(err)
+			return command.NewRemoteErrorResult(err)
 		}
 	}
 	// TODO(olaola): save output stats onto metadata here.
-	return command.NewFromExitCode((int)(resPb.ExitCode))
+	return command.NewResultFromExitCode((int)(resPb.ExitCode))
 }
 
 // Run executes a command remotely.
@@ -162,13 +150,13 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	if err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
-	acDgPb := acDg.ToProto()
+	acdgPb := acDg.ToProto()
 	var resPb *repb.ActionResult
 	acceptCached := opt.AcceptCached && !opt.DoNotCache
 	if acceptCached {
-		resPb, err = c.GrpcClient.CheckActionCache(ctx, acDgPb)
+		resPb, err = c.GrpcClient.CheckActionCache(ctx, acdgPb)
 		if err != nil {
-			return command.NewLocalErrorResult(err), meta
+			return command.NewRemoteErrorResult(err), meta
 		}
 	}
 	if resPb != nil {
@@ -191,7 +179,7 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	op, err := c.GrpcClient.ExecuteAndWait(ctx, &repb.ExecuteRequest{
 		InstanceName:    c.GrpcClient.InstanceName,
 		SkipCacheLookup: !acceptCached,
-		ActionDigest:    acDgPb,
+		ActionDigest:    acdgPb,
 	})
 	if err != nil {
 		return command.NewRemoteErrorResult(err), meta

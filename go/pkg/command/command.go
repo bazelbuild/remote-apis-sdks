@@ -290,13 +290,13 @@ type Result struct {
 	Err error
 }
 
-// LocalErrorExitCode is an exit code corresponding to an local error.
+// LocalErrorExitCode is an exit code corresponding to a local error.
 const LocalErrorExitCode = 35
 
 // TimeoutExitCode is an exit code corresponding to the command timing out remotely.
 const TimeoutExitCode = /*SIGNAL_BASE=*/ 128 + /*SIGALRM=*/ 14
 
-// RemoteErrorExitCode is an exit code corresponding to an remote server error.
+// RemoteErrorExitCode is an exit code corresponding to a remote server error.
 const RemoteErrorExitCode = 45
 
 // InterruptedExitCode is an exit code corresponding to an execution interruption by the user.
@@ -320,8 +320,8 @@ func NewRemoteErrorResult(err error) *Result {
 	}
 }
 
-// NewFromExitCode constructs a Result from a given command exit code.
-func NewFromExitCode(exitCode int) *Result {
+// NewResultFromExitCode constructs a Result from a given command exit code.
+func NewResultFromExitCode(exitCode int) *Result {
 	st := SuccessResultStatus
 	if exitCode != 0 {
 		st = NonZeroExitResultStatus
