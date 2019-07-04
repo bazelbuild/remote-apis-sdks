@@ -332,7 +332,7 @@ func TestBuildTreeFromInputs(t *testing.T) {
 			want: &client.FileTree{},
 		},
 		{
-			desc: "virtual inputs",
+			desc:  "virtual inputs",
 			input: nil,
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{

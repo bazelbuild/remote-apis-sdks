@@ -55,7 +55,7 @@ type VirtualInput struct {
 	Contents []byte
 
 	// Whether the file should be staged as executable.
-  IsExecutable bool
+	IsExecutable bool
 }
 
 // InputSpec represents all the required inputs to a remote command.
