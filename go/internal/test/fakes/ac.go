@@ -1,3 +1,4 @@
+// Package fakes contains configurable test fakes for an RE service.
 package fakes
 
 import (
