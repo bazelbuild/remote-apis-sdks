@@ -62,14 +62,14 @@ func (c *ActionCache) Get(d digest.Digest) *repb.ActionResult {
 	return res
 }
 
-// GetReads returns the number of times GetActionResult was called for a given action digest.
+// Reads returns the number of times GetActionResult was called for a given action digest.
 // These include both successful and unsuccessful reads.
-func (c *ActionCache) GetReads(d digest.Digest) int {
+func (c *ActionCache) Reads(d digest.Digest) int {
 	return c.reads[d]
 }
 
-// GetWrites returns the number of times UpdateActionResult was called for a given action digest.
-func (c *ActionCache) GetWrites(d digest.Digest) int {
+// Writes returns the number of times UpdateActionResult was called for a given action digest.
+func (c *ActionCache) Writes(d digest.Digest) int {
 	return c.writes[d]
 }
 

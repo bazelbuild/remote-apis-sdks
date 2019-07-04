@@ -405,7 +405,7 @@ func TestWriteBlobs(t *testing.T) {
 
 					for _, blob := range tc.present {
 						dg := digest.NewFromBlob(blob)
-						if fake.GetBlobWrites(dg) > 0 {
+						if fake.BlobWrites(dg) > 0 {
 							t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
 						}
 						// Remove this from the input map so we don't iterate it below.
@@ -507,11 +507,11 @@ func TestWriteBlobsBatching(t *testing.T) {
 					t.Errorf("blob with digest %s had diff on uploaded blob: wanted %v, got %v", d, blob, gotBlob)
 				}
 			}
-			if fake.GetBatchReqs() != tc.batchReqs {
-				t.Errorf("%d requests were made to BatchUpdateBlobs, wanted %d", fake.GetBatchReqs(), tc.batchReqs)
+			if fake.BatchReqs() != tc.batchReqs {
+				t.Errorf("%d requests were made to BatchUpdateBlobs, wanted %d", fake.BatchReqs(), tc.batchReqs)
 			}
-			if fake.GetWriteReqs() != tc.writeReqs {
-				t.Errorf("%d requests were made to Write, wanted %d", fake.GetWriteReqs(), tc.writeReqs)
+			if fake.WriteReqs() != tc.writeReqs {
+				t.Errorf("%d requests were made to Write, wanted %d", fake.WriteReqs(), tc.writeReqs)
 			}
 		})
 	}

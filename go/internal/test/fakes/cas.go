@@ -236,23 +236,23 @@ func (f *CAS) Get(d digest.Digest) ([]byte, bool) {
 	return res, ok
 }
 
-// GetBlobReads returns the total number of read requests for a particular digest.
-func (f *CAS) GetBlobReads(d digest.Digest) int {
+// BlobReads returns the total number of read requests for a particular digest.
+func (f *CAS) BlobReads(d digest.Digest) int {
 	return f.reads[d]
 }
 
-// GetBlobWrites returns the total number of update requests for a particular digest.
-func (f *CAS) GetBlobWrites(d digest.Digest) int {
+// BlobWrites returns the total number of update requests for a particular digest.
+func (f *CAS) BlobWrites(d digest.Digest) int {
 	return f.writes[d]
 }
 
-// GetBatchReqs returns the total number of BatchUpdateBlobs requests to this fake.
-func (f *CAS) GetBatchReqs() int {
+// BatchReqs returns the total number of BatchUpdateBlobs requests to this fake.
+func (f *CAS) BatchReqs() int {
 	return f.batchReqs
 }
 
-// GetWriteReqs returns the total number of Write requests to this fake.
-func (f *CAS) GetWriteReqs() int {
+// WriteReqs returns the total number of Write requests to this fake.
+func (f *CAS) WriteReqs() int {
 	return f.writeReqs
 }
 

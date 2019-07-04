@@ -52,8 +52,8 @@ func (s *Exec) Clear() {
 	s.numExecCalls = 0
 }
 
-// GetExecuteCalls returns the total number of Execute calls.
-func (s *Exec) GetExecuteCalls() int {
+// ExecuteCalls returns the total number of Execute calls.
+func (s *Exec) ExecuteCalls() int {
 	return s.numExecCalls
 }
 
