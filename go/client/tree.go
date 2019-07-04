@@ -96,6 +96,9 @@ func BuildTreeFromInputs(execRoot string, is *command.InputSpec) (*FileTree, err
 			return nil, e
 		}
 	}
+	for _, i := range is.VirtualInputs {
+		fs[i.Path] = i.Contents
+	}
 	return BuildTree(fs), nil
 }
 
