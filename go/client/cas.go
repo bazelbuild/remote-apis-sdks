@@ -25,7 +25,7 @@ import (
 // result of PackageTree. Unlike with the single-item functions, it first queries the CAS to
 // see which blobs are missing and only uploads those that are.
 func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
-	if c.casConcurrency <= 0 {
+	if cap(c.casUploaders) <= 0 {
 		return fmt.Errorf("CASConcurrency should be at least 1")
 	}
 	const (
@@ -54,46 +54,36 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	}
 
 	eg, eCtx := errgroup.WithContext(ctx)
-	todo := make(chan []digest.Digest, c.casConcurrency)
-	for i := 0; i < int(c.casConcurrency) && i < len(batches); i++ {
+	for i, batch := range batches {
+		i, batch := i, batch   // https://golang.org/doc/faq#closures_and_goroutines
+		c.casUploaders <- true // Reserve an uploader thread.
 		eg.Go(func() error {
-			for batch := range todo {
-				if len(batch) > 1 {
-					log.V(3).Infof("Uploading batch of %d blobs", len(batch))
-					bchMap := make(map[digest.Digest][]byte)
-					for _, dg := range batch {
-						bchMap[dg] = blobs[dg]
-					}
-					if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
-						return err
-					}
-				} else {
-					log.V(3).Infof("Uploading single blob with digest %s", batch[0])
-					if _, err := c.WriteBlob(eCtx, blobs[batch[0]]); err != nil {
-						return err
-					}
+			defer func() { <-c.casUploaders }()
+			if i%logInterval == 0 {
+				log.V(2).Infof("%d batches left to store", len(batches))
+			}
+			if len(batch) > 1 {
+				log.V(3).Infof("Uploading batch of %d blobs", len(batch))
+				bchMap := make(map[digest.Digest][]byte)
+				for _, dg := range batch {
+					bchMap[dg] = blobs[dg]
 				}
-				if eCtx.Err() != nil {
-					return eCtx.Err()
+				if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
+					return err
 				}
+			} else {
+				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
+				if _, err := c.WriteBlob(eCtx, blobs[batch[0]]); err != nil {
+					return err
+				}
+			}
+			if eCtx.Err() != nil {
+				return eCtx.Err()
 			}
 			return nil
 		})
 	}
 
-	for len(batches) > 0 {
-		select {
-		case todo <- batches[0]:
-			batches = batches[1:]
-			if len(batches)%logInterval == 0 {
-				log.V(2).Infof("%d batches left to store", len(batches))
-			}
-		case <-eCtx.Done():
-			close(todo)
-			return eCtx.Err()
-		}
-	}
-	close(todo)
 	log.V(2).Info("Waiting for remaining jobs")
 	err = eg.Wait()
 	log.V(2).Info("Done")
@@ -310,7 +300,7 @@ func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, o
 // MissingBlobs queries the CAS to determine if it has the listed blobs. It returns a list of the
 // missing blobs.
 func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest.Digest, error) {
-	if c.casConcurrency <= 0 {
+	if cap(c.casUploaders) <= 0 {
 		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
 	var batches [][]digest.Digest
@@ -336,48 +326,37 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 	log.V(3).Infof("%d query batches created", len(batches))
 
 	eg, eCtx := errgroup.WithContext(ctx)
-	todo := make(chan []digest.Digest, c.casConcurrency)
-	for i := 0; i < int(c.casConcurrency) && i < len(batches); i++ {
+	for i, batch := range batches {
+		i, batch := i, batch   // https://golang.org/doc/faq#closures_and_goroutines
+		c.casUploaders <- true // Reserve an uploader thread.
 		eg.Go(func() error {
-			for batch := range todo {
-				var batchPb []*repb.Digest
-				for _, dg := range batch {
-					batchPb = append(batchPb, dg.ToProto())
-				}
-				req := &repb.FindMissingBlobsRequest{
-					InstanceName: c.InstanceName,
-					BlobDigests:  batchPb,
-				}
-				resp, err := c.FindMissingBlobs(eCtx, req)
-				if err != nil {
-					return err
-				}
-				resultMutex.Lock()
-				for _, d := range resp.MissingBlobDigests {
-					missing = append(missing, digest.NewFromProtoUnvalidated(d))
-				}
-				resultMutex.Unlock()
-				if eCtx.Err() != nil {
-					return eCtx.Err()
-				}
+			defer func() { <-c.casUploaders }()
+			if i%logInterval == 0 {
+				log.V(3).Infof("%d missing batches left to query", len(batches))
+			}
+			var batchPb []*repb.Digest
+			for _, dg := range batch {
+				batchPb = append(batchPb, dg.ToProto())
+			}
+			req := &repb.FindMissingBlobsRequest{
+				InstanceName: c.InstanceName,
+				BlobDigests:  batchPb,
+			}
+			resp, err := c.FindMissingBlobs(eCtx, req)
+			if err != nil {
+				return err
+			}
+			resultMutex.Lock()
+			for _, d := range resp.MissingBlobDigests {
+				missing = append(missing, digest.NewFromProtoUnvalidated(d))
+			}
+			resultMutex.Unlock()
+			if eCtx.Err() != nil {
+				return eCtx.Err()
 			}
 			return nil
 		})
 	}
-
-	for len(batches) > 0 {
-		select {
-		case todo <- batches[0]:
-			batches = batches[1:]
-			if len(batches)%logInterval == 0 {
-				log.V(3).Infof("%d missing batches left to query", len(batches))
-			}
-		case <-eCtx.Done():
-			close(todo)
-			return nil, eCtx.Err()
-		}
-	}
-	close(todo)
 	log.V(3).Info("Waiting for remaining query jobs")
 	err := eg.Wait()
 	log.V(3).Info("Done")

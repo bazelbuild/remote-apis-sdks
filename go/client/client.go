@@ -61,12 +61,12 @@ type Client struct {
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
 	// This field is logically "protected" and is intended for use by extensions of Client.
-	Retrier        *Retrier
-	chunkMaxSize   ChunkMaxSize
-	useBatchOps    UseBatchOps
-	casConcurrency CASConcurrency
-	rpcTimeout     time.Duration
-	creds          credentials.PerRPCCredentials
+	Retrier      *Retrier
+	chunkMaxSize ChunkMaxSize
+	useBatchOps  UseBatchOps
+	casUploaders chan bool
+	rpcTimeout   time.Duration
+	creds        credentials.PerRPCCredentials
 	// Used to close the underlying connection.
 	io.Closer
 }
@@ -93,14 +93,13 @@ func (u UseBatchOps) Apply(c *Client) {
 	c.useBatchOps = u
 }
 
-// CASConcurrency is the number of simultaneous requests that will be issued for batch CAS upload an
-// download operations. It is a per-operation limit, not a global one, so N separate calls to CAS
-// methods can result in N * CASConcurrency requests in flight at once.
+// CASConcurrency is the number of simultaneous requests that will be issued for CAS upload and
+// download operations.
 type CASConcurrency int
 
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
-	c.casConcurrency = cy
+	c.casUploaders = make(chan bool, cy)
 }
 
 // PerRPCCreds sets per-call options that will be set on all RPCs to the underlying connection.
@@ -225,18 +224,18 @@ func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client
 	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
 	client := &Client{
-		InstanceName:   instanceName,
-		actionCache:    regrpc.NewActionCacheClient(conn),
-		byteStream:     bsgrpc.NewByteStreamClient(conn),
-		cas:            regrpc.NewContentAddressableStorageClient(conn),
-		execution:      regrpc.NewExecutionClient(conn),
-		capabilities:   regrpc.NewCapabilitiesClient(conn),
-		operations:     opgrpc.NewOperationsClient(conn),
-		rpcTimeout:     time.Minute,
-		Closer:         conn,
-		chunkMaxSize:   DefaultMaxWriteChunkSize,
-		useBatchOps:    true,
-		casConcurrency: 10,
+		InstanceName: instanceName,
+		actionCache:  regrpc.NewActionCacheClient(conn),
+		byteStream:   bsgrpc.NewByteStreamClient(conn),
+		cas:          regrpc.NewContentAddressableStorageClient(conn),
+		execution:    regrpc.NewExecutionClient(conn),
+		capabilities: regrpc.NewCapabilitiesClient(conn),
+		operations:   opgrpc.NewOperationsClient(conn),
+		rpcTimeout:   time.Minute,
+		Closer:       conn,
+		chunkMaxSize: DefaultMaxWriteChunkSize,
+		useBatchOps:  true,
+		casUploaders: make(chan bool, 50),
 	}
 	for _, o := range opts {
 		o.Apply(client)
