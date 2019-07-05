@@ -76,7 +76,7 @@ func main() {
 	case command.NonZeroExitResultStatus:
 		fmt.Fprintf(os.Stderr, "Remote action FAILED with exit code %d.\n", res.ExitCode)
 	case command.TimeoutResultStatus:
-		fmt.Fprintf(os.Stderr, "Remote action TIMED OUT after %d seconds.\n", cmd.Timeout.Seconds())
+		fmt.Fprintf(os.Stderr, "Remote action TIMED OUT after %0f seconds.\n", cmd.Timeout.Seconds())
 	case command.InterruptedResultStatus:
 		fmt.Fprintf(os.Stderr, "Remote execution was interrupted.\n")
 	case command.RemoteErrorResultStatus:
