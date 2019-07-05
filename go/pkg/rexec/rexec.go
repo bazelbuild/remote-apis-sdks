@@ -64,35 +64,28 @@ func buildCommand(cmd *command.Command) *repb.Command {
 	return cmdPb
 }
 
-func (c *Client) downloadOutErr(ctx context.Context, resPb *repb.ActionResult, oe outerr.OutErr) error {
-	downloads := []struct {
-		raw   []byte
-		dgPb  *repb.Digest
-		write func([]byte)
-	}{
-		{raw: resPb.StdoutRaw, dgPb: resPb.StdoutDigest, write: oe.WriteOut},
-		{raw: resPb.StderrRaw, dgPb: resPb.StderrDigest, write: oe.WriteErr},
-	}
-	for _, d := range downloads {
-		if d.raw != nil {
-			d.write(d.raw)
-		} else if d.dgPb != nil {
-			dg, err := digest.NewFromProto(d.dgPb)
-			if err != nil {
-				return err
-			}
-			bytes, err := c.GrpcClient.ReadBlob(ctx, dg)
-			if err != nil {
-				return err
-			}
-			d.write(bytes)
+func (c *Client) downloadStream(ctx context.Context, raw []byte, dgPb *repb.Digest, write func([]byte)) error {
+	if raw != nil {
+		write(raw)
+	} else if dgPb != nil {
+		dg, err := digest.NewFromProto(dgPb)
+		if err != nil {
+			return err
 		}
+		bytes, err := c.GrpcClient.ReadBlob(ctx, dg)
+		if err != nil {
+			return err
+		}
+		write(bytes)
 	}
 	return nil
 }
 
 func (c *Client) downloadResults(ctx context.Context, resPb *repb.ActionResult, execRoot string, downloadOutputs bool, oe outerr.OutErr) *command.Result {
-	if err := c.downloadOutErr(ctx, resPb, oe); err != nil {
+	if err := c.downloadStream(ctx, resPb.StdoutRaw, resPb.StdoutDigest, oe.WriteOut); err != nil {
+		return command.NewRemoteErrorResult(err)
+	}
+	if err := c.downloadStream(ctx, resPb.StderrRaw, resPb.StderrDigest, oe.WriteErr); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
 	if downloadOutputs {
