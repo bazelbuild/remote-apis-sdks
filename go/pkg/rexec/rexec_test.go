@@ -90,11 +90,11 @@ func TestExecCacheHit(t *testing.T) {
 	if diff := cmp.Diff(wantMeta, meta); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if !bytes.Equal(oe.GetStdout(), []byte("stdout")) {
-		t.Errorf("Run() gave stdout diff: want \"stdout\", got: %v", oe.GetStdout())
+	if !bytes.Equal(oe.Stdout(), []byte("stdout")) {
+		t.Errorf("Run() gave stdout diff: want \"stdout\", got: %v", oe.Stdout())
 	}
-	if !bytes.Equal(oe.GetStderr(), []byte("stderr")) {
-		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.GetStderr())
+	if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
+		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
 	}
 	path := filepath.Join(execRoot, "a/b/out")
 	contents, err := ioutil.ReadFile(path)
@@ -135,8 +135,8 @@ func TestExecNotAcceptCached(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if !bytes.Equal(oe.GetStdout(), []byte("not cached")) {
-		t.Errorf("Run() gave stdout diff: want \"not cached\", got: %v", oe.GetStdout())
+	if !bytes.Equal(oe.Stdout(), []byte("not cached")) {
+		t.Errorf("Run() gave stdout diff: want \"not cached\", got: %v", oe.Stdout())
 	}
 	// We did specify DoNotCache=false, so the new result should now be cached:
 	if diff := cmp.Diff(s.Exec.ActionResult, s.ActionCache.Get(acDg)); diff != "" {
@@ -188,8 +188,8 @@ func TestExecManualCacheMiss(t *testing.T) {
 			if diff := cmp.Diff(wantRes, res); diff != "" {
 				t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 			}
-			if !bytes.Equal(oe.GetStderr(), []byte("stderr")) {
-				t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.GetStderr())
+			if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
+				t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
 			}
 		})
 	}
@@ -224,8 +224,8 @@ func TestExecDoNotCache_NotAcceptCached(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if !bytes.Equal(oe.GetStdout(), []byte("not cached")) {
-		t.Errorf("Run() gave stdout diff: want \"not cached\", got: %v", oe.GetStdout())
+	if !bytes.Equal(oe.Stdout(), []byte("not cached")) {
+		t.Errorf("Run() gave stdout diff: want \"not cached\", got: %v", oe.Stdout())
 	}
 	// The action cache should still contain the same result, because we specified DoNotCache.
 	if !bytes.Equal(s.ActionCache.Get(acDg).StdoutRaw, []byte("cached")) {
@@ -250,8 +250,8 @@ func TestExecNonZeroExit(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if !bytes.Equal(oe.GetStderr(), []byte("error")) {
-		t.Errorf("Run() gave stderr diff: want \"error\", got: %v", oe.GetStderr())
+	if !bytes.Equal(oe.Stderr(), []byte("error")) {
+		t.Errorf("Run() gave stderr diff: want \"error\", got: %v", oe.Stderr())
 	}
 }
 
@@ -272,11 +272,11 @@ func TestExecRemoteFailure(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if len(oe.GetStdout()) != 0 {
-		t.Errorf("Run() gave unexpected stdout: %v", oe.GetStdout())
+	if len(oe.Stdout()) != 0 {
+		t.Errorf("Run() gave unexpected stdout: %v", oe.Stdout())
 	}
-	if len(oe.GetStderr()) != 0 {
-		t.Errorf("Run() gave unexpected stderr: %v", oe.GetStderr())
+	if len(oe.Stderr()) != 0 {
+		t.Errorf("Run() gave unexpected stderr: %v", oe.Stderr())
 	}
 }
 
@@ -306,11 +306,11 @@ func TestExecRemoteFailureDownloadsPartialResults(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if len(oe.GetStdout()) != 0 {
-		t.Errorf("Run() gave unexpected stdout: %v", oe.GetStdout())
+	if len(oe.Stdout()) != 0 {
+		t.Errorf("Run() gave unexpected stdout: %v", oe.Stdout())
 	}
-	if !bytes.Equal(oe.GetStderr(), []byte("stderr")) {
-		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.GetStderr())
+	if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
+		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
 	}
 	path := filepath.Join(execRoot, "a/b/out")
 	contents, err := ioutil.ReadFile(path)
@@ -348,11 +348,11 @@ func TestExecTimeoutDownloadsPartialResults(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if len(oe.GetStdout()) != 0 {
-		t.Errorf("Run() gave unexpected stdout: %v", oe.GetStdout())
+	if len(oe.Stdout()) != 0 {
+		t.Errorf("Run() gave unexpected stdout: %v", oe.Stdout())
 	}
-	if !bytes.Equal(oe.GetStderr(), []byte("stderr")) {
-		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.GetStderr())
+	if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
+		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
 	}
 	path := filepath.Join(execRoot, "a/b/out")
 	contents, err := ioutil.ReadFile(path)
@@ -425,11 +425,11 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 			if diff := cmp.Diff(tc.wantRes, res); diff != "" {
 				t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 			}
-			if len(oe.GetStdout()) != 0 {
-				t.Errorf("Run() gave unexpected stdout: %v", oe.GetStdout())
+			if len(oe.Stdout()) != 0 {
+				t.Errorf("Run() gave unexpected stdout: %v", oe.Stdout())
 			}
-			if !bytes.Equal(oe.GetStderr(), []byte("stderr")) {
-				t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.GetStderr())
+			if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
+				t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
 			}
 			path := filepath.Join(execRoot, "a/b/out")
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -480,11 +480,11 @@ func TestDoNotDownloadOutputs_cached(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if len(oe.GetStdout()) != 0 {
-		t.Errorf("Run() gave unexpected stdout: %v", oe.GetStdout())
+	if len(oe.Stdout()) != 0 {
+		t.Errorf("Run() gave unexpected stdout: %v", oe.Stdout())
 	}
-	if !bytes.Equal(oe.GetStderr(), []byte("stderr")) {
-		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.GetStderr())
+	if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
+		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
 	}
 	path := filepath.Join(execRoot, "a/b/out")
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
