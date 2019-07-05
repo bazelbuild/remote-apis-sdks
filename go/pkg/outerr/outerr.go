@@ -55,12 +55,12 @@ func NewRecordingOutErr() *RecordingOutErr {
 	return res
 }
 
-// GetStdout returns the full recorded stdout contents.
-func (s *RecordingOutErr) GetStdout() []byte {
+// Stdout returns the full recorded stdout contents.
+func (s *RecordingOutErr) Stdout() []byte {
 	return s.out.Bytes()
 }
 
-// GetStderr returns the full recorded stderr contents.
-func (s *RecordingOutErr) GetStderr() []byte {
+// Stderr returns the full recorded stderr contents.
+func (s *RecordingOutErr) Stderr() []byte {
 	return s.err.Bytes()
 }

@@ -13,13 +13,13 @@ func TestRecordingOutErr(t *testing.T) {
 	o := NewRecordingOutErr()
 	o.WriteOut([]byte("hello"))
 	o.WriteErr([]byte("world"))
-	gotOut := o.GetStdout()
+	gotOut := o.Stdout()
 	if !bytes.Equal(gotOut, []byte("hello")) {
-		t.Errorf("expected o.GetStdout() to return hello, got %v", gotOut)
+		t.Errorf("expected o.Stdout() to return hello, got %v", gotOut)
 	}
-	gotErr := o.GetStderr()
+	gotErr := o.Stderr()
 	if !bytes.Equal(gotErr, []byte("world")) {
-		t.Errorf("expected o.GetStderr() to return hello, got %v", gotErr)
+		t.Errorf("expected o.Stderr() to return hello, got %v", gotErr)
 	}
 }
 
