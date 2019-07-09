@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/internal/test/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"

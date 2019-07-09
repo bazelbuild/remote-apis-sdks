@@ -13,7 +13,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/internal/test/fakes"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"

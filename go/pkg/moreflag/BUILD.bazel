@@ -4,7 +4,7 @@ go_library(
     name = "go_default_library",
     srcs = ["moreflag.go"],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//visibility:public"],
 )
 
 go_test(
