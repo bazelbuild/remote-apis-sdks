@@ -25,8 +25,8 @@ go_test(
     embed = [":go_default_library"],
     deps = [
         "//go/digest:go_default_library",
-        "//go/internal/test/fakes:go_default_library",
         "//go/pkg/command:go_default_library",
+        "//go/pkg/fakes:go_default_library",
         "//go/pkg/outerr:go_default_library",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
         "@com_github_google_go_cmp//cmp:go_default_library",

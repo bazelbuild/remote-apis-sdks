@@ -8,7 +8,7 @@ go_library(
         "exec.go",
         "server.go",
     ],
-    importpath = "github.com/bazelbuild/remote-apis-sdks/go/internal/test/fakes",
+    importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes",
     visibility = ["//visibility:public"],
     deps = [
         "//go/client:go_default_library",
