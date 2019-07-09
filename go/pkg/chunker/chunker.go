@@ -2,6 +2,7 @@
 package chunker
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -23,13 +24,13 @@ var ErrEOF = errors.New("ErrEOF")
 // Chunker can be used to chunk an input into uploadable-size byte slices.
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
 type Chunker struct {
-	chunkSize        int
-	reader           io.ReadCloser
-	contents, buffer []byte
-	digest           digest.Digest
-	offset           int64
-	initialized      bool
-	path             string
+	chunkSize   int
+	reader      *bufio.Reader
+	contents    []byte
+	digest      digest.Digest
+	offset      int64
+	initialized bool
+	path        string
 }
 
 // NewFromBlob initializes a Chunker from the provided bytes buffer.
@@ -94,9 +95,6 @@ func (c *Chunker) ChunkSize() int {
 // Useful for upload retries.
 // TODO(olaola): implement Seek(offset) when we have resumable uploads.
 func (c *Chunker) Reset() {
-	if c.reader != nil && c.bytesLeft() > 0 {
-		c.reader.Close()
-	}
 	c.reader = nil
 	c.offset = 0
 	c.initialized = false
@@ -139,65 +137,47 @@ func (c *Chunker) Next() (*Chunk, error) {
 		return nil, ErrEOF
 	}
 	c.initialized = true
-	bytesLeft := c.bytesLeft()
 	if c.digest.Size == 0 {
 		return emptyChunk, nil
 	}
-	toRead := IOBufferSize
-	if int64(toRead) > bytesLeft {
-		toRead = int(bytesLeft)
-	}
-	if c.contents != nil {
-		c.buffer = c.contents
-	} else if c.reader == nil {
+	if c.contents == nil && c.reader == nil {
 		f, err := os.Open(c.path)
 		if err != nil {
 			return nil, err
 		}
-		c.reader = f
-		if c.buffer == nil {
-			c.buffer = make([]byte, toRead)
-			if c.offset == 0 && int64(toRead) == c.digest.Size {
-				c.contents = c.buffer
-			}
-		}
+		c.reader = bufio.NewReaderSize(f, IOBufferSize)
 	}
-	start := int(c.offset % int64(len(c.buffer)))
+	bytesLeft := c.bytesLeft()
 	bytesToSend := c.chunkSize
 	if bytesLeft < int64(bytesToSend) {
 		bytesToSend = int(bytesLeft)
 	}
 	var data []byte
-	leftover := bytesToSend
 	if c.reader != nil {
-		inBuffer := len(c.buffer) - start
-		// Copy any leftover data from the end that is less than a single chunk size.
-		if bytesToSend > inBuffer {
-			data = append(data, c.buffer[start:len(c.buffer)]...)
-			start = 0
-			leftover -= inBuffer
-			toRead -= inBuffer
+		if c.offset == 0 && c.digest.Size <= int64(IOBufferSize) {
+			data = make([]byte, c.digest.Size)
+			c.contents = data // Cache the full contents to avoid Reads on future Resets.
+		} else {
+			data = make([]byte, bytesToSend)
 		}
-		if start == 0 {  // Need to read more data into the buffer.
-			n, err := io.ReadAtLeast(c.reader, c.buffer, toRead)
-			if err != nil {
-				return nil, err
-			}
-			if n < toRead {
-				return nil, fmt.Errorf("only read %d bytes from %s, expected %d", n, c.path, toRead)
-			}
+		n, err := io.ReadFull(c.reader, data)
+		if err != nil {
+			return nil, err
 		}
+		if n < bytesToSend {
+			return nil, fmt.Errorf("only read %d bytes from %s, expected %d", n, c.path, bytesToSend)
+		}
+	} else {
+		// Contents are immutable so it's okay to return a slice.
+		data = c.contents[c.offset : int(c.offset)+bytesToSend]
 	}
 	res := &Chunk{
 		Offset: c.offset,
-		Data:   append(data, c.buffer[start:start+leftover]...),
+		Data:   data[:bytesToSend],
 	}
 	if c.offset == 0 {
 		res.Digest = &c.digest
 	}
 	c.offset += int64(bytesToSend)
-	if c.reader != nil && !c.HasNext() {
-		c.reader.Close()
-	}
 	return res, nil
 }
