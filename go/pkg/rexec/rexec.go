@@ -4,7 +4,6 @@ package rexec
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
@@ -37,31 +36,6 @@ func (c *NoopFileDigestCache) Get(path string) (digest.Digest, error) {
 type Client struct {
 	FileDigestCache FileDigestCache
 	GrpcClient      *rc.Client
-}
-
-func buildCommand(cmd *command.Command) *repb.Command {
-	cmdPb := &repb.Command{
-		Arguments:         cmd.Args,
-		OutputFiles:       make([]string, len(cmd.OutputFiles)),
-		OutputDirectories: make([]string, len(cmd.OutputDirs)),
-		WorkingDirectory:  cmd.WorkingDir,
-	}
-	copy(cmdPb.OutputFiles, cmd.OutputFiles)
-	copy(cmdPb.OutputDirectories, cmd.OutputDirs)
-	sort.Strings(cmdPb.OutputFiles)
-	sort.Strings(cmdPb.OutputDirectories)
-	for name, val := range cmd.InputSpec.EnvironmentVariables {
-		cmdPb.EnvironmentVariables = append(cmdPb.EnvironmentVariables, &repb.Command_EnvironmentVariable{Name: name, Value: val})
-	}
-	sort.Slice(cmdPb.EnvironmentVariables, func(i, j int) bool { return cmdPb.EnvironmentVariables[i].Name < cmdPb.EnvironmentVariables[j].Name })
-	if len(cmd.Platform) > 0 {
-		cmdPb.Platform = &repb.Platform{}
-		for name, val := range cmd.Platform {
-			cmdPb.Platform.Properties = append(cmdPb.Platform.Properties, &repb.Platform_Property{Name: name, Value: val})
-		}
-		sort.Slice(cmdPb.Platform.Properties, func(i, j int) bool { return cmdPb.Platform.Properties[i].Name < cmdPb.Platform.Properties[j].Name })
-	}
-	return cmdPb
 }
 
 func (c *Client) downloadStream(ctx context.Context, raw []byte, dgPb *repb.Digest, write func([]byte)) error {
@@ -105,7 +79,7 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	if err := cmd.Validate(); err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
-	cmdPb := buildCommand(cmd)
+	cmdPb := cmd.ToREProto()
 	log.V(2).Infof("%s> Command: \n%s\n", cmdID, proto.MarshalTextString(cmdPb))
 	cmdBlob, err := proto.Marshal(cmdPb)
 	if err != nil {
