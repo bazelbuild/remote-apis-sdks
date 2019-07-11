@@ -28,8 +28,9 @@ type Chunker struct {
 	reader    *bufio.Reader
 	// An optional cache of the full data. It will be present in these cases:
 	// * The Chunker was initialized from a []byte.
-	// * Chunker.FullData was called.
+	// * Chunker.FullData was called at least once.
 	// * Next() was called and the read was less than IOBufferSize.
+	// Once contents are initialized, they are immutable.
 	contents    []byte
 	digest      digest.Digest
 	offset      int64
@@ -140,7 +141,8 @@ func (c *Chunker) Next() (*Chunk, error) {
 	if c.digest.Size == 0 {
 		return &Chunk{}, nil
 	}
-	if c.contents == nil && c.reader == nil { // First read from a file.
+	// Empty contents means we don't have the full data cache, and must read it from a file.
+	if c.contents == nil && c.reader == nil { // Need to initialize the reader.
 		f, err := os.Open(c.path)
 		if err != nil {
 			return nil, err
@@ -153,11 +155,10 @@ func (c *Chunker) Next() (*Chunk, error) {
 		bytesToSend = int(bytesLeft)
 	}
 	var data []byte
-
-	if c.reader != nil {
+	if c.contents == nil { // Data is being read from a file rather than static contents cache.
 		if c.offset == 0 && c.digest.Size <= int64(IOBufferSize) {
 			data = make([]byte, c.digest.Size)
-			c.contents = data // Cache the full contents to avoid Reads on future Resets.
+			c.contents = data // Cache the contents to avoid Reads on future Resets.
 		} else {
 			data = make([]byte, bytesToSend)
 		}
@@ -169,7 +170,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 			return nil, fmt.Errorf("only read %d bytes from %s, expected %d", n, c.path, bytesToSend)
 		}
 	} else {
-		// Contents are immutable so it's okay to return a slice.
+		// Data is being read from the cache. Contents are immutable so it's okay to return a slice.
 		data = c.contents[c.offset : int(c.offset)+bytesToSend]
 	}
 	res := &Chunk{

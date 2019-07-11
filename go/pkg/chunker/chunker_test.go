@@ -82,13 +82,14 @@ var tests = []struct {
 	},
 }
 
-var bufferSizes = []int{4} //3, 4, 8, 100
+var bufferSizes = []int{3, 4, 8, 100}
 
 func TestChunkerFromBlob(t *testing.T) {
 	t.Parallel()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := NewFromBlob(tc.blob, tc.chunkSize)
+			var gotChunks []*Chunk
 			for _, wantChunk := range tc.wantChunks {
 				if !c.HasNext() {
 					t.Errorf("%s: c.HasNext() was false on blob %q , expecting next chunk %q", tc.name, tc.blob, string(wantChunk.Data))
@@ -97,9 +98,10 @@ func TestChunkerFromBlob(t *testing.T) {
 				if err != nil {
 					t.Errorf("%s: c.Next() gave error %v on blob %q , expecting next chunk %q", tc.name, err, tc.blob, string(wantChunk.Data))
 				}
-				if diff := cmp.Diff(wantChunk, got); diff != "" {
-					t.Errorf("%s: c.Next() gave result diff (-want +got):\n%s", tc.name, diff)
-				}
+				gotChunks = append(gotChunks, got)
+			}
+			if diff := cmp.Diff(tc.wantChunks, gotChunks); diff != "" {
+				t.Errorf("%s: Chunker gave result diff (-want +got):\n%s", tc.name, diff)
 			}
 		})
 	}
@@ -124,6 +126,7 @@ func TestChunkerFromFile(t *testing.T) {
 				dg := digest.NewFromBlob(tc.blob)
 				IOBufferSize = bufSize
 				c := NewFromFile(path, dg, tc.chunkSize)
+				var gotChunks []*Chunk
 				for _, wantChunk := range tc.wantChunks {
 					if !c.HasNext() {
 						t.Errorf("%s: c.HasNext() was false on blob %q buffer size %d, expecting next chunk %q", tc.name, tc.blob, bufSize, string(wantChunk.Data))
@@ -132,9 +135,10 @@ func TestChunkerFromFile(t *testing.T) {
 					if err != nil {
 						t.Errorf("%s: c.Next() gave error %v on blob %q buffer size %d, expecting next chunk %q", tc.name, err, tc.blob, bufSize, string(wantChunk.Data))
 					}
-					if diff := cmp.Diff(wantChunk, got); diff != "" {
-						t.Errorf("%s: c.Next() buffer size %d gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
-					}
+					gotChunks = append(gotChunks, got)
+				}
+				if diff := cmp.Diff(tc.wantChunks, gotChunks); diff != "" {
+					t.Errorf("%s: Chunker buffer size %d gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
 				}
 			}
 		})
@@ -147,6 +151,7 @@ func TestChunkerFromBlob_Reset(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			for reset := 1; reset < len(tc.wantChunks); reset++ {
 				c := NewFromBlob(tc.blob, tc.chunkSize)
+				var gotChunks []*Chunk
 				for i, wantChunk := range tc.wantChunks {
 					if !c.HasNext() {
 						t.Errorf("%s: c.HasNext() was false on blob %q , expecting next chunk %q", tc.name, tc.blob, string(wantChunk.Data))
@@ -155,14 +160,16 @@ func TestChunkerFromBlob_Reset(t *testing.T) {
 					if err != nil {
 						t.Errorf("%s: c.Next() gave error %v on blob %q , expecting next chunk %q", tc.name, err, tc.blob, string(wantChunk.Data))
 					}
-					if diff := cmp.Diff(wantChunk, got); diff != "" {
-						t.Errorf("%s: c.Next() gave result diff (-want +got):\n%s", tc.name, diff)
-					}
+					gotChunks = append(gotChunks, got)
 					if i == reset {
 						c.Reset()
 						break
 					}
 				}
+				if diff := cmp.Diff(tc.wantChunks[:len(gotChunks)], gotChunks); diff != "" {
+					t.Errorf("%s: Chunker gave result diff (-want +got):\n%s", tc.name, diff)
+				}
+				gotChunks = nil
 				if reset >= len(tc.wantChunks) {
 					continue
 				}
@@ -174,9 +181,10 @@ func TestChunkerFromBlob_Reset(t *testing.T) {
 					if err != nil {
 						t.Errorf("%s: c.Next() gave error %v on blob %q , expecting next chunk %q", tc.name, err, tc.blob, string(wantChunk.Data))
 					}
-					if diff := cmp.Diff(wantChunk, got); diff != "" {
-						t.Errorf("%s: c.Next() gave result diff (-want +got):\n%s", tc.name, diff)
-					}
+					gotChunks = append(gotChunks, got)
+				}
+				if diff := cmp.Diff(tc.wantChunks, gotChunks); diff != "" {
+					t.Errorf("%s: Chunker gave result diff (-want +got):\n%s", tc.name, diff)
 				}
 			}
 		})
@@ -203,6 +211,7 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 				IOBufferSize = bufSize
 				for reset := 1; reset < len(tc.wantChunks); reset++ {
 					c := NewFromFile(path, dg, tc.chunkSize)
+					var gotChunks []*Chunk
 					for i, wantChunk := range tc.wantChunks {
 						if !c.HasNext() {
 							t.Errorf("%s: c.HasNext() was false on blob %q buffer size %d, expecting next chunk %q", tc.name, tc.blob, bufSize, string(wantChunk.Data))
@@ -211,14 +220,16 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 						if err != nil {
 							t.Errorf("%s: c.Next() gave error %v on blob %q buffer size %d, expecting next chunk %q", tc.name, err, tc.blob, bufSize, string(wantChunk.Data))
 						}
-						if diff := cmp.Diff(wantChunk, got); diff != "" {
-							t.Errorf("%s: c.Next() buffer size %d gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
-						}
+						gotChunks = append(gotChunks, got)
 						if i == reset {
 							c.Reset()
 							break
 						}
 					}
+					if diff := cmp.Diff(tc.wantChunks[:len(gotChunks)], gotChunks); diff != "" {
+						t.Errorf("%s: Chunker buffer size %s gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
+					}
+					gotChunks = nil
 					if reset >= len(tc.wantChunks) {
 						continue
 					}
@@ -230,9 +241,10 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 						if err != nil {
 							t.Errorf("%s: c.Next() gave error %v on blob %q buffer size %d, expecting next chunk %q", tc.name, err, tc.blob, bufSize, string(wantChunk.Data))
 						}
-						if diff := cmp.Diff(wantChunk, got); diff != "" {
-							t.Errorf("%s: c.Next() buffer size %d gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
-						}
+						gotChunks = append(gotChunks, got)
+					}
+					if diff := cmp.Diff(tc.wantChunks, gotChunks); diff != "" {
+						t.Errorf("%s: Chunker buffer size %s gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
 					}
 				}
 			}
