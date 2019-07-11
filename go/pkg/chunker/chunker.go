@@ -43,8 +43,10 @@ func NewFromBlob(blob []byte, chunkSize int) *Chunker {
 	if chunkSize < 1 {
 		chunkSize = DefaultChunkSize
 	}
+	contents := make([]byte, len(blob))
+	copy(contents, blob)
 	return &Chunker{
-		contents:  blob,
+		contents:  contents,
 		chunkSize: chunkSize,
 		digest:    digest.NewFromBlob(blob),
 	}
