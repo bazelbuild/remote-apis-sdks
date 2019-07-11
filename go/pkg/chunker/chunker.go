@@ -69,16 +69,16 @@ func NewFromFile(path string, dg digest.Digest, chunkSize int) *Chunker {
 
 // String returns an identifiable representation of the Chunker.
 func (c *Chunker) String() string {
-	size := fmt.Sprintf("<%d bytes>", c.Size())
+	size := fmt.Sprintf("<%d bytes>", c.digest.Size)
 	if c.path == "" {
 		return size
 	}
 	return fmt.Sprintf("%s: %s", size, c.path)
 }
 
-// Size returns the size in bytes of the full data of this chunker.
-func (c *Chunker) Size() int64 {
-	return c.digest.Size
+// Digest returns the digest of the full data of this chunker.
+func (c *Chunker) Digest() digest.Digest {
+	return c.digest
 }
 
 // Offset returns the current Chunker offset.
