@@ -123,15 +123,11 @@ func (c *Chunker) HasNext() bool {
 	return !c.initialized || c.bytesLeft() > 0
 }
 
-// Chunk is a piece of a byte[] blob suitable for being uploaded. The first Chunk returned by a
-// Chunker will contain the Digest of the whole data. In all other cases, the Digest will be nil.
+// Chunk is a piece of a byte[] blob suitable for being uploaded.
 type Chunk struct {
-	Digest *digest.Digest
 	Offset int64
 	Data   []byte
 }
-
-var emptyChunk = &Chunk{Digest: &digest.Empty}
 
 // Next returns the next chunk of data or error. ErrEOF is returned if and only if HasNext is false.
 // Chunk.Data will be empty if and only if the full underlying data is empty (in which case it will
@@ -142,7 +138,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 	}
 	c.initialized = true
 	if c.digest.Size == 0 {
-		return emptyChunk, nil
+		return &Chunk{}, nil
 	}
 	if c.contents == nil && c.reader == nil { // First read from a file.
 		f, err := os.Open(c.path)
@@ -180,9 +176,6 @@ func (c *Chunker) Next() (*Chunk, error) {
 		Offset: c.offset,
 		// Reading only up to bytesToSend in case contents contains the entire data.
 		Data: data[:bytesToSend],
-	}
-	if c.offset == 0 {
-		res.Digest = &c.digest
 	}
 	c.offset += int64(bytesToSend)
 	return res, nil
