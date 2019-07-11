@@ -21,8 +21,8 @@ import (
 )
 
 func TestExecCacheHit(t *testing.T) {
-	e := fakes.NewTestEnv(t)
-	defer e.Cleanup()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
 	cmd := &command.Command{
 		Args:        []string{"tool"},
 		ExecRoot:    e.ExecRoot,
@@ -63,8 +63,8 @@ func TestExecCacheHit(t *testing.T) {
 
 // TestExecNotAcceptCached should skip both client-side and server side action cache lookups.
 func TestExecNotAcceptCached(t *testing.T) {
-	e := fakes.NewTestEnv(t)
-	defer e.Cleanup()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
 	cmd := &command.Command{Args: []string{"tool"}, ExecRoot: e.ExecRoot}
 	opt := &command.ExecutionOptions{AcceptCached: false}
 	wantRes := &command.Result{Status: command.SuccessResultStatus}
@@ -106,8 +106,8 @@ func TestExecManualCacheMiss(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			e := fakes.NewTestEnv(t)
-			defer e.Cleanup()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
 			cmd := &command.Command{Args: []string{"tool"}, ExecRoot: e.ExecRoot}
 			opt := &command.ExecutionOptions{AcceptCached: true, DownloadOutputs: true}
 			wantRes := &command.Result{Status: tc.want}
@@ -127,8 +127,8 @@ func TestExecManualCacheMiss(t *testing.T) {
 }
 
 func TestExecDoNotCache_NotAcceptCached(t *testing.T) {
-	e := fakes.NewTestEnv(t)
-	defer e.Cleanup()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
 	cmd := &command.Command{Args: []string{"tool"}, ExecRoot: e.ExecRoot}
 	// DoNotCache true implies in particular that we also skip action cache lookups, local or remote.
 	opt := &command.ExecutionOptions{DoNotCache: true}
@@ -171,8 +171,8 @@ func TestExecRemoteFailureDownloadsPartialResults(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			e := fakes.NewTestEnv(t)
-			defer e.Cleanup()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
 			cmd := &command.Command{
 				Args:        []string{"tool"},
 				OutputFiles: []string{"a/b/out"},
@@ -244,8 +244,8 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			e := fakes.NewTestEnv(t)
-			defer e.Cleanup()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
 			cmd := &command.Command{
 				Args:        []string{"tool"},
 				OutputFiles: []string{"a/b/out"},

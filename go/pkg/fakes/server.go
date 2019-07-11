@@ -76,13 +76,14 @@ type TestEnv struct {
 	Client     *rexec.Client
 	Server     *Server
 	ExecRoot   string
-	GrpcClient *rc.Client
 	t          *testing.T
 }
 
 // NewTestEnv initializes a TestEnv containing a fake server, a client connected to it,
 // and a temporary directory used as execution root for inputs and outputs.
-func NewTestEnv(t *testing.T) *TestEnv {
+// It returns the new env and a cleanup function that should be called in the end of the test.
+func NewTestEnv(t *testing.T) (*TestEnv, func()) {
+	t.Helper()
 	// Set up temp directory.
 	execRoot, err := ioutil.TempDir("", strings.ReplaceAll(t.Name(), string(filepath.Separator), "_"))
 	if err != nil {
@@ -101,16 +102,63 @@ func NewTestEnv(t *testing.T) *TestEnv {
 		Client:     &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient},
 		Server:     s,
 		ExecRoot:   execRoot,
-		GrpcClient: grpcClient,
 		t:          t,
+	}, func(){
+		grpcClient.Close()
+		s.Stop()
+		os.RemoveAll(execRoot)
 	}
 }
 
-// Cleanup shuts down the server and client and removes the temporary directory.
-func (e *TestEnv) Cleanup() {
-	e.GrpcClient.Close()
-	e.Server.Stop()
-	os.RemoveAll(e.ExecRoot)
+// Set sets up the fake to return the given result on the given command execution.
+// It is not possible to make the fake result in a LocalErrorResultStatus or an InterruptedResultStatus.
+func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...option) (cmdDg, acDg digest.Digest) {
+	e.t.Helper()
+	cmd.FillDefaultFieldValues()
+	ft, err := rc.BuildTreeFromInputs(cmd.ExecRoot, cmd.InputSpec)
+	if err != nil {
+		e.t.Fatalf("error building input tree in fake setup: %v", err)
+		return digest.Empty, digest.Empty
+	}
+	root, _, err := rc.PackageTree(ft)
+	if err != nil {
+		e.t.Fatalf("error building input tree in fake setup: %v", err)
+		return digest.Empty, digest.Empty
+	}
+
+	cmdPb := cmd.ToREProto()
+	cmdDg = digest.TestNewFromMessage(cmdPb)
+	ac := &repb.Action{
+		CommandDigest:   cmdDg.ToProto(),
+		InputRootDigest: root.ToProto(),
+		DoNotCache:      opt.DoNotCache,
+	}
+	if cmd.Timeout > 0 {
+		ac.Timeout = ptypes.DurationProto(cmd.Timeout)
+	}
+	ar := &repb.ActionResult{
+		ExitCode: int32(res.ExitCode),
+	}
+	acDg = digest.TestNewFromMessage(ac)
+	for _, o := range opts {
+		o.Apply(ar, e.Server)
+	}
+	e.Server.Exec.ActionResult = ar
+	switch res.Status {
+	case command.TimeoutResultStatus:
+		e.Server.Exec.Status = status.New(codes.DeadlineExceeded, "timeout")
+	case command.RemoteErrorResultStatus:
+		st, ok := status.FromError(res.Err)
+		if !ok {
+			st = status.New(codes.Internal, "remote error")
+		}
+		e.Server.Exec.Status = st
+	case command.CacheHitResultStatus:
+		if !e.Server.Exec.Cached { // Assume the user means in this case the actual ActionCache should miss.
+			e.Server.ActionCache.Put(acDg, ar)
+		}
+	}
+	return cmdDg, acDg
 }
 
 type option interface {
@@ -176,54 +224,4 @@ type ExecutionCacheHit bool
 // Apply on true will cause the ActionResult to be returned as a cache hit during fake execution.
 func (c ExecutionCacheHit) Apply(ac *repb.ActionResult, s *Server) {
 	s.Exec.Cached = bool(c)
-}
-
-// Set sets up the fake to return the given result on the given command execution.
-// It is not possible to make the fake result in a LocalErrorResultStatus or an InterruptedResultStatus.
-func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...option) (cmdDg, acDg digest.Digest) {
-	cmd.FillDefaultFieldValues()
-	ft, err := rc.BuildTreeFromInputs(cmd.ExecRoot, cmd.InputSpec)
-	if err != nil {
-		e.t.Fatalf("error building input tree in fake setup: %v", err)
-		return digest.Empty, digest.Empty
-	}
-	root, _, err := rc.PackageTree(ft)
-	if err != nil {
-		e.t.Fatalf("error building input tree in fake setup: %v", err)
-		return digest.Empty, digest.Empty
-	}
-
-	cmdPb := cmd.ToREProto()
-	cmdDg = digest.TestNewFromMessage(cmdPb)
-	ac := &repb.Action{
-		CommandDigest:   cmdDg.ToProto(),
-		InputRootDigest: root.ToProto(),
-		DoNotCache:      opt.DoNotCache,
-	}
-	if cmd.Timeout > 0 {
-		ac.Timeout = ptypes.DurationProto(cmd.Timeout)
-	}
-	ar := &repb.ActionResult{
-		ExitCode: int32(res.ExitCode),
-	}
-	acDg = digest.TestNewFromMessage(ac)
-	for _, o := range opts {
-		o.Apply(ar, e.Server)
-	}
-	e.Server.Exec.ActionResult = ar
-	switch res.Status {
-	case command.TimeoutResultStatus:
-		e.Server.Exec.Status = status.New(codes.DeadlineExceeded, "timeout")
-	case command.RemoteErrorResultStatus:
-		st, ok := status.FromError(res.Err)
-		if !ok {
-			st = status.New(codes.Internal, "remote error")
-		}
-		e.Server.Exec.Status = st
-	case command.CacheHitResultStatus:
-		if !e.Server.Exec.Cached { // Assume the user means in this case the actual ActionCache should miss.
-			e.Server.ActionCache.Put(acDg, ar)
-		}
-	}
-	return cmdDg, acDg
 }
