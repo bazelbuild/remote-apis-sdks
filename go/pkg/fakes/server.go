@@ -76,6 +76,7 @@ type TestEnv struct {
 	Client     *rexec.Client
 	Server     *Server
 	ExecRoot   string
+	GrpcClient *rc.Client
 	t          *testing.T
 }
 
@@ -99,6 +100,7 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
 	return &TestEnv{
+		GrpcClient: grpcClient,
 		Client:     &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient},
 		Server:     s,
 		ExecRoot:   execRoot,

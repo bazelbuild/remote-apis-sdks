@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
-	log "github.com/golang/glog"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
 	"golang.org/x/sync/errgroup"
@@ -19,12 +19,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	log "github.com/golang/glog"
 )
 
-// WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
-// result of PackageTree. Unlike with the single-item functions, it first queries the CAS to
-// see which blobs are missing and only uploads those that are.
-func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
+// Upload stores a number of uploadable items.
+// It first queries the CAS to see which items are missing and only uploads those that are.
+func (c *Client) Upload(ctx context.Context, data ...*chunker.Chunker) error {
 	if cap(c.casUploaders) <= 0 {
 		return fmt.Errorf("CASConcurrency should be at least 1")
 	}
@@ -33,15 +33,20 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	)
 
 	var dgs []digest.Digest
-	for d := range blobs {
-		dgs = append(dgs, d)
+	chunkers := make(map[digest.Digest]*chunker.Chunker)
+	for _, c := range data {
+		dg := c.Digest()
+		if _, ok := chunkers[dg]; !ok {
+			dgs = append(dgs, dg)
+			chunkers[dg] = c
+		}
 	}
 
 	missing, err := c.MissingBlobs(ctx, dgs)
 	if err != nil {
 		return err
 	}
-	log.V(2).Infof("%d blobs to store", len(missing))
+	log.V(2).Infof("%d items to store", len(missing))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
 		batches = makeBatches(missing)
@@ -66,14 +71,20 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 				log.V(3).Infof("Uploading batch of %d blobs", len(batch))
 				bchMap := make(map[digest.Digest][]byte)
 				for _, dg := range batch {
-					bchMap[dg] = blobs[dg]
+					data, err := chunkers[dg].FullData()
+					if err != nil {
+						return err
+					}
+					bchMap[dg] = data
 				}
 				if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
 					return err
 				}
 			} else {
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
-				if _, err := c.WriteBlob(eCtx, blobs[batch[0]]); err != nil {
+				ch := chunkers[batch[0]]
+				dg := ch.Digest()
+				if err := c.WriteChunked(eCtx, c.ResourceNameWrite(dg.Hash, dg.Size), ch); err != nil {
 					return err
 				}
 			}
@@ -90,6 +101,21 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	return err
 }
 
+// WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
+// result of PackageTree. Unlike with the single-item functions, it first queries the CAS to
+// see which blobs are missing and only uploads those that are.
+// TODO(olaola): rethink the API of this layer:
+// * Do we want to allow []byte uploads, or require the user to construct Chunkers?
+// * How to consistently distinguish in the API between should we use GetMissing or not?
+// * Should BatchWrite be a public method at all?
+func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
+	var chunkers []*chunker.Chunker
+	for _, blob := range blobs {
+		chunkers = append(chunkers, chunker.NewFromBlob(blob, int(c.chunkMaxSize)))
+	}
+	return c.Upload(ctx, chunkers...)
+}
+
 // WriteProto marshals and writes a proto.
 func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Digest, error) {
 	bytes, err := proto.Marshal(msg)
@@ -101,12 +127,9 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 
 // WriteBlob uploads a blob to the CAS.
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
-	dg := digest.NewFromBlob(blob)
-	name := c.ResourceNameWrite(dg.Hash, dg.Size)
-	if err := c.WriteBytes(ctx, name, blob); err != nil {
-		return dg, err
-	}
-	return dg, nil
+	ch := chunker.NewFromBlob(blob, int(c.chunkMaxSize))
+	dg := ch.Digest()
+	return dg, c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
 }
 
 const (
