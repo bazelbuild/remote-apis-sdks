@@ -11,6 +11,8 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/pborman/uuid"
+
+	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
 // InputType can be specified to narrow down the matching for a given input path.
@@ -365,4 +367,30 @@ type Metadata struct {
 	// to detect changes in the action between builds.
 	ActionDigest digest.Digest
 	// TODO(olaola): Add a lot of other fields.
+}
+
+// ToREProto converts the Command to an RE API Command proto.
+func (c *Command) ToREProto() *repb.Command {
+	cmdPb := &repb.Command{
+		Arguments:         c.Args,
+		OutputFiles:       make([]string, len(c.OutputFiles)),
+		OutputDirectories: make([]string, len(c.OutputDirs)),
+		WorkingDirectory:  c.WorkingDir,
+	}
+	copy(cmdPb.OutputFiles, c.OutputFiles)
+	copy(cmdPb.OutputDirectories, c.OutputDirs)
+	sort.Strings(cmdPb.OutputFiles)
+	sort.Strings(cmdPb.OutputDirectories)
+	for name, val := range c.InputSpec.EnvironmentVariables {
+		cmdPb.EnvironmentVariables = append(cmdPb.EnvironmentVariables, &repb.Command_EnvironmentVariable{Name: name, Value: val})
+	}
+	sort.Slice(cmdPb.EnvironmentVariables, func(i, j int) bool { return cmdPb.EnvironmentVariables[i].Name < cmdPb.EnvironmentVariables[j].Name })
+	if len(c.Platform) > 0 {
+		cmdPb.Platform = &repb.Platform{}
+		for name, val := range c.Platform {
+			cmdPb.Platform.Properties = append(cmdPb.Platform.Properties, &repb.Platform_Property{Name: name, Value: val})
+		}
+		sort.Slice(cmdPb.Platform.Properties, func(i, j int) bool { return cmdPb.Platform.Properties[i].Name < cmdPb.Platform.Properties[j].Name })
+	}
+	return cmdPb
 }
