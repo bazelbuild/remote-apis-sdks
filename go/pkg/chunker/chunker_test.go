@@ -227,7 +227,7 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 						}
 					}
 					if diff := cmp.Diff(tc.wantChunks[:len(gotChunks)], gotChunks); diff != "" {
-						t.Errorf("%s: Chunker buffer size %s gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
+						t.Errorf("%s: Chunker buffer size %d gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
 					}
 					gotChunks = nil
 					if reset >= len(tc.wantChunks) {
@@ -244,7 +244,7 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 						gotChunks = append(gotChunks, got)
 					}
 					if diff := cmp.Diff(tc.wantChunks, gotChunks); diff != "" {
-						t.Errorf("%s: Chunker buffer size %s gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
+						t.Errorf("%s: Chunker buffer size %d gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
 					}
 				}
 			}
