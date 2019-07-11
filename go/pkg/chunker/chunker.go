@@ -24,8 +24,12 @@ var ErrEOF = errors.New("ErrEOF")
 // Chunker can be used to chunk an input into uploadable-size byte slices.
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
 type Chunker struct {
-	chunkSize   int
-	reader      *bufio.Reader
+	chunkSize int
+	reader    *bufio.Reader
+	// An optional cache of the full data. It will be present in these cases:
+	// * The Chunker was initialized from a []byte.
+	// * Chunker.FullData was called.
+	// * Next() was called and the read was less than IOBufferSize.
 	contents    []byte
 	digest      digest.Digest
 	offset      int64
@@ -140,7 +144,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 	if c.digest.Size == 0 {
 		return emptyChunk, nil
 	}
-	if c.contents == nil && c.reader == nil {
+	if c.contents == nil && c.reader == nil { // First read from a file.
 		f, err := os.Open(c.path)
 		if err != nil {
 			return nil, err
@@ -153,6 +157,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 		bytesToSend = int(bytesLeft)
 	}
 	var data []byte
+
 	if c.reader != nil {
 		if c.offset == 0 && c.digest.Size <= int64(IOBufferSize) {
 			data = make([]byte, c.digest.Size)
@@ -173,7 +178,8 @@ func (c *Chunker) Next() (*Chunk, error) {
 	}
 	res := &Chunk{
 		Offset: c.offset,
-		Data:   data[:bytesToSend],
+		// Reading only up to bytesToSend in case contents contains the entire data.
+		Data: data[:bytesToSend],
 	}
 	if c.offset == 0 {
 		res.Digest = &c.digest
