@@ -9,6 +9,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 
@@ -360,7 +361,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			}
 
 			gotBlobs := make(map[digest.Digest][]byte)
-			gotRootDg, inputs, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize)
+			gotRootDg, inputs, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, &filemetadata.NoopFileMetadataCache{})
 			if err != nil {
 				t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 			}
@@ -434,7 +435,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
 		t.Run(tc.desc, func(t *testing.T) {
-			if _, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize); err == nil {
+			if _, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, &filemetadata.NoopFileMetadataCache{}); err == nil {
 				t.Errorf("ComputeMerkleTree(%v) succeeded, want error", tc.spec)
 			}
 		})
