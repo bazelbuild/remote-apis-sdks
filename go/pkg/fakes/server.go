@@ -33,10 +33,10 @@ type Server struct {
 }
 
 // NewServer creates a server that is ready to accept requests.
-func NewServer() (s *Server, err error) {
+func NewServer(t *testing.T) (s *Server, err error) {
 	cas := NewCAS()
 	ac := NewActionCache()
-	s = &Server{Exec: NewExec(ac, cas), CAS: cas, ActionCache: ac}
+	s = &Server{Exec: NewExec(t, ac, cas), CAS: cas, ActionCache: ac}
 	s.listener, err = net.Listen("tcp", ":0")
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 		t.Fatalf("failed to make temp dir: %v", err)
 	}
 	// Set up the fake.
-	s, err := NewServer()
+	s, err := NewServer(t)
 	if err != nil {
 		t.Fatalf("Error starting fake server: %v", err)
 	}
@@ -99,15 +99,15 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
 	return &TestEnv{
-		Client:     &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient},
-		Server:     s,
-		ExecRoot:   execRoot,
-		t:          t,
-	}, func(){
-		grpcClient.Close()
-		s.Stop()
-		os.RemoveAll(execRoot)
-	}
+			Client:     &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient},
+			Server:     s,
+			ExecRoot:   execRoot,
+			t:          t,
+		}, func() {
+			grpcClient.Close()
+			s.Stop()
+			os.RemoveAll(execRoot)
+		}
 }
 
 // Set sets up the fake to return the given result on the given command execution.
@@ -143,6 +143,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 	for _, o := range opts {
 		o.Apply(ar, e.Server)
 	}
+	e.Server.Exec.adg = acDg
 	e.Server.Exec.ActionResult = ar
 	switch res.Status {
 	case command.TimeoutResultStatus:
