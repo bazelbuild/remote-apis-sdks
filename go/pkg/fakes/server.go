@@ -74,7 +74,6 @@ func (s *Server) NewTestClient(ctx context.Context) (*rc.Client, error) {
 // TestEnv is a wrapper for convenient integration tests of remote execution.
 type TestEnv struct {
 	Client     *rexec.Client
-	GrpcClient *rc.Client
 	Server     *Server
 	ExecRoot   string
 	t          *testing.T
@@ -101,7 +100,6 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 	}
 	return &TestEnv{
 			Client:     &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient},
-			GrpcClient: grpcClient,
 			Server:     s,
 			ExecRoot:   execRoot,
 			t:          t,
