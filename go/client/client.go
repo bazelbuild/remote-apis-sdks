@@ -58,8 +58,9 @@ type Client struct {
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
 	// This field is logically "protected" and is intended for use by extensions of Client.
-	Retrier      *Retrier
-	chunkMaxSize ChunkMaxSize
+	Retrier *Retrier
+	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
+	ChunkMaxSize ChunkMaxSize
 	useBatchOps  UseBatchOps
 	casUploaders chan bool
 	rpcTimeout   time.Duration
@@ -78,7 +79,7 @@ type ChunkMaxSize int
 
 // Apply sets the client's maximal chunk size s.
 func (s ChunkMaxSize) Apply(c *Client) {
-	c.chunkMaxSize = s
+	c.ChunkMaxSize = s
 }
 
 // UseBatchOps can be set to true to use batch CAS operations when uploading multiple blobs, or
@@ -233,7 +234,7 @@ func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client
 		operations:   opgrpc.NewOperationsClient(conn),
 		rpcTimeout:   time.Minute,
 		Closer:       conn,
-		chunkMaxSize: chunker.DefaultChunkSize,
+		ChunkMaxSize: chunker.DefaultChunkSize,
 		useBatchOps:  true,
 		casUploaders: make(chan bool, DefaultCASConcurrency),
 	}
