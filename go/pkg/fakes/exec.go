@@ -2,6 +2,7 @@ package fakes
 
 import (
 	"fmt"
+	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/golang/protobuf/proto"
@@ -34,11 +35,15 @@ type Exec struct {
 	OutputBlobs [][]byte
 	// Number of Execute calls.
 	numExecCalls int
+	// Used for errors.
+	t *testing.T
+	// The digest of the fake action.
+	adg digest.Digest
 }
 
 // NewExec returns a new empty Exec.
-func NewExec(ac *ActionCache, cas *CAS) *Exec {
-	c := &Exec{ac: ac, cas: cas}
+func NewExec(t *testing.T, ac *ActionCache, cas *CAS) *Exec {
+	c := &Exec{t: t, ac: ac, cas: cas}
 	c.Clear()
 	return c
 }
@@ -107,6 +112,10 @@ func (s *Exec) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_Execute
 	dg, err := digest.NewFromProto(req.ActionDigest)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, fmt.Sprintf("invalid digest received: %v", req.ActionDigest))
+	}
+	if dg != s.adg {
+		s.t.Errorf("unexpected action digest received by fake: expected %v, got %v", s.adg, dg)
+		return status.Error(codes.InvalidArgument, fmt.Sprintf("unexpected digest received: %v", req.ActionDigest))
 	}
 	if op, err := s.fakeExecution(dg, req.SkipCacheLookup); err != nil {
 		return err

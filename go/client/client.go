@@ -94,6 +94,9 @@ func (u UseBatchOps) Apply(c *Client) {
 // download operations.
 type CASConcurrency int
 
+// DefaultCASConcurrency is the default maximum number of concurrent upload and download operations.
+const DefaultCASConcurrency = 50
+
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casUploaders = make(chan bool, cy)
@@ -232,7 +235,7 @@ func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client
 		Closer:       conn,
 		chunkMaxSize: chunker.DefaultChunkSize,
 		useBatchOps:  true,
-		casUploaders: make(chan bool, 50),
+		casUploaders: make(chan bool, DefaultCASConcurrency),
 	}
 	for _, o := range opts {
 		o.Apply(client)

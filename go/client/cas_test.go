@@ -322,6 +322,7 @@ func TestUpload(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 	fake := e.Server.CAS
+	c := e.Client.GrpcClient
 
 	var thousandBlobs [][]byte
 	var halfThousandBlobs [][]byte
@@ -371,7 +372,7 @@ func TestUpload(t *testing.T) {
 
 	for _, ub := range []client.UseBatchOps{false, true} {
 		t.Run(fmt.Sprintf("UsingBatch:%t", ub), func(t *testing.T) {
-			ub.Apply(e.GrpcClient)
+			ub.Apply(c)
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
 					fake.Clear()
@@ -385,7 +386,7 @@ func TestUpload(t *testing.T) {
 						input = append(input, chunker.NewFromBlob(blob, 20))
 					}
 
-					err := e.GrpcClient.Upload(ctx, input...)
+					err := c.Upload(ctx, input...)
 					if err != nil {
 						t.Fatalf("c.Upload(ctx, input) gave error %v, expected nil", err)
 					}
@@ -407,6 +408,9 @@ func TestUpload(t *testing.T) {
 						} else if !bytes.Equal(blob, gotBlob) {
 							t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
 						}
+					}
+					if fake.MaxConcurrency() > client.DefaultCASConcurrency {
+						t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), client.DefaultCASConcurrency)
 					}
 				})
 			}
