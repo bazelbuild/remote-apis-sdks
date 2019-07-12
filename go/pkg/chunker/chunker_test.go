@@ -9,6 +9,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 var tests = []struct {
@@ -140,6 +141,22 @@ func TestChunkerFromFile(t *testing.T) {
 				if diff := cmp.Diff(tc.wantChunks, gotChunks); diff != "" {
 					t.Errorf("%s: Chunker buffer size %d gave result diff (-want +got):\n%s", tc.name, bufSize, diff)
 				}
+			}
+		})
+	}
+}
+
+func TestChunkerFullData(t *testing.T) {
+	t.Parallel()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewFromBlob(tc.blob, tc.chunkSize)
+			gotBlob, err := c.FullData()
+			if err != nil {
+				t.Errorf("c.FullData() gave error %v on blob %q", err, tc.blob)
+			}
+			if diff := cmp.Diff(tc.blob, gotBlob, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("FullData gave result diff (-want +got):\n%s", diff)
 			}
 		})
 	}
