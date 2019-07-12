@@ -386,16 +386,16 @@ func TestUpload(t *testing.T) {
 						input = append(input, chunker.NewFromBlob(blob, 20))
 					}
 
-					err := c.Upload(ctx, input...)
+					err := c.UploadIfMissing(ctx, input...)
 					if err != nil {
-						t.Fatalf("c.Upload(ctx, input) gave error %v, expected nil", err)
+						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
 
 					for _, ch := range input {
 						dg := ch.Digest()
 						blob, err := ch.FullData()
 						if err != nil {
-							t.Fatalf("ch.FullData() returned an error: %v", err)
+							t.Errorf("ch.FullData() returned an error: %v", err)
 						}
 						if present[dg] {
 							if fake.BlobWrites(dg) > 0 {

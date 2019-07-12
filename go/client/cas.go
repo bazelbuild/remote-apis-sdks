@@ -22,9 +22,9 @@ import (
 	log "github.com/golang/glog"
 )
 
-// Upload stores a number of uploadable items.
+// UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
-func (c *Client) Upload(ctx context.Context, data ...*chunker.Chunker) error {
+func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) error {
 	if cap(c.casUploaders) <= 0 {
 		return fmt.Errorf("CASConcurrency should be at least 1")
 	}
@@ -113,7 +113,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	for _, blob := range blobs {
 		chunkers = append(chunkers, chunker.NewFromBlob(blob, int(c.chunkMaxSize)))
 	}
-	return c.Upload(ctx, chunkers...)
+	return c.UploadIfMissing(ctx, chunkers...)
 }
 
 // WriteProto marshals and writes a proto.
