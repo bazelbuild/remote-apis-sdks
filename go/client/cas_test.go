@@ -13,6 +13,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
@@ -316,27 +317,12 @@ func TestMissingBlobs(t *testing.T) {
 	}
 }
 
-func TestWriteBlobs(t *testing.T) {
+func TestUpload(t *testing.T) {
 	ctx := context.Background()
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("Cannot listen: %v", err)
-	}
-	defer listener.Close()
-	server := grpc.NewServer()
-	fake := fakes.NewCAS()
-	bsgrpc.RegisterByteStreamServer(server, fake)
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
-	go server.Serve(listener)
-	defer server.Stop()
-	c, err := client.Dial(ctx, instance, client.DialParams{
-		Service:    listener.Addr().String(),
-		NoSecurity: true,
-	}, client.ChunkMaxSize(20)) // Use small write chunk size for tests.
-	if err != nil {
-		t.Fatalf("Error connecting to server: %v", err)
-	}
-	defer c.Close()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
 
 	var thousandBlobs [][]byte
 	var halfThousandBlobs [][]byte
@@ -390,33 +376,41 @@ func TestWriteBlobs(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
 					fake.Clear()
+					present := make(map[digest.Digest]bool)
 					for _, blob := range tc.present {
 						fake.Put(blob)
+						present[digest.NewFromBlob(blob)] = true
 					}
-					input := make(map[digest.Digest][]byte)
+					var input []*chunker.Chunker
 					for _, blob := range tc.input {
-						input[digest.NewFromBlob(blob)] = blob
+						input = append(input, chunker.NewFromBlob(blob, 20))
 					}
 
-					err := c.WriteBlobs(ctx, input)
+					err := c.UploadIfMissing(ctx, input...)
 					if err != nil {
-						t.Fatalf("c.WriteBlobs(ctx, inputs) gave error %s, expected nil", err)
+						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
 
-					for _, blob := range tc.present {
-						dg := digest.NewFromBlob(blob)
-						if fake.BlobWrites(dg) > 0 {
-							t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
+					for _, ch := range input {
+						dg := ch.Digest()
+						blob, err := ch.FullData()
+						if err != nil {
+							t.Errorf("ch.FullData() returned an error: %v", err)
 						}
-						// Remove this from the input map so we don't iterate it below.
-						delete(input, dg)
-					}
-					for dg, blob := range input {
+						if present[dg] {
+							if fake.BlobWrites(dg) > 0 {
+								t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
+							}
+							continue
+						}
 						if gotBlob, ok := fake.Get(dg); !ok {
 							t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
 						} else if !bytes.Equal(blob, gotBlob) {
 							t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
 						}
+					}
+					if fake.MaxConcurrency() > client.DefaultCASConcurrency {
+						t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), client.DefaultCASConcurrency)
 					}
 				})
 			}

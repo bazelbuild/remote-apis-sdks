@@ -7,51 +7,52 @@ import (
 	"io"
 	"os"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
+
 	log "github.com/golang/glog"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
 // WriteBytes uploads a byte slice.
 func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
+	return c.WriteChunked(ctx, name, chunker.NewFromBlob(data, int(c.chunkMaxSize)))
+}
+
+// WriteChunked uploads chunked data with a given resource name to the CAS.
+func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chunker) error {
 	cancelCtx, cancel := context.WithCancel(ctx)
 	opts := c.RPCOpts()
 	defer cancel()
 	closure := func() error {
+		ch.Reset() // Retry by starting the stream from the beginning.
+		// TODO(olaola): implement resumable uploads.
+
 		// Use lower-level Write in order to not retry twice.
 		stream, err := c.byteStream.Write(cancelCtx, opts...)
 		if err != nil {
 			return err
 		}
-		var offset int64
-		arr := data // Save a local copy that gets altered in the loop.
-		first := true
-		for len(arr) > 0 || first { // Iterate at least once, so we can upload 0-sized data.
-			first = false
-			req := &bspb.WriteRequest{ResourceName: name}
-			if offset > 0 {
-				req.ResourceName = ""
+		for ch.HasNext() {
+			req := &bspb.WriteRequest{}
+			chunk, err := ch.Next()
+			if err != nil {
+				return err
 			}
-			req.WriteOffset = offset
-			chunkSize := int64(c.chunkMaxSize)
-			dataLen := int64(len(arr))
-			if chunkSize > dataLen {
-				chunkSize = dataLen
+			if chunk.Offset == 0 {
+				req.ResourceName = name
 			}
-			req.Data = arr[:chunkSize]
-			arr = arr[chunkSize:]
-			if len(arr) == 0 {
+			req.WriteOffset = chunk.Offset
+			req.Data = chunk.Data
+			if !ch.HasNext() {
 				req.FinishWrite = true
 			}
-			log.V(3).Infof("Sending: resource:%s offset:%d len(data):%d", req.ResourceName, req.WriteOffset, len(req.Data))
-			err := stream.Send(req)
+			err = stream.Send(req)
 			if err == io.EOF {
 				break
 			}
 			if err != nil {
-				log.Error("after regular stream send: ", err)
 				return err
 			}
-			offset += chunkSize
 		}
 		if _, err := stream.CloseAndRecv(); err != nil {
 			return err

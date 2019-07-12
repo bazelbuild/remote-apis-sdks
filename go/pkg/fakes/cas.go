@@ -197,12 +197,14 @@ func (f *Writer) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest
 // CAS is a fake CAS that implements FindMissingBlobs, Read and Write, storing stored blobs
 // in a map. It also counts the number of requests to store received, for validating batching logic.
 type CAS struct {
-	blobs     map[digest.Digest][]byte
-	reads     map[digest.Digest]int
-	writes    map[digest.Digest]int
-	mu        sync.RWMutex
-	batchReqs int
-	writeReqs int
+	blobs       map[digest.Digest][]byte
+	reads       map[digest.Digest]int
+	writes      map[digest.Digest]int
+	mu          sync.RWMutex
+	batchReqs   int
+	writeReqs   int
+	concReqs    int
+	maxConcReqs int
 }
 
 // NewCAS returns a new empty fake CAS.
@@ -214,11 +216,15 @@ func NewCAS() *CAS {
 
 // Clear removes all results from the cache.
 func (f *CAS) Clear() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.blobs = make(map[digest.Digest][]byte)
 	f.reads = make(map[digest.Digest]int)
 	f.writes = make(map[digest.Digest]int)
 	f.batchReqs = 0
 	f.writeReqs = 0
+	f.concReqs = 0
+	f.maxConcReqs = 0
 }
 
 // Put adds a given blob to the cache and returns its digest.
@@ -256,6 +262,11 @@ func (f *CAS) WriteReqs() int {
 	return f.writeReqs
 }
 
+// MaxConcurrency returns the maximum number of concurrent Write/Batch requests to this fake.
+func (f *CAS) MaxConcurrency() int {
+	return f.maxConcReqs
+}
+
 // FindMissingBlobs implements the corresponding RE API function.
 func (f *CAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
 	f.mu.RLock()
@@ -276,8 +287,17 @@ func (f *CAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRe
 // BatchUpdateBlobs implements the corresponding RE API function.
 func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (*repb.BatchUpdateBlobsResponse, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.batchReqs++
+	f.concReqs++
+	defer func() {
+		f.mu.Lock()
+		f.concReqs--
+		f.mu.Unlock()
+	}()
+	if f.concReqs > f.maxConcReqs {
+		f.maxConcReqs = f.concReqs
+	}
+	f.mu.Unlock()
 
 	if req.InstanceName != "instance" {
 		return nil, status.Error(codes.InvalidArgument, "test fake expected instance name \"instance\"")
@@ -303,8 +323,10 @@ func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRe
 			})
 			continue
 		}
+		f.mu.Lock()
 		f.blobs[dg] = r.Data
 		f.writes[dg]++
+		f.mu.Unlock()
 		resps = append(resps, &repb.BatchUpdateBlobsResponse_Response{
 			Digest: r.Digest,
 			Status: status.New(codes.OK, "").Proto(),
@@ -326,8 +348,17 @@ func (f *CAS) GetTree(*repb.GetTreeRequest, regrpc.ContentAddressableStorage_Get
 // Write implements the corresponding RE API function.
 func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.writeReqs++
+	f.concReqs++
+	defer func() {
+		f.mu.Lock()
+		f.concReqs--
+		f.mu.Unlock()
+	}()
+	if f.concReqs > f.maxConcReqs {
+		f.maxConcReqs = f.concReqs
+	}
+	f.mu.Unlock()
 
 	off := int64(0)
 	buf := new(bytes.Buffer)
@@ -393,8 +424,10 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 		return status.Errorf(codes.InvalidArgument, "reached end of stream before the client finished writing")
 	}
 
+	f.mu.Lock()
 	f.blobs[dg] = buf.Bytes()
 	f.writes[dg]++
+	f.mu.Unlock()
 	cDg := digest.NewFromBlob(buf.Bytes())
 	if dg != cDg {
 		return status.Errorf(codes.InvalidArgument, "mismatched digest: received %s, computed %s", dg, cDg)

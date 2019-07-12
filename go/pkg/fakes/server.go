@@ -73,10 +73,10 @@ func (s *Server) NewTestClient(ctx context.Context) (*rc.Client, error) {
 
 // TestEnv is a wrapper for convenient integration tests of remote execution.
 type TestEnv struct {
-	Client     *rexec.Client
-	Server     *Server
-	ExecRoot   string
-	t          *testing.T
+	Client   *rexec.Client
+	Server   *Server
+	ExecRoot string
+	t        *testing.T
 }
 
 // NewTestEnv initializes a TestEnv containing a fake server, a client connected to it,
@@ -99,10 +99,10 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
 	return &TestEnv{
-			Client:     &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient},
-			Server:     s,
-			ExecRoot:   execRoot,
-			t:          t,
+			Client:   &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient},
+			Server:   s,
+			ExecRoot: execRoot,
+			t:        t,
 		}, func() {
 			grpcClient.Close()
 			s.Stop()

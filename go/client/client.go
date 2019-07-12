@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/actas"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/retry"
-	log "github.com/golang/glog"
-
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -23,6 +22,7 @@ import (
 
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	log "github.com/golang/glog"
 	emptypb "github.com/golang/protobuf/ptypes/empty"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
@@ -31,9 +31,6 @@ import (
 )
 
 const (
-	// DefaultMaxWriteChunkSize is the default max chunk size for ByteStream.Write RPCs.
-	DefaultMaxWriteChunkSize = 1024 * 1024
-
 	scopes      = "https://www.googleapis.com/auth/cloud-platform"
 	authority   = "test-server"
 	localPrefix = "localhost"
@@ -96,6 +93,9 @@ func (u UseBatchOps) Apply(c *Client) {
 // CASConcurrency is the number of simultaneous requests that will be issued for CAS upload and
 // download operations.
 type CASConcurrency int
+
+// DefaultCASConcurrency is the default maximum number of concurrent upload and download operations.
+const DefaultCASConcurrency = 50
 
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
@@ -233,9 +233,9 @@ func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client
 		operations:   opgrpc.NewOperationsClient(conn),
 		rpcTimeout:   time.Minute,
 		Closer:       conn,
-		chunkMaxSize: DefaultMaxWriteChunkSize,
+		chunkMaxSize: chunker.DefaultChunkSize,
 		useBatchOps:  true,
-		casUploaders: make(chan bool, 50),
+		casUploaders: make(chan bool, DefaultCASConcurrency),
 	}
 	for _, o := range opts {
 		o.Apply(client)
