@@ -11,6 +11,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc"
@@ -99,7 +100,7 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
 	return &TestEnv{
-			Client:   &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient},
+			Client:   &rexec.Client{&filemetadata.NoopFileMetadataCache{}, grpcClient},
 			Server:   s,
 			ExecRoot: execRoot,
 			t:        t,

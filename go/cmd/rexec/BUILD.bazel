@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//go/flags:go_default_library",
         "//go/pkg/command:go_default_library",
+        "//go/pkg/filemetadata:go_default_library",
         "//go/pkg/moreflag:go_default_library",
         "//go/pkg/outerr:go_default_library",
         "//go/pkg/rexec:go_default_library",

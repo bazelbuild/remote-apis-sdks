@@ -8,6 +8,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
@@ -19,23 +20,15 @@ import (
 	log "github.com/golang/glog"
 )
 
-// FileDigestCache is a cache for file contents->digests.
-type FileDigestCache interface {
-	Get(string) (digest.Digest, error)
-}
-
-// NoopFileDigestCache is a non-caching cache (always returns a cache miss).
-type NoopFileDigestCache struct{}
-
-// Get computes the digest from the file contents.
-func (c *NoopFileDigestCache) Get(path string) (digest.Digest, error) {
-	return digest.NewFromFile(path)
+// FileMetadataCache is a cache for file contents->Metadata.
+type FileMetadataCache interface {
+	Get(string) (*filemetadata.Metadata, error)
 }
 
 // Client is a remote execution client.
 type Client struct {
-	FileDigestCache FileDigestCache
-	GrpcClient      *rc.Client
+	FileMetadataCache FileMetadataCache
+	GrpcClient        *rc.Client
 }
 
 func (c *Client) downloadStream(ctx context.Context, raw []byte, dgPb *repb.Digest, write func([]byte)) error {

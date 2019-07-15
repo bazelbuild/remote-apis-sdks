@@ -24,6 +24,7 @@ import (
 	"path"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
@@ -70,7 +71,7 @@ func main() {
 		log.Exitf("error connecting to remote execution client: %v", err)
 	}
 	defer grpcClient.Close()
-	c := &rexec.Client{&rexec.NoopFileDigestCache{}, grpcClient}
+	c := &rexec.Client{&filemetadata.NoopFileMetadataCache{}, grpcClient}
 	res, _ := c.Run(ctx, cmd, opt, outerr.SystemOutErr)
 	switch res.Status {
 	case command.NonZeroExitResultStatus:
