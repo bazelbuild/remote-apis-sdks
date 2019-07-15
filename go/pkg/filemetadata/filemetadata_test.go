@@ -33,7 +33,7 @@ func TestCompute(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			margin := 20 * time.Millisecond
+			margin := time.Second
 			before := time.Now().Truncate(margin)
 			filename, err := createFile(t, tc.executable, tc.contents)
 			if err != nil {
