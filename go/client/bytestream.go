@@ -15,7 +15,7 @@ import (
 
 // WriteBytes uploads a byte slice.
 func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
-	return c.WriteChunked(ctx, name, chunker.NewFromBlob(data, int(c.chunkMaxSize)))
+	return c.WriteChunked(ctx, name, chunker.NewFromBlob(data, int(c.ChunkMaxSize)))
 }
 
 // WriteChunked uploads chunked data with a given resource name to the CAS.

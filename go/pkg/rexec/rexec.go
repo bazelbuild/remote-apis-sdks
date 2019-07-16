@@ -7,9 +7,11 @@ import (
 	"strings"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
@@ -78,19 +80,17 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	if err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
-	cmdDg := digest.NewFromBlob(cmdBlob)
+	chunkSize := int(c.GrpcClient.ChunkMaxSize)
+	cmdCh := chunker.NewFromBlob(cmdBlob, chunkSize)
+	cmdDg := cmdCh.Digest()
 	meta.CommandDigest = cmdDg
 	log.V(1).Infof("%s> Command digest: %s", cmdID, cmdDg)
 	log.V(1).Infof("%s> Computing input Merkle tree...", cmdID)
-	ft, err := rc.BuildTreeFromInputs(cmd.ExecRoot, cmd.InputSpec)
+	root, blobs, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, chunkSize)
 	if err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
 	// TODO(olaola): compute input stats.
-	root, blobs, err := rc.PackageTree(ft)
-	if err != nil {
-		return command.NewLocalErrorResult(err), meta
-	}
 	acPb := &repb.Action{
 		CommandDigest:   cmdDg.ToProto(),
 		InputRootDigest: root.ToProto(),
@@ -103,7 +103,8 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	if err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
-	acDg := digest.NewFromBlob(acBlob)
+	acCh := chunker.NewFromBlob(acBlob, chunkSize)
+	acDg := acCh.Digest()
 	meta.ActionDigest = acDg
 	log.V(1).Infof("%s> Action digest: %s", cmdID, acDg)
 	ctx, err = rc.ContextWithMetadata(ctx, cmd.Identifiers.ToolName, cmdID, cmd.Identifiers.InvocationID)
@@ -128,11 +129,11 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 		}
 		return res, meta
 	}
-	blobs[cmdDg] = cmdBlob
-	blobs[acDg] = acBlob
+	blobs = append(blobs, cmdCh)
+	blobs = append(blobs, acCh)
 	log.V(1).Infof("%s> Checking inputs to upload...", cmdID)
 	// TODO(olaola): compute input cache hit stats.
-	if err := c.GrpcClient.WriteBlobs(ctx, blobs); err != nil {
+	if err := c.GrpcClient.UploadIfMissing(ctx, blobs...); err != nil {
 		return command.NewRemoteErrorResult(err), meta
 	}
 	log.V(1).Infof("%s> Executing remotely...\n%s", cmdID, strings.Join(cmd.Args, " "))

@@ -2,37 +2,28 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "go_default_library",
-    srcs = ["rexec.go"],
-    importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec",
+    srcs = ["tree.go"],
+    importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/tree",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/client:go_default_library",
         "//go/digest:go_default_library",
         "//go/pkg/chunker:go_default_library",
         "//go/pkg/command:go_default_library",
-        "//go/pkg/filemetadata:go_default_library",
-        "//go/pkg/outerr:go_default_library",
-        "//go/pkg/tree:go_default_library",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
-        "@com_github_golang_glog//:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
-        "@com_github_golang_protobuf//ptypes:go_default_library_gen",
-        "@org_golang_google_grpc//codes:go_default_library",
-        "@org_golang_google_grpc//status:go_default_library",
     ],
 )
 
 go_test(
     name = "go_default_test",
-    srcs = ["rexec_test.go"],
+    srcs = ["tree_test.go"],
     embed = [":go_default_library"],
     deps = [
+        "//go/digest:go_default_library",
+        "//go/pkg/chunker:go_default_library",
         "//go/pkg/command:go_default_library",
-        "//go/pkg/fakes:go_default_library",
-        "//go/pkg/outerr:go_default_library",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
+        "@com_github_golang_protobuf//proto:go_default_library",
         "@com_github_google_go_cmp//cmp:go_default_library",
-        "@org_golang_google_grpc//codes:go_default_library",
-        "@org_golang_google_grpc//status:go_default_library",
     ],
 )

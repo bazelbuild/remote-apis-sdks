@@ -65,7 +65,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 		eg.Go(func() error {
 			defer func() { <-c.casUploaders }()
 			if i%logInterval == 0 {
-				log.V(2).Infof("%d batches left to store", len(batches))
+				log.V(2).Infof("%d batches left to store", len(batches)-i)
 			}
 			if len(batch) > 1 {
 				log.V(3).Infof("Uploading batch of %d blobs", len(batch))
@@ -111,7 +111,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
 	var chunkers []*chunker.Chunker
 	for _, blob := range blobs {
-		chunkers = append(chunkers, chunker.NewFromBlob(blob, int(c.chunkMaxSize)))
+		chunkers = append(chunkers, chunker.NewFromBlob(blob, int(c.ChunkMaxSize)))
 	}
 	return c.UploadIfMissing(ctx, chunkers...)
 }
@@ -127,7 +127,7 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 
 // WriteBlob uploads a blob to the CAS.
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
-	ch := chunker.NewFromBlob(blob, int(c.chunkMaxSize))
+	ch := chunker.NewFromBlob(blob, int(c.ChunkMaxSize))
 	dg := ch.Digest()
 	return dg, c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
 }
@@ -355,7 +355,7 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 		eg.Go(func() error {
 			defer func() { <-c.casUploaders }()
 			if i%logInterval == 0 {
-				log.V(3).Infof("%d missing batches left to query", len(batches))
+				log.V(3).Infof("%d missing batches left to query", len(batches)-i)
 			}
 			var batchPb []*repb.Digest
 			for _, dg := range batch {
