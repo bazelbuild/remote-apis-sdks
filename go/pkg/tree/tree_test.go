@@ -382,7 +382,7 @@ func TestComputeMerkleTree(t *testing.T) {
 						t.Errorf("  Diff between unpacked roots (want -> got):\n%s", diff)
 					}
 				} else {
-					t.Logf("  Root digest gotten not present in blobs map")
+					t.Errorf("  Root digest gotten not present in blobs map")
 				}
 			}
 			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
@@ -434,8 +434,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
 		t.Run(tc.desc, func(t *testing.T) {
-			_, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize)
-			if err == nil {
+			if _, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize); err == nil {
 				t.Errorf("ComputeMerkleTree(%v) succeeded, want error", tc.spec)
 			}
 		})
