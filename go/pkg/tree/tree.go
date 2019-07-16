@@ -21,7 +21,7 @@ import (
 
 // FileMetadataCache is a cache for file contents->Metadata.
 type FileMetadataCache interface {
-	Get(string) (*filemetadata.Metadata, error)
+	Get(path string) (*filemetadata.Metadata, error)
 }
 
 // treeNode represents a file tree, which is an intermediate representation used to encode a Merkle
