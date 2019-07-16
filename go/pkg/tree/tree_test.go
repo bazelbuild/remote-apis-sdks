@@ -1,6 +1,7 @@
 package tree
 
 import (
+	"errors"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -439,6 +440,47 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 				t.Errorf("ComputeMerkleTree(%v) succeeded, want error", tc.spec)
 			}
 		})
+	}
+}
+
+type stubFileMetadataCache struct {
+	Digest digest.Digest
+	Err    error
+}
+
+// Get implements the FileMetadataCache interface.
+func (s *stubFileMetadataCache) Get(_ string) (*filemetadata.Metadata, error) {
+	if s.Err != nil {
+		return nil, s.Err
+	}
+	return &filemetadata.Metadata{Digest: s.Digest}, nil
+}
+
+func TestComputeMerkleTreeUseCache(t *testing.T) {
+	fooBlob := []byte("foo")
+	fooDg := digest.NewFromBlob(fooBlob)
+	fooDgPb := fooDg.ToProto()
+	fooDir := &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true}}}
+
+	cache := &stubFileMetadataCache{Digest: fooDg}
+	spec := &command.InputSpec{Inputs: []string{"foo"}}
+	gotRootDg, _, err := ComputeMerkleTree("", spec, chunker.DefaultChunkSize, cache)
+	if err != nil {
+		t.Errorf("ComputeMerkleTree(%v) gave unexpected error %v, want nil", spec, err)
+	}
+	rootDg := digest.NewFromBlob(mustMarshal(t, fooDir))
+	if rootDg != gotRootDg {
+		t.Errorf("ComputeMerkleTree(...) gave root digest diff, want %v, got %v", rootDg, gotRootDg)
+	}
+}
+
+func TestComputeMerkleTreeUseCacheError(t *testing.T) {
+	err := errors.New("some unknown error")
+	cache := &stubFileMetadataCache{Err: err}
+	spec := &command.InputSpec{Inputs: []string{"foo"}}
+	_, _, e := ComputeMerkleTree("", spec, chunker.DefaultChunkSize, cache)
+	if e != err {
+		t.Errorf("ComputeMerkleTree(%v) gave unexpected error %v, want %v", spec, e, err)
 	}
 }
 

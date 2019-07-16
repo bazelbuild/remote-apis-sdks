@@ -86,7 +86,7 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	meta.CommandDigest = cmdDg
 	log.V(1).Infof("%s> Command digest: %s", cmdID, cmdDg)
 	log.V(1).Infof("%s> Computing input Merkle tree...", cmdID)
-	root, blobs, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, chunkSize)
+	root, blobs, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, chunkSize, c.FileMetadataCache)
 	if err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
