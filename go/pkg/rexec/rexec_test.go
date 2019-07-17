@@ -52,7 +52,7 @@ func TestExecCacheHit(t *testing.T) {
 		CommandDigest:    cmdDg,
 		ActionDigest:     acDg,
 		InputDirectories: 1,
-		InputFiles:       1,
+		InputFiles:       2,
 		TotalInputBytes:  fooDirDg.Size + cmdDg.Size + acDg.Size + fooDg.Size,
 	}
 	if diff := cmp.Diff(wantRes, res); diff != "" {
