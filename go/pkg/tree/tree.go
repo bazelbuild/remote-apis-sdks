@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -14,10 +13,16 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/golang/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
+
+// FileMetadataCache is a cache for file contents->Metadata.
+type FileMetadataCache interface {
+	Get(path string) (*filemetadata.Metadata, error)
+}
 
 // treeNode represents a file tree, which is an intermediate representation used to encode a Merkle
 // tree later. It corresponds roughly to a *repb.Directory, but with pointers, not digests, used to
@@ -42,31 +47,21 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*chunker.Chunker, chunkSize int) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*chunker.Chunker, chunkSize int, cache FileMetadataCache) error {
 	absPath := filepath.Join(execRoot, path)
-	fi, err := os.Stat(absPath)
+	meta, err := cache.Get(absPath)
+	t := command.FileInputType
 	if err != nil {
-		return err
-	}
-	var t command.InputType
-	switch mode := fi.Mode(); {
-	case mode.IsDir():
+		if !strings.Contains(err.Error(), "is a directory") {
+			return err
+		}
 		t = command.DirectoryInputType
-	case mode.IsRegular():
-		t = command.FileInputType
-	default:
-		return fmt.Errorf("unsupported input type: %s, %v", absPath, mode)
 	}
-
 	if shouldIgnore(absPath, t, excl) {
 		return nil
 	}
 	if t == command.FileInputType {
-		dg, err := digest.NewFromFile(absPath)
-		if err != nil {
-			return err
-		}
-		fs[path] = chunker.NewFromFile(absPath, dg, chunkSize)
+		fs[path] = chunker.NewFromFile(absPath, meta.Digest, chunkSize)
 		return nil
 	}
 	// Directory
@@ -76,7 +71,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 
 	for _, f := range files {
-		if e := loadFiles(execRoot, excl, filepath.Join(path, f.Name()), fs, chunkSize); e != nil {
+		if e := loadFiles(execRoot, excl, filepath.Join(path, f.Name()), fs, chunkSize, cache); e != nil {
 			return e
 		}
 	}
@@ -84,13 +79,13 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 }
 
 // ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as Chunkers.
-func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int) (root digest.Digest, inputs []*chunker.Chunker, err error) {
+func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache FileMetadataCache) (root digest.Digest, inputs []*chunker.Chunker, err error) {
 	fs := make(map[string]*chunker.Chunker)
 	for _, i := range is.Inputs {
 		if i == "" {
 			return digest.Empty, nil, errors.New("empty Input, use \".\" for entire exec root")
 		}
-		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize); e != nil {
+		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache); e != nil {
 			return digest.Empty, nil, e
 		}
 	}
