@@ -156,6 +156,26 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "Normalizing input paths",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob},
+				{path: "fooDir/otherDir/foo", fileContents: fooBlob},
+				{path: "barDir/bar", fileContents: barBlob},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir/../fooDir/foo", "barDir//bar"},
+			},
+			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
+				{Name: "barDir", Digest: barDirDgPb},
+				{Name: "fooDir", Digest: fooDirDgPb},
+			}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
+			expectedCacheCalls: map[string]int{
+				"fooDir/foo": 1,
+				"barDir/bar": 1,
+			},
+		},
+		{
 			desc: "File absolute symlink",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob},
@@ -386,6 +406,20 @@ func TestComputeMerkleTree(t *testing.T) {
 				VirtualInputs: []*command.VirtualInput{
 					&command.VirtualInput{Path: "fooDir/foo", Contents: fooBlob},
 					&command.VirtualInput{Path: "barDir/bar", Contents: barBlob},
+				},
+			},
+			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
+				{Name: "barDir", Digest: barDirDgPb},
+				{Name: "fooDir", Digest: fooDirDgPb},
+			}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
+		},
+		{
+			desc: "Normalizing virtual inputs paths",
+			spec: &command.InputSpec{
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "fooDir/../fooDir/foo", Contents: fooBlob},
+					&command.VirtualInput{Path: "barDir///bar", Contents: barBlob},
 				},
 			},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{

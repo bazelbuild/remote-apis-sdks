@@ -48,7 +48,7 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
 func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*chunker.Chunker, chunkSize int, cache FileMetadataCache) error {
-	absPath := filepath.Join(execRoot, path)
+	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	meta, err := cache.Get(absPath)
 	t := command.FileInputType
 	if err != nil {
@@ -108,11 +108,9 @@ func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, ca
 }
 
 func buildTree(files map[string]*chunker.Chunker) *treeNode {
-	// This is not the fastest way to build a Merkle tree, but it should do for the intended uses of
-	// this library.
 	root := &treeNode{}
 	for name, ch := range files {
-		segs := strings.Split(name, "/")
+		segs := strings.Split(filepath.Clean(name), string(filepath.Separator))
 		// The last segment is the filename, so split it off.
 		segs, base := segs[0:len(segs)-1], segs[len(segs)-1]
 
@@ -138,9 +136,6 @@ func buildTree(files map[string]*chunker.Chunker) *treeNode {
 }
 
 func packageTree(t *treeNode, chunkSize int) (root digest.Digest, blobs map[digest.Digest]*chunker.Chunker, err error) {
-	if t == nil {
-		return digest.Empty, nil, errors.New("nil treeNode while packaging tree")
-	}
 	dir := &repb.Directory{}
 	blobs = make(map[digest.Digest]*chunker.Chunker)
 
