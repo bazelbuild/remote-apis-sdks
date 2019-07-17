@@ -9,7 +9,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
@@ -22,14 +21,9 @@ import (
 	log "github.com/golang/glog"
 )
 
-// FileMetadataCache is a cache for file contents->Metadata.
-type FileMetadataCache interface {
-	Get(string) (*filemetadata.Metadata, error)
-}
-
 // Client is a remote execution client.
 type Client struct {
-	FileMetadataCache FileMetadataCache
+	FileMetadataCache tree.FileMetadataCache
 	GrpcClient        *rc.Client
 }
 
