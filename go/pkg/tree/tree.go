@@ -52,7 +52,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	meta, err := cache.Get(absPath)
 	t := command.FileInputType
 	if err != nil {
-		if !strings.Contains(err.Error(), "is a directory") {
+		if e, ok := err.(*filemetadata.FileError); !ok || !e.IsDirectory {
 			return err
 		}
 		t = command.DirectoryInputType
@@ -140,9 +140,6 @@ func packageTree(t *treeNode, chunkSize int) (root digest.Digest, blobs map[dige
 	blobs = make(map[digest.Digest]*chunker.Chunker)
 
 	for name, child := range t.Dirs {
-		if name == "" {
-			return digest.Empty, nil, errors.New("empty directory name while packaging tree")
-		}
 		dg, childBlobs, err := packageTree(child, chunkSize)
 		if err != nil {
 			return digest.Empty, nil, err
@@ -155,12 +152,6 @@ func packageTree(t *treeNode, chunkSize int) (root digest.Digest, blobs map[dige
 	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
 
 	for name, ch := range t.Files {
-		if name == "" {
-			return digest.Empty, nil, errors.New("empty file name while packaging tree")
-		}
-		if _, ok := t.Dirs[name]; ok {
-			return digest.Empty, nil, errors.New("directory and file with the same name while packaging tree")
-		}
 		dg := ch.Digest()
 		dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: true})
 		blobs[dg] = ch
