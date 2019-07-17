@@ -80,11 +80,13 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	meta.CommandDigest = cmdDg
 	log.V(1).Infof("%s> Command digest: %s", cmdID, cmdDg)
 	log.V(1).Infof("%s> Computing input Merkle tree...", cmdID)
-	root, blobs, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, chunkSize, c.FileMetadataCache)
+	root, blobs, stats, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, chunkSize, c.FileMetadataCache)
 	if err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
-	// TODO(olaola): compute input stats.
+	meta.InputFiles = stats.InputFiles
+	meta.InputDirectories = stats.InputDirectories
+	meta.TotalInputBytes = stats.TotalInputBytes
 	acPb := &repb.Action{
 		CommandDigest:   cmdDg.ToProto(),
 		InputRootDigest: root.ToProto(),
@@ -100,6 +102,7 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	acCh := chunker.NewFromBlob(acBlob, chunkSize)
 	acDg := acCh.Digest()
 	meta.ActionDigest = acDg
+	meta.TotalInputBytes += cmdDg.Size + acDg.Size
 	log.V(1).Infof("%s> Action digest: %s", cmdID, acDg)
 	ctx, err = rc.ContextWithMetadata(ctx, cmd.Identifiers.ToolName, cmdID, cmd.Identifiers.InvocationID)
 	if err != nil {

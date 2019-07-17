@@ -36,8 +36,10 @@ func TestExecCacheHit(t *testing.T) {
 	res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
 
 	wantMeta := &command.Metadata{
-		CommandDigest: cmdDg,
-		ActionDigest:  acDg,
+		CommandDigest:    cmdDg,
+		ActionDigest:     acDg,
+		InputDirectories: 1,
+		TotalInputBytes:  cmdDg.Size + acDg.Size,
 	}
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
