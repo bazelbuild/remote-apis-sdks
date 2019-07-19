@@ -27,7 +27,43 @@ type Client struct {
 	GrpcClient        *rc.Client
 }
 
-func (c *Client) downloadStream(ctx context.Context, raw []byte, dgPb *repb.Digest, write func([]byte)) error {
+// Context allows more granular control over various stages of command execution.
+// At any point, any errors that occurred will be stored in the Result.
+type Context struct {
+	ctx        context.Context
+	cmd        *command.Command
+	opt        *command.ExecutionOptions
+	oe         outerr.OutErr
+	client     *Client
+	inputBlobs []*chunker.Chunker
+	resPb      *repb.ActionResult
+	// The metadata of the current execution.
+	Metadata *command.Metadata
+	// The result of the current execution, if available.
+	Result *command.Result
+}
+
+// NewContext starts a new Context for a given command.
+func (c *Client) NewContext(ctx context.Context, cmd *command.Command, opt *command.ExecutionOptions, oe outerr.OutErr) (*Context, error) {
+	cmd.FillDefaultFieldValues()
+	if err := cmd.Validate(); err != nil {
+		return nil, err
+	}
+	grpcCtx, err := rc.ContextWithMetadata(ctx, cmd.Identifiers.ToolName, cmd.Identifiers.CommandID, cmd.Identifiers.InvocationID)
+	if err != nil {
+		return nil, err
+	}
+	return &Context{
+		ctx:      grpcCtx,
+		cmd:      cmd,
+		opt:      opt,
+		oe:       oe,
+		client:   c,
+		Metadata: &command.Metadata{},
+	}, nil
+}
+
+func (ec *Context) downloadStream(raw []byte, dgPb *repb.Digest, write func([]byte)) error {
 	if raw != nil {
 		write(raw)
 	} else if dgPb != nil {
@@ -35,7 +71,7 @@ func (c *Client) downloadStream(ctx context.Context, raw []byte, dgPb *repb.Dige
 		if err != nil {
 			return err
 		}
-		bytes, err := c.GrpcClient.ReadBlob(ctx, dg)
+		bytes, err := ec.client.GrpcClient.ReadBlob(ec.ctx, dg)
 		if err != nil {
 			return err
 		}
@@ -44,134 +80,178 @@ func (c *Client) downloadStream(ctx context.Context, raw []byte, dgPb *repb.Dige
 	return nil
 }
 
-func (c *Client) downloadResults(ctx context.Context, resPb *repb.ActionResult, execRoot string, downloadOutputs bool, oe outerr.OutErr) *command.Result {
-	if err := c.downloadStream(ctx, resPb.StdoutRaw, resPb.StdoutDigest, oe.WriteOut); err != nil {
+func (ec *Context) downloadResults() *command.Result {
+	if err := ec.downloadStream(ec.resPb.StdoutRaw, ec.resPb.StdoutDigest, ec.oe.WriteOut); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
-	if err := c.downloadStream(ctx, resPb.StderrRaw, resPb.StderrDigest, oe.WriteErr); err != nil {
+	if err := ec.downloadStream(ec.resPb.StderrRaw, ec.resPb.StderrDigest, ec.oe.WriteErr); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
-	if downloadOutputs {
-		if err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, execRoot); err != nil {
+	if ec.opt.DownloadOutputs {
+		if err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, ec.cmd.ExecRoot); err != nil {
 			return command.NewRemoteErrorResult(err)
 		}
 	}
 	// TODO(olaola): save output stats onto metadata here.
-	return command.NewResultFromExitCode((int)(resPb.ExitCode))
+	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
-// Run executes a command remotely.
-func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.ExecutionOptions, oe outerr.OutErr) (*command.Result, *command.Metadata) {
-	cmd.FillDefaultFieldValues()
-	cmdID := cmd.Identifiers.CommandID
-	meta := &command.Metadata{}
-	if err := cmd.Validate(); err != nil {
-		return command.NewLocalErrorResult(err), meta
+func (ec *Context) computeInputs() error {
+	if ec.Metadata.ActionDigest.Size > 0 {
+		// Already computed inputs.
+		return nil
 	}
-	cmdPb := cmd.ToREProto()
+	cmdID := ec.cmd.Identifiers.CommandID
+	cmdPb := ec.cmd.ToREProto()
 	log.V(2).Infof("%s> Command: \n%s\n", cmdID, proto.MarshalTextString(cmdPb))
-	chunkSize := int(c.GrpcClient.ChunkMaxSize)
+	chunkSize := int(ec.client.GrpcClient.ChunkMaxSize)
 	cmdCh, err := chunker.NewFromProto(cmdPb, chunkSize)
 	if err != nil {
-		return command.NewLocalErrorResult(err), meta
+		return err
 	}
 	cmdDg := cmdCh.Digest()
-	meta.CommandDigest = cmdDg
+	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s> Command digest: %s", cmdID, cmdDg)
 	log.V(1).Infof("%s> Computing input Merkle tree...", cmdID)
-	root, blobs, stats, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, chunkSize, c.FileMetadataCache)
+	root, blobs, stats, err := tree.ComputeMerkleTree(ec.cmd.ExecRoot, ec.cmd.InputSpec, chunkSize, ec.client.FileMetadataCache)
 	if err != nil {
-		return command.NewLocalErrorResult(err), meta
+		return err
 	}
-	meta.InputFiles = stats.InputFiles
-	meta.InputDirectories = stats.InputDirectories
-	meta.TotalInputBytes = stats.TotalInputBytes
+	ec.inputBlobs = blobs
+	ec.Metadata.InputFiles = stats.InputFiles
+	ec.Metadata.InputDirectories = stats.InputDirectories
+	ec.Metadata.TotalInputBytes = stats.TotalInputBytes
 	acPb := &repb.Action{
 		CommandDigest:   cmdDg.ToProto(),
 		InputRootDigest: root.ToProto(),
-		DoNotCache:      opt.DoNotCache,
+		DoNotCache:      ec.opt.DoNotCache,
 	}
-	if cmd.Timeout > 0 {
-		acPb.Timeout = ptypes.DurationProto(cmd.Timeout)
+	if ec.cmd.Timeout > 0 {
+		acPb.Timeout = ptypes.DurationProto(ec.cmd.Timeout)
 	}
 	acCh, err := chunker.NewFromProto(acPb, chunkSize)
 	if err != nil {
-		return command.NewLocalErrorResult(err), meta
+		return err
 	}
 	acDg := acCh.Digest()
-	meta.ActionDigest = acDg
-	meta.TotalInputBytes += cmdDg.Size + acDg.Size
 	log.V(1).Infof("%s> Action digest: %s", cmdID, acDg)
-	ctx, err = rc.ContextWithMetadata(ctx, cmd.Identifiers.ToolName, cmdID, cmd.Identifiers.InvocationID)
-	if err != nil {
-		return command.NewLocalErrorResult(err), meta
+	ec.inputBlobs = append(ec.inputBlobs, cmdCh)
+	ec.inputBlobs = append(ec.inputBlobs, acCh)
+	ec.Metadata.ActionDigest = acDg
+	ec.Metadata.TotalInputBytes += cmdDg.Size + acDg.Size
+	return nil
+}
+
+// GetCachedResult tries to get the command result from the cache. The Result will be nil on a
+// cache miss. The Context will be ready to execute the action, or, alternatively, to
+// update the remote cache with a local result. If the ExecutionOptions do not allow to accept
+// remotely cached results, the operation is a noop.
+func (ec *Context) GetCachedResult() {
+	if err := ec.computeInputs(); err != nil {
+		ec.Result = command.NewLocalErrorResult(err)
+		return
 	}
-	acdgPb := acDg.ToProto()
-	var resPb *repb.ActionResult
-	acceptCached := opt.AcceptCached && !opt.DoNotCache
-	if acceptCached {
-		resPb, err = c.GrpcClient.CheckActionCache(ctx, acdgPb)
+	if ec.opt.AcceptCached && !ec.opt.DoNotCache {
+		resPb, err := ec.client.GrpcClient.CheckActionCache(ec.ctx, ec.Metadata.ActionDigest.ToProto())
 		if err != nil {
-			return command.NewRemoteErrorResult(err), meta
+			ec.Result = command.NewRemoteErrorResult(err)
+			return
 		}
+		ec.resPb = resPb
 	}
-	if resPb != nil {
-		log.V(1).Infof("%s> Found cached result, downloading outputs...", cmdID)
-		res := c.downloadResults(ctx, resPb, cmd.ExecRoot, opt.DownloadOutputs, oe)
-		// TODO(olaola): implement the cache-miss-retry loop.
-		if res.Err == nil {
-			res.Status = command.CacheHitResultStatus
+	if ec.resPb != nil {
+		log.V(1).Infof("%s> Found cached result, downloading outputs...", ec.cmd.Identifiers.CommandID)
+		ec.Result = ec.downloadResults()
+		if ec.Result.Err == nil {
+			ec.Result.Status = command.CacheHitResultStatus
 		}
-		return res, meta
+		return
 	}
-	blobs = append(blobs, cmdCh)
-	blobs = append(blobs, acCh)
+	ec.Result = nil
+}
+
+// UpdateCachedResult tries to write local results of the execution to the remote cache.
+func (ec *Context) UpdateCachedResult() {
+	if err := ec.computeInputs(); err != nil {
+		ec.Result = command.NewLocalErrorResult(err)
+		return
+	}
+	// TODO(olaola): implement this.
+}
+
+// ExecuteRemotely tries to execute the command remotely and download the results. It uploads any
+// missing inputs first.
+func (ec *Context) ExecuteRemotely() {
+	if err := ec.computeInputs(); err != nil {
+		ec.Result = command.NewLocalErrorResult(err)
+		return
+	}
+	cmdID := ec.cmd.Identifiers.CommandID
 	log.V(1).Infof("%s> Checking inputs to upload...", cmdID)
 	// TODO(olaola): compute input cache hit stats.
-	if err := c.GrpcClient.UploadIfMissing(ctx, blobs...); err != nil {
-		return command.NewRemoteErrorResult(err), meta
+	if err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, ec.inputBlobs...); err != nil {
+		ec.Result = command.NewRemoteErrorResult(err)
+		return
 	}
-	log.V(1).Infof("%s> Executing remotely...\n%s", cmdID, strings.Join(cmd.Args, " "))
-	op, err := c.GrpcClient.ExecuteAndWait(ctx, &repb.ExecuteRequest{
-		InstanceName:    c.GrpcClient.InstanceName,
-		SkipCacheLookup: !acceptCached,
-		ActionDigest:    acdgPb,
+	log.V(1).Infof("%s> Executing remotely...\n%s", cmdID, strings.Join(ec.cmd.Args, " "))
+	op, err := ec.client.GrpcClient.ExecuteAndWait(ec.ctx, &repb.ExecuteRequest{
+		InstanceName:    ec.client.GrpcClient.InstanceName,
+		SkipCacheLookup: !ec.opt.AcceptCached || ec.opt.DoNotCache,
+		ActionDigest:    ec.Metadata.ActionDigest.ToProto(),
 	})
 	if err != nil {
-		return command.NewRemoteErrorResult(err), meta
+		ec.Result = command.NewRemoteErrorResult(err)
+		return
 	}
 
 	or := op.GetResponse()
 	if or == nil {
-		return command.NewRemoteErrorResult(fmt.Errorf("unexpected operation result type: %v", or)), meta
+		ec.Result = command.NewRemoteErrorResult(fmt.Errorf("unexpected operation result type: %v", or))
+		return
 	}
 	resp := &repb.ExecuteResponse{}
 	if err := ptypes.UnmarshalAny(or, resp); err != nil {
-		return command.NewRemoteErrorResult(err), meta
+		ec.Result = command.NewRemoteErrorResult(err)
+		return
 	}
-	resPb = resp.Result
+	ec.resPb = resp.Result
 	st := status.FromProto(resp.Status)
 	message := resp.Message
-	if message != "" && (st.Code() != codes.OK || resPb != nil && resPb.ExitCode != 0) {
-		oe.WriteErr([]byte(message + "\n"))
+	if message != "" && (st.Code() != codes.OK || ec.resPb != nil && ec.resPb.ExitCode != 0) {
+		ec.oe.WriteErr([]byte(message + "\n"))
 	}
 
-	var res *command.Result
-	if resPb != nil {
+	if ec.resPb != nil {
 		log.V(1).Infof("%s> Downloading outputs...", cmdID)
-		res = c.downloadResults(ctx, resPb, cmd.ExecRoot, opt.DownloadOutputs, oe)
-		if resp.CachedResult {
-			res.Status = command.CacheHitResultStatus
+		ec.Result = ec.downloadResults()
+		if resp.CachedResult && ec.Result.Err == nil {
+			ec.Result.Status = command.CacheHitResultStatus
 		}
 	}
 	if st.Code() == codes.DeadlineExceeded {
-		return command.NewTimeoutResult(), meta
+		ec.Result = command.NewTimeoutResult()
+		return
 	}
 	if st.Code() != codes.OK {
-		return command.NewRemoteErrorResult(st.Err()), meta
+		ec.Result = command.NewRemoteErrorResult(st.Err())
+		return
 	}
-	if resPb == nil {
-		return command.NewRemoteErrorResult(fmt.Errorf("execute did not return action result")), meta
+	if ec.resPb == nil {
+		ec.Result = command.NewRemoteErrorResult(fmt.Errorf("execute did not return action result"))
 	}
-	return res, meta
+}
+
+// Run executes a command remotely.
+func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.ExecutionOptions, oe outerr.OutErr) (*command.Result, *command.Metadata) {
+	ec, err := c.NewContext(ctx, cmd, opt, oe)
+	if err != nil {
+		return command.NewLocalErrorResult(err), &command.Metadata{}
+	}
+	ec.GetCachedResult()
+	if ec.Result != nil {
+		return ec.Result, ec.Metadata
+	}
+	ec.ExecuteRemotely()
+	// TODO(olaola): implement the cache-miss-retry loop.
+	return ec.Result, ec.Metadata
 }
