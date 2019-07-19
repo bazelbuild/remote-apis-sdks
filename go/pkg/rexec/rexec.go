@@ -27,9 +27,9 @@ type Client struct {
 	GrpcClient        *rc.Client
 }
 
-// ExecutionContext allows more granular control over various stages of command execution.
+// Context allows more granular control over various stages of command execution.
 // At any point, any errors that occurred will be stored in the Result.
-type ExecutionContext struct {
+type Context struct {
 	ctx        context.Context
 	cmd        *command.Command
 	opt        *command.ExecutionOptions
@@ -43,8 +43,8 @@ type ExecutionContext struct {
 	Result *command.Result
 }
 
-// NewExecutionContext starts a new ExecutionContext for a given command.
-func (c *Client) NewExecutionContext(ctx context.Context, cmd *command.Command, opt *command.ExecutionOptions, oe outerr.OutErr) (*ExecutionContext, error) {
+// NewContext starts a new Context for a given command.
+func (c *Client) NewContext(ctx context.Context, cmd *command.Command, opt *command.ExecutionOptions, oe outerr.OutErr) (*Context, error) {
 	cmd.FillDefaultFieldValues()
 	if err := cmd.Validate(); err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func (c *Client) NewExecutionContext(ctx context.Context, cmd *command.Command, 
 	if err != nil {
 		return nil, err
 	}
-	return &ExecutionContext{
+	return &Context{
 		ctx:      grpcCtx,
 		cmd:      cmd,
 		opt:      opt,
@@ -63,7 +63,7 @@ func (c *Client) NewExecutionContext(ctx context.Context, cmd *command.Command, 
 	}, nil
 }
 
-func (ec *ExecutionContext) downloadStream(raw []byte, dgPb *repb.Digest, write func([]byte)) error {
+func (ec *Context) downloadStream(raw []byte, dgPb *repb.Digest, write func([]byte)) error {
 	if raw != nil {
 		write(raw)
 	} else if dgPb != nil {
@@ -80,7 +80,7 @@ func (ec *ExecutionContext) downloadStream(raw []byte, dgPb *repb.Digest, write 
 	return nil
 }
 
-func (ec *ExecutionContext) downloadResults() *command.Result {
+func (ec *Context) downloadResults() *command.Result {
 	if err := ec.downloadStream(ec.resPb.StdoutRaw, ec.resPb.StdoutDigest, ec.oe.WriteOut); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
@@ -96,7 +96,11 @@ func (ec *ExecutionContext) downloadResults() *command.Result {
 	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
-func (ec *ExecutionContext) computeInputs() error {
+func (ec *Context) computeInputs() error {
+	if ec.Metadata.ActionDigest.Size > 0 {
+		// Already computed inputs.
+		return nil
+	}
 	cmdID := ec.cmd.Identifiers.CommandID
 	cmdPb := ec.cmd.ToREProto()
 	log.V(2).Infof("%s> Command: \n%s\n", cmdID, proto.MarshalTextString(cmdPb))
@@ -138,20 +142,14 @@ func (ec *ExecutionContext) computeInputs() error {
 	return nil
 }
 
-func (ec *ExecutionContext) computedInputs() bool {
-	return ec.Metadata.ActionDigest.Size > 0
-}
-
 // GetCachedResult tries to get the command result from the cache. The Result will be nil on a
-// cache miss. The ExecutionContext will be ready to execute the action, or, alternatively, to
+// cache miss. The Context will be ready to execute the action, or, alternatively, to
 // update the remote cache with a local result. If the ExecutionOptions do not allow to accept
 // remotely cached results, the operation is a noop.
-func (ec *ExecutionContext) GetCachedResult() {
-	if !ec.computedInputs() {
-		if err := ec.computeInputs(); err != nil {
-			ec.Result = command.NewLocalErrorResult(err)
-			return
-		}
+func (ec *Context) GetCachedResult() {
+	if err := ec.computeInputs(); err != nil {
+		ec.Result = command.NewLocalErrorResult(err)
+		return
 	}
 	if ec.opt.AcceptCached && !ec.opt.DoNotCache {
 		resPb, err := ec.client.GrpcClient.CheckActionCache(ec.ctx, ec.Metadata.ActionDigest.ToProto())
@@ -173,24 +171,20 @@ func (ec *ExecutionContext) GetCachedResult() {
 }
 
 // UpdateCachedResult tries to write local results of the execution to the remote cache.
-func (ec *ExecutionContext) UpdateCachedResult() {
-	if !ec.computedInputs() {
-		if err := ec.computeInputs(); err != nil {
-			ec.Result = command.NewLocalErrorResult(err)
-			return
-		}
+func (ec *Context) UpdateCachedResult() {
+	if err := ec.computeInputs(); err != nil {
+		ec.Result = command.NewLocalErrorResult(err)
+		return
 	}
 	// TODO(olaola): implement this.
 }
 
 // ExecuteRemotely tries to execute the command remotely and download the results. It uploads any
 // missing inputs first.
-func (ec *ExecutionContext) ExecuteRemotely() {
-	if !ec.computedInputs() {
-		if err := ec.computeInputs(); err != nil {
-			ec.Result = command.NewLocalErrorResult(err)
-			return
-		}
+func (ec *Context) ExecuteRemotely() {
+	if err := ec.computeInputs(); err != nil {
+		ec.Result = command.NewLocalErrorResult(err)
+		return
 	}
 	cmdID := ec.cmd.Identifiers.CommandID
 	log.V(1).Infof("%s> Checking inputs to upload...", cmdID)
@@ -249,7 +243,7 @@ func (ec *ExecutionContext) ExecuteRemotely() {
 
 // Run executes a command remotely.
 func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.ExecutionOptions, oe outerr.OutErr) (*command.Result, *command.Metadata) {
-	ec, err := c.NewExecutionContext(ctx, cmd, opt, oe)
+	ec, err := c.NewContext(ctx, cmd, opt, oe)
 	if err != nil {
 		return command.NewLocalErrorResult(err), &command.Metadata{}
 	}
