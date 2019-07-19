@@ -80,7 +80,7 @@ func (c *callCountingMetadataCache) Get(path string) (*filemetadata.Metadata, er
 	if err != nil {
 		c.t.Errorf("expected %v to be under %v", path, c.execRoot)
 	}
-	c.calls[p] += 1
+	c.calls[p]++
 	return c.cache.Get(path)
 }
 
@@ -107,9 +107,11 @@ func TestComputeMerkleTree(t *testing.T) {
 		// The expected results are calculated by marshalling rootDir, then expecting the result to be
 		// the digest of rootDir plus a map containing rootDir's marshalled blob and all the additional
 		// blobs.
-		rootDir            *repb.Directory
-		additionalBlobs    [][]byte
-		expectedCacheCalls map[string]int
+		rootDir         *repb.Directory
+		additionalBlobs [][]byte
+		wantCacheCalls  map[string]int
+		// The expected wantStats.TotalInputBytes is calculated by adding the marshalled rootDir size.
+		wantStats *Stats
 	}{
 		{
 			desc:            "Empty directory",
@@ -117,6 +119,9 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec:            &command.InputSpec{},
 			rootDir:         &repb.Directory{},
 			additionalBlobs: nil,
+			wantStats: &Stats{
+				InputDirectories: 1,
+			},
 		},
 		{
 			desc: "Files at root",
@@ -129,9 +134,14 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			rootDir:         foobarDir,
 			additionalBlobs: [][]byte{fooBlob, barBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"foo": 1,
 				"bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 1,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + barDg.Size,
 			},
 		},
 		{
@@ -148,11 +158,16 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
 				"barDir":     1,
 				"barDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + barDg.Size + fooDirDg.Size + barDirDg.Size,
 			},
 		},
 		{
@@ -170,9 +185,14 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir/foo": 1,
 				"barDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + barDg.Size + fooDirDg.Size + barDirDg.Size,
 			},
 		},
 		{
@@ -189,10 +209,15 @@ func TestComputeMerkleTree(t *testing.T) {
 				Files:       []*repb.FileNode{{Name: "bar", Digest: fooDgPb, IsExecutable: true}},
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
 				"bar":        1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 2,
+				InputFiles:       2,
+				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size,
 			},
 		},
 		{
@@ -209,10 +234,15 @@ func TestComputeMerkleTree(t *testing.T) {
 				Files:       []*repb.FileNode{{Name: "bar", Digest: fooDgPb, IsExecutable: true}},
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
 				"bar":        1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 2,
+				InputFiles:       2,
+				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size,
 			},
 		},
 		{
@@ -230,11 +260,16 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
 				"barDir":     1,
 				"barDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
 			},
 		},
 		{
@@ -252,11 +287,16 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
 				"barDir":     1,
 				"barDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
 			},
 		},
 		{
@@ -274,12 +314,17 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "foobarDir", Digest: foobarDirDg.ToProto()},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, foobarDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir":        1,
 				"fooDir/foo":    1,
 				"foobarDir":     1,
 				"foobarDir/foo": 1,
 				"foobarDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       3,
+				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size + barDg.Size + foobarDirDg.Size,
 			},
 		},
 		{
@@ -296,11 +341,16 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir2", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir1":     1,
 				"fooDir1/foo": 1,
 				"fooDir2":     1,
 				"fooDir2/foo": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  2*fooDg.Size + 2*fooDirDg.Size,
 			},
 		},
 		{
@@ -317,10 +367,15 @@ func TestComputeMerkleTree(t *testing.T) {
 				Files:       []*repb.FileNode{{Name: "fooDirBlob", Digest: fooDirDgPb, IsExecutable: true}},
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDirBlob": 1,
 				"fooDir":     1,
 				"fooDir/foo": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 2,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + 2*fooDirDg.Size,
 			},
 		},
 		{
@@ -342,13 +397,18 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"fooDir":         1,
 				"fooDir/foo":     1,
 				"fooDir/foo.txt": 1,
 				"barDir":         1,
 				"barDir/bar":     1,
 				"barDir/bar.txt": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
 			},
 		},
 		{
@@ -369,11 +429,16 @@ func TestComputeMerkleTree(t *testing.T) {
 				Files:       []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true}},
 			},
 			additionalBlobs: [][]byte{fooBlob, barBlob, barDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"foo":        1,
 				"fooDir":     1,
 				"barDir":     1,
 				"barDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 2,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + barDg.Size + barDirDg.Size,
 			},
 		},
 		{
@@ -393,11 +458,16 @@ func TestComputeMerkleTree(t *testing.T) {
 				Directories: []*repb.DirectoryNode{{Name: "barDir", Digest: barDirDgPb}},
 			},
 			additionalBlobs: [][]byte{barBlob, barDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"foo":        1,
 				"fooDir":     1,
 				"barDir":     1,
 				"barDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 2,
+				InputFiles:       1,
+				TotalInputBytes:  barDg.Size + barDirDg.Size,
 			},
 		},
 		{
@@ -413,6 +483,11 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
+			},
 		},
 		{
 			desc: "Normalizing virtual inputs paths",
@@ -427,6 +502,11 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
+			},
 		},
 		{
 			// NOTE: The use of maps in our implementation means that the traversal order is unstable. The
@@ -470,7 +550,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				},
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
-			expectedCacheCalls: map[string]int{
+			wantCacheCalls: map[string]int{
 				"a":     1,
 				"b":     1,
 				"c":     1,
@@ -490,6 +570,11 @@ func TestComputeMerkleTree(t *testing.T) {
 				"k/foo": 1,
 				"l/foo": 1,
 			},
+			wantStats: &Stats{
+				InputDirectories: 7,
+				InputFiles:       12,
+				TotalInputBytes:  12*fooDg.Size + 6*fooDirDg.Size,
+			},
 		},
 	}
 
@@ -508,13 +593,14 @@ func TestComputeMerkleTree(t *testing.T) {
 			rootBlob := mustMarshal(t, tc.rootDir)
 			rootDg := digest.NewFromBlob(rootBlob)
 			wantBlobs[rootDg] = rootBlob
+			tc.wantStats.TotalInputBytes += int64(len(rootBlob))
 			for _, b := range tc.additionalBlobs {
 				wantBlobs[digest.NewFromBlob(b)] = b
 			}
 
 			gotBlobs := make(map[digest.Digest][]byte)
 			cache := newCallCountingMetadataCache(root, t)
-			gotRootDg, inputs, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, cache)
+			gotRootDg, inputs, stats, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, cache)
 			if err != nil {
 				t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 			}
@@ -542,8 +628,11 @@ func TestComputeMerkleTree(t *testing.T) {
 			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
 				t.Errorf("ComputeMerkleTree(...) gave diff (want -> got) on blobs:\n%s", diff)
 			}
-			if diff := cmp.Diff(tc.expectedCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
+			if diff := cmp.Diff(tc.wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("ComputeMerkleTree(...) gave diff on file metadata cache access (want -> got) on blobs:\n%s", diff)
+			}
+			if diff := cmp.Diff(tc.wantStats, stats); diff != "" {
+				t.Errorf("ComputeMerkleTree(...) gave diff on stats (want -> got) on blobs:\n%s", diff)
 			}
 		})
 	}
@@ -591,7 +680,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
 		t.Run(tc.desc, func(t *testing.T) {
-			if _, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, &filemetadata.NoopFileMetadataCache{}); err == nil {
+			if _, _, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, &filemetadata.NoopFileMetadataCache{}); err == nil {
 				t.Errorf("ComputeMerkleTree(%v) succeeded, want error", tc.spec)
 			}
 		})

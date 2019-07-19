@@ -366,6 +366,12 @@ type Metadata struct {
 	// ActionDigest is a digest of the action being executed. It can be used
 	// to detect changes in the action between builds.
 	ActionDigest digest.Digest
+	// The total number of input files.
+	InputFiles int
+	// The total number of input directories.
+	InputDirectories int
+	// The overall number of bytes from all the inputs.
+	TotalInputBytes int64
 	// TODO(olaola): Add a lot of other fields.
 }
 

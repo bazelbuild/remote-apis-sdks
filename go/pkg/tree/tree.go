@@ -32,6 +32,20 @@ type treeNode struct {
 	Dirs  map[string]*treeNode
 }
 
+// Stats contains various stats/metadata of the constructed Merkle tree.
+// Note that these stats count the overall input tree, even if some parts of it are not unique.
+// For example, if a file "foo" of 10 bytes occurs 5 times in the tree, it will be counted as 5
+// InputFiles and 50 TotalInputBytes.
+type Stats struct {
+	// The total number of input files.
+	InputFiles int
+	// The total number of input directories.
+	InputDirectories int
+	// The overall number of bytes from all the inputs.
+	TotalInputBytes int64
+	// TODO(olaola): number of FileMetadata cache hits/misses go here.
+}
+
 // shouldIgnore returns whether a given input should be excluded based on the given InputExclusions,
 func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusion) bool {
 	for _, r := range excl {
@@ -79,32 +93,33 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 }
 
 // ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as Chunkers.
-func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache FileMetadataCache) (root digest.Digest, inputs []*chunker.Chunker, err error) {
+func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache FileMetadataCache) (root digest.Digest, inputs []*chunker.Chunker, stats *Stats, err error) {
+	stats = &Stats{}
 	fs := make(map[string]*chunker.Chunker)
 	for _, i := range is.Inputs {
 		if i == "" {
-			return digest.Empty, nil, errors.New("empty Input, use \".\" for entire exec root")
+			return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
 		}
 		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache); e != nil {
-			return digest.Empty, nil, e
+			return digest.Empty, nil, nil, e
 		}
 	}
 	for _, i := range is.VirtualInputs {
 		if i.Path == "" {
-			return digest.Empty, nil, errors.New("empty Path in VirtualInputs")
+			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
 		}
 		fs[i.Path] = chunker.NewFromBlob(i.Contents, chunkSize)
 	}
 	ft := buildTree(fs)
 	var blobs map[digest.Digest]*chunker.Chunker
-	root, blobs, err = packageTree(ft, chunkSize)
+	root, blobs, err = packageTree(ft, chunkSize, stats)
 	if err != nil {
-		return digest.Empty, nil, err
+		return digest.Empty, nil, nil, err
 	}
 	for _, ch := range blobs {
 		inputs = append(inputs, ch)
 	}
-	return root, inputs, nil
+	return root, inputs, stats, nil
 }
 
 func buildTree(files map[string]*chunker.Chunker) *treeNode {
@@ -135,12 +150,12 @@ func buildTree(files map[string]*chunker.Chunker) *treeNode {
 	return root
 }
 
-func packageTree(t *treeNode, chunkSize int) (root digest.Digest, blobs map[digest.Digest]*chunker.Chunker, err error) {
+func packageTree(t *treeNode, chunkSize int, stats *Stats) (root digest.Digest, blobs map[digest.Digest]*chunker.Chunker, err error) {
 	dir := &repb.Directory{}
 	blobs = make(map[digest.Digest]*chunker.Chunker)
 
 	for name, child := range t.Dirs {
-		dg, childBlobs, err := packageTree(child, chunkSize)
+		dg, childBlobs, err := packageTree(child, chunkSize, stats)
 		if err != nil {
 			return digest.Empty, nil, err
 		}
@@ -155,6 +170,8 @@ func packageTree(t *treeNode, chunkSize int) (root digest.Digest, blobs map[dige
 		dg := ch.Digest()
 		dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: true})
 		blobs[dg] = ch
+		stats.InputFiles++
+		stats.TotalInputBytes += dg.Size
 	}
 	sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
 
@@ -165,6 +182,8 @@ func packageTree(t *treeNode, chunkSize int) (root digest.Digest, blobs map[dige
 	ch := chunker.NewFromBlob(encDir, chunkSize)
 	dg := ch.Digest()
 	blobs[dg] = ch
+	stats.TotalInputBytes += dg.Size
+	stats.InputDirectories++
 	return dg, blobs, nil
 }
 
