@@ -264,3 +264,97 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 	}
 	return flatFiles, nil
 }
+
+func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, children map[digest.Digest]*repb.Directory, files map[digest.Digest]*chunker.Chunker, err error) {
+	root = &repb.Directory{}
+	children = make(map[digest.Digest]*repb.Directory)
+	files = make(map[digest.Digest]*chunker.Chunker)
+
+	for name, child := range t.Dirs {
+		chRoot, chDirs, childFiles, err := packageDirectories(child, chunkSize)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		ch, err := chunker.NewFromProto(chRoot, chunkSize)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		dg := ch.Digest()
+		root.Directories = append(root.Directories, &repb.DirectoryNode{Name: name, Digest: dg.ToProto()})
+		for d, b := range childFiles {
+			files[d] = b
+		}
+		children[dg] = chRoot
+		for d, b := range chDirs {
+			children[d] = b
+		}
+	}
+	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
+
+	for name, ch := range t.Files {
+		dg := ch.Digest()
+		root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: true})
+		files[dg] = ch
+	}
+	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
+	return root, children, files, nil
+}
+
+// ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
+// The paths have to be relative to execRoot.
+// It also populates the remote ActionResult, packaging output directories as trees where required.
+func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cache FileMetadataCache) (map[digest.Digest]*chunker.Chunker, *repb.ActionResult, error) {
+	outs := make(map[digest.Digest]*chunker.Chunker)
+	resPb := &repb.ActionResult{}
+	for _, path := range paths {
+		absPath := filepath.Clean(filepath.Join(execRoot, path))
+		normPath, err := filepath.Rel(execRoot, absPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("path %v is not under exec root %v: %v", path, execRoot, err)
+		}
+		meta, err := cache.Get(absPath)
+		if err == nil {
+			// A regular file.
+			ch := chunker.NewFromFile(absPath, meta.Digest, chunkSize)
+			outs[meta.Digest] = ch
+			resPb.OutputFiles = append(resPb.OutputFiles, &repb.OutputFile{Path: normPath, Digest: meta.Digest.ToProto()})
+			continue
+		}
+		e, ok := err.(*filemetadata.FileError)
+		if !ok {
+			return nil, nil, err
+		}
+		if e.IsNotFound {
+			continue // Ignore missing outputs.
+		}
+		if !e.IsDirectory {
+			return nil, nil, err
+		}
+		// A directory.
+		fs := make(map[string]*chunker.Chunker)
+		if e := loadFiles(absPath, nil, "", fs, chunkSize, cache); e != nil {
+			return nil, nil, e
+		}
+		ft := buildTree(fs)
+
+		treePb := &repb.Tree{}
+		rootDir, childDirs, files, err := packageDirectories(ft, chunkSize)
+		if err != nil {
+			return nil, nil, err
+		}
+		treePb.Root = rootDir
+		for _, c := range childDirs {
+			treePb.Children = append(treePb.Children, c)
+		}
+		ch, err := chunker.NewFromProto(treePb, chunkSize)
+		if err != nil {
+			return nil, nil, err
+		}
+		outs[ch.Digest()] = ch
+		for _, ch := range files {
+			outs[ch.Digest()] = ch
+		}
+		resPb.OutputDirectories = append(resPb.OutputDirectories, &repb.OutputDirectory{Path: normPath, TreeDigest: ch.Digest().ToProto()})
+	}
+	return outs, resPb, nil
+}
