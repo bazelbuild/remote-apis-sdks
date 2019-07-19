@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/golang/protobuf/proto"
 )
 
 // DefaultChunkSize is the default chunk size for ByteStream.Write RPCs.
@@ -68,6 +69,15 @@ func NewFromFile(path string, dg digest.Digest, chunkSize int) *Chunker {
 		digest:    dg,
 		path:      path,
 	}
+}
+
+// NewFromProto initializes a Chunker from the marshalled proto message.
+func NewFromProto(msg proto.Message, chunkSize int) (*Chunker, error) {
+	blob, err := proto.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+	return NewFromBlob(blob, chunkSize), nil
 }
 
 // String returns an identifiable representation of the Chunker.
