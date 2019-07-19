@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
@@ -23,9 +24,15 @@ import (
 func TestExecCacheHit(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
+	fooPath := filepath.Join(e.ExecRoot, "foo")
+	fooBlob := []byte("hello")
+	if err := ioutil.WriteFile(fooPath, []byte("hello"), 0777); err != nil {
+		t.Fatalf("failed to write input file %s", fooBlob)
+	}
 	cmd := &command.Command{
 		Args:        []string{"tool"},
 		ExecRoot:    e.ExecRoot,
+		InputSpec:   &command.InputSpec{Inputs: []string{"foo"}},
 		OutputFiles: []string{"a/b/out"},
 	}
 	opt := command.DefaultExecutionOptions()
@@ -35,11 +42,18 @@ func TestExecCacheHit(t *testing.T) {
 
 	res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
 
+	fooDg := digest.NewFromBlob(fooBlob)
+	fooDir := &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDg.ToProto(), IsExecutable: true}}}
+	fooDirDg, err := digest.NewFromMessage(fooDir)
+	if err != nil {
+		t.Fatalf("failed digesting message %v: %v", fooDir, err)
+	}
 	wantMeta := &command.Metadata{
 		CommandDigest:    cmdDg,
 		ActionDigest:     acDg,
 		InputDirectories: 1,
-		TotalInputBytes:  cmdDg.Size + acDg.Size,
+		InputFiles:       1,
+		TotalInputBytes:  fooDirDg.Size + cmdDg.Size + acDg.Size + fooDg.Size,
 	}
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)

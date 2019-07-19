@@ -26,6 +26,7 @@ go_test(
     srcs = ["rexec_test.go"],
     embed = [":go_default_library"],
     deps = [
+        "//go/digest:go_default_library",
         "//go/pkg/command:go_default_library",
         "//go/pkg/fakes:go_default_library",
         "//go/pkg/outerr:go_default_library",
