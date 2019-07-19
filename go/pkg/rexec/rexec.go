@@ -70,12 +70,11 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	}
 	cmdPb := cmd.ToREProto()
 	log.V(2).Infof("%s> Command: \n%s\n", cmdID, proto.MarshalTextString(cmdPb))
-	cmdBlob, err := proto.Marshal(cmdPb)
+	chunkSize := int(c.GrpcClient.ChunkMaxSize)
+	cmdCh, err := chunker.NewFromProto(cmdPb, chunkSize)
 	if err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
-	chunkSize := int(c.GrpcClient.ChunkMaxSize)
-	cmdCh := chunker.NewFromBlob(cmdBlob, chunkSize)
 	cmdDg := cmdCh.Digest()
 	meta.CommandDigest = cmdDg
 	log.V(1).Infof("%s> Command digest: %s", cmdID, cmdDg)
@@ -95,11 +94,10 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	if cmd.Timeout > 0 {
 		acPb.Timeout = ptypes.DurationProto(cmd.Timeout)
 	}
-	acBlob, err := proto.Marshal(acPb)
+	acCh, err := chunker.NewFromProto(acPb, chunkSize)
 	if err != nil {
 		return command.NewLocalErrorResult(err), meta
 	}
-	acCh := chunker.NewFromBlob(acBlob, chunkSize)
 	acDg := acCh.Digest()
 	meta.ActionDigest = acDg
 	meta.TotalInputBytes += cmdDg.Size + acDg.Size

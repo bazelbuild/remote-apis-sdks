@@ -14,7 +14,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
-	"github.com/golang/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -175,11 +174,10 @@ func packageTree(t *treeNode, chunkSize int, stats *Stats) (root digest.Digest, 
 	}
 	sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
 
-	encDir, err := proto.Marshal(dir)
+	ch, err := chunker.NewFromProto(dir, chunkSize)
 	if err != nil {
 		return digest.Empty, nil, err
 	}
-	ch := chunker.NewFromBlob(encDir, chunkSize)
 	dg := ch.Digest()
 	blobs[dg] = ch
 	stats.TotalInputBytes += dg.Size
