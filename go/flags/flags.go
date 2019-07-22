@@ -1,5 +1,4 @@
-// Package flags provides a convenient way to configure the client connection from command line
-// flags.
+// Package flags provides a convenient way to initialize the remote client from flags.
 package flags
 
 import (
