@@ -32,14 +32,6 @@ var (
 	fooDirBlob, barDirBlob, foobarDirBlob = mustMarshal(fooDir), mustMarshal(barDir), mustMarshal(foobarDir)
 	fooDirDg, barDirDg, foobarDirDg       = digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob)
 	fooDirDgPb, barDirDgPb                = fooDirDg.ToProto(), barDirDg.ToProto()
-
-	cmpOpts = []cmp.Option{
-		cmpopts.EquateEmpty(),
-		cmpopts.IgnoreFields(repb.Digest{}, "XXX_sizecache"),
-		cmpopts.IgnoreFields(repb.Directory{}, "XXX_sizecache"),
-		cmpopts.IgnoreFields(repb.DirectoryNode{}, "XXX_sizecache"),
-		cmpopts.IgnoreFields(repb.FileNode{}, "XXX_sizecache"),
-	}
 )
 
 func mustMarshal(p proto.Message) []byte {
@@ -881,7 +873,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			if diff := cmp.Diff(tc.wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
 			}
-			if diff := cmp.Diff(tc.wantResult, gotResult, cmpOpts...); diff != "" {
+			if diff := cmp.Diff(tc.wantResult, gotResult, cmp.Comparer(proto.Equal)); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff on action result (-want +got) on blobs:\n%s", diff)
 			}
 		})
@@ -892,7 +884,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 	tests := []struct {
 		desc  string
 		input []*inputPath
-		// The blobs are everything except the
+		// The blobs are everything else outside of the Tree proto itself.
 		wantBlobs        [][]byte
 		wantTreeRoot     *repb.Directory
 		wantTreeChildren []*repb.Directory
@@ -984,7 +976,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
 			}
 			if len(gotResult.OutputDirectories) != 1 {
-				t.Fatalf("ComputeOutputsToUpload(...) expected result with an output directory, got %v", gotResult)
+				t.Fatalf("ComputeOutputsToUpload(...) expected result with an output directory, got %+v", gotResult)
 			}
 			dir := gotResult.OutputDirectories[0]
 			if dir.Path != "a/b/fooDir" {
@@ -993,7 +985,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			dg := digest.NewFromProtoUnvalidated(dir.TreeDigest)
 			treeBlob, ok := gotBlobs[dg]
 			if !ok {
-				t.Fatalf("ComputeOutputsToUpload(...) tree proto with digest %v not uploaded", dg)
+				t.Fatalf("ComputeOutputsToUpload(...) tree proto with digest %+v not uploaded", dg)
 			}
 			wantBlobs[dg] = treeBlob
 			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
@@ -1003,7 +995,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			if err := proto.Unmarshal(treeBlob, tree); err != nil {
 				t.Errorf("ComputeOutputsToUpload(...) failed unmarshalling tree blob from %v: %v\n", treeBlob, err)
 			}
-			if diff := cmp.Diff(tc.wantTreeRoot, tree.Root, cmpOpts...); diff != "" {
+			if diff := cmp.Diff(tc.wantTreeRoot, tree.Root, cmp.Comparer(proto.Equal)); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on tree root:\n%s", diff)
 			}
 			wantChildren := make(map[digest.Digest]*repb.Directory)
@@ -1014,7 +1006,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			for _, d := range tree.Children {
 				gotChildren[digest.TestNewFromMessage(d)] = d
 			}
-			if diff := cmp.Diff(wantChildren, gotChildren, cmpOpts...); diff != "" {
+			if diff := cmp.Diff(wantChildren, gotChildren, cmp.Comparer(proto.Equal)); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on tree children:\n%s", diff)
 			}
 		})
