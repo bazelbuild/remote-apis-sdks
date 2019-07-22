@@ -30,13 +30,14 @@ type Client struct {
 // Context allows more granular control over various stages of command execution.
 // At any point, any errors that occurred will be stored in the Result.
 type Context struct {
-	ctx        context.Context
-	cmd        *command.Command
-	opt        *command.ExecutionOptions
-	oe         outerr.OutErr
-	client     *Client
-	inputBlobs []*chunker.Chunker
-	resPb      *repb.ActionResult
+	ctx         context.Context
+	cmd         *command.Command
+	opt         *command.ExecutionOptions
+	oe          outerr.OutErr
+	client      *Client
+	inputBlobs  []*chunker.Chunker
+	cmdCh, acCh *chunker.Chunker
+	resPb       *repb.ActionResult
 	// The metadata of the current execution.
 	Metadata *command.Metadata
 	// The result of the current execution, if available.
@@ -105,11 +106,11 @@ func (ec *Context) computeInputs() error {
 	cmdPb := ec.cmd.ToREProto()
 	log.V(2).Infof("%s> Command: \n%s\n", cmdID, proto.MarshalTextString(cmdPb))
 	chunkSize := int(ec.client.GrpcClient.ChunkMaxSize)
-	cmdCh, err := chunker.NewFromProto(cmdPb, chunkSize)
-	if err != nil {
+	var err error
+	if ec.cmdCh, err = chunker.NewFromProto(cmdPb, chunkSize); err != nil {
 		return err
 	}
-	cmdDg := cmdCh.Digest()
+	cmdDg := ec.cmdCh.Digest()
 	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s> Command digest: %s", cmdID, cmdDg)
 	log.V(1).Infof("%s> Computing input Merkle tree...", cmdID)
@@ -129,14 +130,13 @@ func (ec *Context) computeInputs() error {
 	if ec.cmd.Timeout > 0 {
 		acPb.Timeout = ptypes.DurationProto(ec.cmd.Timeout)
 	}
-	acCh, err := chunker.NewFromProto(acPb, chunkSize)
-	if err != nil {
+	if ec.acCh, err = chunker.NewFromProto(acPb, chunkSize); err != nil {
 		return err
 	}
-	acDg := acCh.Digest()
+	acDg := ec.acCh.Digest()
 	log.V(1).Infof("%s> Action digest: %s", cmdID, acDg)
-	ec.inputBlobs = append(ec.inputBlobs, cmdCh)
-	ec.inputBlobs = append(ec.inputBlobs, acCh)
+	ec.inputBlobs = append(ec.inputBlobs, ec.cmdCh)
+	ec.inputBlobs = append(ec.inputBlobs, ec.acCh)
 	ec.Metadata.ActionDigest = acDg
 	ec.Metadata.TotalInputBytes += cmdDg.Size + acDg.Size
 	return nil
@@ -171,12 +171,44 @@ func (ec *Context) GetCachedResult() {
 }
 
 // UpdateCachedResult tries to write local results of the execution to the remote cache.
+// TODO(olaola): optional arguments to override values of local outputs, and also stdout/err.
 func (ec *Context) UpdateCachedResult() {
+	cmdID := ec.cmd.Identifiers.CommandID
+	ec.Result = &command.Result{Status: command.SuccessResultStatus}
+	if ec.opt.DoNotCache {
+		log.V(1).Infof("%s> Command is marked do-not-cache, skipping remote caching.", cmdID)
+		return
+	}
 	if err := ec.computeInputs(); err != nil {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
-	// TODO(olaola): implement this.
+	chunkSize := int(ec.client.GrpcClient.ChunkMaxSize)
+	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
+	blobs, resPb, err := tree.ComputeOutputsToUpload(ec.cmd.ExecRoot, outPaths, chunkSize, ec.client.FileMetadataCache)
+	if err != nil {
+		ec.Result = command.NewLocalErrorResult(err)
+		return
+	}
+	toUpload := []*chunker.Chunker{ec.acCh, ec.cmdCh}
+	for _, ch := range blobs {
+		toUpload = append(toUpload, ch)
+	}
+	log.V(1).Infof("%s> Uploading local outputs...", cmdID)
+	if err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, toUpload...); err != nil {
+		ec.Result = command.NewRemoteErrorResult(err)
+		return
+	}
+	log.V(1).Infof("%s> Updating remote cache...", cmdID)
+	req := &repb.UpdateActionResultRequest{
+		InstanceName: ec.client.GrpcClient.InstanceName,
+		ActionDigest: ec.Metadata.ActionDigest.ToProto(),
+		ActionResult: resPb,
+	}
+	if _, err := ec.client.GrpcClient.UpdateActionResult(ec.ctx, req); err != nil {
+		ec.Result = command.NewRemoteErrorResult(err)
+		return
+	}
 }
 
 // ExecuteRemotely tries to execute the command remotely and download the results. It uploads any
