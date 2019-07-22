@@ -17,11 +17,27 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
-func mustMarshal(t *testing.T, p proto.Message) []byte {
-	t.Helper()
+var (
+	fooBlob, barBlob = []byte("foo"), []byte("bar")
+	fooDg, barDg     = digest.NewFromBlob(fooBlob), digest.NewFromBlob(barBlob)
+	fooDgPb, barDgPb = fooDg.ToProto(), barDg.ToProto()
+
+	fooDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true}}}
+	barDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb, IsExecutable: true}}}
+	foobarDir = &repb.Directory{Files: []*repb.FileNode{
+		{Name: "bar", Digest: barDgPb, IsExecutable: true},
+		{Name: "foo", Digest: fooDgPb, IsExecutable: true},
+	}}
+
+	fooDirBlob, barDirBlob, foobarDirBlob = mustMarshal(fooDir), mustMarshal(barDir), mustMarshal(foobarDir)
+	fooDirDg, barDirDg, foobarDirDg       = digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob)
+	fooDirDgPb, barDirDgPb                = fooDirDg.ToProto(), barDirDg.ToProto()
+)
+
+func mustMarshal(p proto.Message) []byte {
 	b, err := proto.Marshal(p)
 	if err != nil {
-		t.Fatalf("error marshalling proto during test setup: %s", err)
+		panic("error marshalling proto during test setup: %s" + err.Error())
 	}
 	return b
 }
@@ -85,21 +101,6 @@ func (c *callCountingMetadataCache) Get(path string) (*filemetadata.Metadata, er
 }
 
 func TestComputeMerkleTree(t *testing.T) {
-	fooBlob, barBlob := []byte("foo"), []byte("bar")
-	fooDg, barDg := digest.NewFromBlob(fooBlob), digest.NewFromBlob(barBlob)
-	fooDgPb, barDgPb := fooDg.ToProto(), barDg.ToProto()
-
-	fooDir := &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true}}}
-	barDir := &repb.Directory{Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb, IsExecutable: true}}}
-	foobarDir := &repb.Directory{Files: []*repb.FileNode{
-		{Name: "bar", Digest: barDgPb, IsExecutable: true},
-		{Name: "foo", Digest: fooDgPb, IsExecutable: true},
-	}}
-
-	fooDirBlob, barDirBlob, foobarDirBlob := mustMarshal(t, fooDir), mustMarshal(t, barDir), mustMarshal(t, foobarDir)
-	fooDirDg, barDirDg, foobarDirDg := digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob)
-	fooDirDgPb, barDirDgPb := fooDirDg.ToProto(), barDirDg.ToProto()
-
 	tests := []struct {
 		desc  string
 		input []*inputPath
@@ -590,7 +591,7 @@ func TestComputeMerkleTree(t *testing.T) {
 
 		t.Run(tc.desc, func(t *testing.T) {
 			wantBlobs := make(map[digest.Digest][]byte)
-			rootBlob := mustMarshal(t, tc.rootDir)
+			rootBlob := mustMarshal(tc.rootDir)
 			rootDg := digest.NewFromBlob(rootBlob)
 			wantBlobs[rootDg] = rootBlob
 			tc.wantStats.TotalInputBytes += int64(len(rootBlob))
@@ -612,27 +613,27 @@ func TestComputeMerkleTree(t *testing.T) {
 				gotBlobs[ch.Digest()] = blob
 			}
 			if diff := cmp.Diff(rootDg, gotRootDg); diff != "" {
-				t.Errorf("ComputeMerkleTree(...) gave diff (want -> got) on root:\n%s", diff)
+				t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
 				if gotRootBlob, ok := gotBlobs[gotRootDg]; ok {
 					gotRoot := new(repb.Directory)
 					if err := proto.Unmarshal(gotRootBlob, gotRoot); err != nil {
 						t.Errorf("  When unpacking root blob, got error: %s", err)
 					} else {
 						diff := cmp.Diff(tc.rootDir, gotRoot)
-						t.Errorf("  Diff between unpacked roots (want -> got):\n%s", diff)
+						t.Errorf("  Diff between unpacked roots (-want +got):\n%s", diff)
 					}
 				} else {
 					t.Errorf("  Root digest gotten not present in blobs map")
 				}
 			}
 			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
-				t.Errorf("ComputeMerkleTree(...) gave diff (want -> got) on blobs:\n%s", diff)
+				t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on blobs:\n%s", diff)
 			}
 			if diff := cmp.Diff(tc.wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
-				t.Errorf("ComputeMerkleTree(...) gave diff on file metadata cache access (want -> got) on blobs:\n%s", diff)
+				t.Errorf("ComputeMerkleTree(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
 			}
 			if diff := cmp.Diff(tc.wantStats, stats); diff != "" {
-				t.Errorf("ComputeMerkleTree(...) gave diff on stats (want -> got) on blobs:\n%s", diff)
+				t.Errorf("ComputeMerkleTree(...) gave diff on stats (-want +got) on blobs:\n%s", diff)
 			}
 		})
 	}
@@ -763,5 +764,251 @@ func TestFlattenTreeRepeated(t *testing.T) {
 		if wantOut.IsExecutable != got.IsExecutable {
 			t.Errorf("FlattenTree gave IsExecutable diff on %s: want %v, got: %v", path, wantOut.IsExecutable, got.IsExecutable)
 		}
+	}
+}
+
+func TestComputeOutputsToUploadFiles(t *testing.T) {
+	tests := []struct {
+		desc           string
+		input          []*inputPath
+		paths          []string
+		wantResult     *repb.ActionResult
+		wantBlobs      [][]byte
+		wantCacheCalls map[string]int
+	}{
+		{
+			desc:       "Empty paths",
+			input:      nil,
+			wantResult: &repb.ActionResult{},
+		},
+		{
+			desc: "Missing output",
+			input: []*inputPath{
+				{path: "foo", fileContents: fooBlob},
+			},
+			paths:     []string{"foo", "bar"},
+			wantBlobs: [][]byte{fooBlob},
+			wantResult: &repb.ActionResult{
+				OutputFiles: []*repb.OutputFile{&repb.OutputFile{Path: "foo", Digest: fooDgPb}},
+			},
+			wantCacheCalls: map[string]int{
+				"bar": 1,
+				"foo": 1,
+			},
+		},
+		{
+			desc: "Two files",
+			input: []*inputPath{
+				{path: "foo", fileContents: fooBlob},
+				{path: "bar", fileContents: barBlob},
+			},
+			paths:     []string{"foo", "bar"},
+			wantBlobs: [][]byte{fooBlob, barBlob},
+			wantResult: &repb.ActionResult{
+				OutputFiles: []*repb.OutputFile{
+					// Note the outputs are not sorted.
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb},
+					&repb.OutputFile{Path: "bar", Digest: barDgPb},
+				},
+			},
+			wantCacheCalls: map[string]int{
+				"bar": 1,
+				"foo": 1,
+			},
+		},
+		{
+			desc: "Duplicate file contents",
+			input: []*inputPath{
+				{path: "foo", fileContents: fooBlob},
+				{path: "bar", fileContents: fooBlob},
+			},
+			paths:     []string{"foo", "bar"},
+			wantBlobs: [][]byte{fooBlob},
+			wantResult: &repb.ActionResult{
+				OutputFiles: []*repb.OutputFile{
+					// Note the outputs are not sorted.
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb},
+					&repb.OutputFile{Path: "bar", Digest: fooDgPb},
+				},
+			},
+			wantCacheCalls: map[string]int{
+				"bar": 1,
+				"foo": 1,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		root, err := ioutil.TempDir("", tc.desc)
+		if err != nil {
+			t.Fatalf("failed to make temp dir: %v", err)
+		}
+		defer os.RemoveAll(root)
+		if err := construct(root, tc.input); err != nil {
+			t.Fatalf("failed to construct input dir structure: %v", err)
+		}
+
+		t.Run(tc.desc, func(t *testing.T) {
+			wantBlobs := make(map[digest.Digest][]byte)
+			for _, b := range tc.wantBlobs {
+				wantBlobs[digest.NewFromBlob(b)] = b
+			}
+
+			gotBlobs := make(map[digest.Digest][]byte)
+			cache := newCallCountingMetadataCache(root, t)
+			chunkers, gotResult, err := ComputeOutputsToUpload(root, tc.paths, chunker.DefaultChunkSize, cache)
+			if err != nil {
+				t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
+			}
+			for _, ch := range chunkers {
+				blob, err := ch.FullData()
+				if err != nil {
+					t.Errorf("chunker %v FullData() returned error %v", ch, err)
+				}
+				gotBlobs[ch.Digest()] = blob
+			}
+			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
+				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
+			}
+			if diff := cmp.Diff(tc.wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
+			}
+			if diff := cmp.Diff(tc.wantResult, gotResult, cmp.Comparer(proto.Equal)); diff != "" {
+				t.Errorf("ComputeOutputsToUpload(...) gave diff on action result (-want +got) on blobs:\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestComputeOutputsToUploadDirectories(t *testing.T) {
+	tests := []struct {
+		desc  string
+		input []*inputPath
+		// The blobs are everything else outside of the Tree proto itself.
+		wantBlobs        [][]byte
+		wantTreeRoot     *repb.Directory
+		wantTreeChildren []*repb.Directory
+		wantCacheCalls   map[string]int
+	}{
+		{
+			desc: "Two files",
+			input: []*inputPath{
+				{path: "a/b/fooDir/foo", fileContents: fooBlob},
+				{path: "a/b/fooDir/bar", fileContents: barBlob},
+			},
+			wantBlobs:    [][]byte{fooBlob, barBlob},
+			wantTreeRoot: foobarDir,
+			wantCacheCalls: map[string]int{
+				"a/b/fooDir":     2,
+				"a/b/fooDir/bar": 1,
+				"a/b/fooDir/foo": 1,
+			},
+		},
+		{
+			desc: "Duplicate file contents",
+			input: []*inputPath{
+				{path: "a/b/fooDir/foo", fileContents: fooBlob},
+				{path: "a/b/fooDir/bar", fileContents: fooBlob},
+			},
+			wantBlobs: [][]byte{fooBlob, fooBlob},
+			wantTreeRoot: &repb.Directory{Files: []*repb.FileNode{
+				{Name: "bar", Digest: fooDgPb, IsExecutable: true},
+				{Name: "foo", Digest: fooDgPb, IsExecutable: true},
+			}},
+			wantCacheCalls: map[string]int{
+				"a/b/fooDir":     2,
+				"a/b/fooDir/bar": 1,
+				"a/b/fooDir/foo": 1,
+			},
+		},
+		{
+			desc: "Duplicate subdirectories",
+			input: []*inputPath{
+				{path: "a/b/fooDir/dir1/foo", fileContents: fooBlob},
+				{path: "a/b/fooDir/dir2/foo", fileContents: fooBlob},
+			},
+			wantBlobs: [][]byte{fooBlob},
+			wantTreeRoot: &repb.Directory{Directories: []*repb.DirectoryNode{
+				{Name: "dir1", Digest: fooDirDgPb},
+				{Name: "dir2", Digest: fooDirDgPb},
+			}},
+			wantTreeChildren: []*repb.Directory{fooDir},
+			wantCacheCalls: map[string]int{
+				"a/b/fooDir":          2,
+				"a/b/fooDir/dir1":     1,
+				"a/b/fooDir/dir1/foo": 1,
+				"a/b/fooDir/dir2":     1,
+				"a/b/fooDir/dir2/foo": 1,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		root, err := ioutil.TempDir("", tc.desc)
+		if err != nil {
+			t.Fatalf("failed to make temp dir: %v", err)
+		}
+		defer os.RemoveAll(root)
+		if err := construct(root, tc.input); err != nil {
+			t.Fatalf("failed to construct input dir structure: %v", err)
+		}
+
+		t.Run(tc.desc, func(t *testing.T) {
+			wantBlobs := make(map[digest.Digest][]byte)
+			for _, b := range tc.wantBlobs {
+				wantBlobs[digest.NewFromBlob(b)] = b
+			}
+
+			gotBlobs := make(map[digest.Digest][]byte)
+			cache := newCallCountingMetadataCache(root, t)
+			chunkers, gotResult, err := ComputeOutputsToUpload(root, []string{"a/b/fooDir"}, chunker.DefaultChunkSize, cache)
+			if err != nil {
+				t.Fatalf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
+			}
+			for _, ch := range chunkers {
+				blob, err := ch.FullData()
+				if err != nil {
+					t.Errorf("chunker %v FullData() returned error %v", ch, err)
+				}
+				gotBlobs[ch.Digest()] = blob
+			}
+			if diff := cmp.Diff(tc.wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
+			}
+			if len(gotResult.OutputDirectories) != 1 {
+				t.Fatalf("ComputeOutputsToUpload(...) expected result with an output directory, got %+v", gotResult)
+			}
+			dir := gotResult.OutputDirectories[0]
+			if dir.Path != "a/b/fooDir" {
+				t.Errorf("ComputeOutputsToUpload(...) gave result dir path %s, want a/b/fooDir:\n", dir.Path)
+			}
+			dg := digest.NewFromProtoUnvalidated(dir.TreeDigest)
+			treeBlob, ok := gotBlobs[dg]
+			if !ok {
+				t.Fatalf("ComputeOutputsToUpload(...) tree proto with digest %+v not uploaded", dg)
+			}
+			wantBlobs[dg] = treeBlob
+			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
+				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
+			}
+			tree := &repb.Tree{}
+			if err := proto.Unmarshal(treeBlob, tree); err != nil {
+				t.Errorf("ComputeOutputsToUpload(...) failed unmarshalling tree blob from %v: %v\n", treeBlob, err)
+			}
+			if diff := cmp.Diff(tc.wantTreeRoot, tree.Root, cmp.Comparer(proto.Equal)); diff != "" {
+				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on tree root:\n%s", diff)
+			}
+			wantChildren := make(map[digest.Digest]*repb.Directory)
+			for _, d := range tc.wantTreeChildren {
+				wantChildren[digest.TestNewFromMessage(d)] = d
+			}
+			gotChildren := make(map[digest.Digest]*repb.Directory)
+			for _, d := range tree.Children {
+				gotChildren[digest.TestNewFromMessage(d)] = d
+			}
+			if diff := cmp.Diff(wantChildren, gotChildren, cmp.Comparer(proto.Equal)); diff != "" {
+				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on tree children:\n%s", diff)
+			}
+		})
 	}
 }
