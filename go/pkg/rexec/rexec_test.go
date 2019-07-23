@@ -26,7 +26,7 @@ func TestExecCacheHit(t *testing.T) {
 	defer cleanup()
 	fooPath := filepath.Join(e.ExecRoot, "foo")
 	fooBlob := []byte("hello")
-	if err := ioutil.WriteFile(fooPath, []byte("hello"), 0777); err != nil {
+	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
 		t.Fatalf("failed to write input file %s", fooBlob)
 	}
 	cmd := &command.Command{
@@ -287,5 +287,68 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 				t.Errorf("expected output file %s to not be downloaded, but it was", path)
 			}
 		})
+	}
+}
+
+func TestUpdateRemoteCache(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fooPath := filepath.Join(e.ExecRoot, "foo")
+	fooBlob := []byte("hello")
+	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
+		t.Fatalf("failed to write input file %s", fooBlob)
+	}
+	cmd := &command.Command{
+		Args:        []string{"tool"},
+		ExecRoot:    e.ExecRoot,
+		InputSpec:   &command.InputSpec{Inputs: []string{"foo"}},
+		OutputFiles: []string{"a/b/out"},
+	}
+	opt := command.DefaultExecutionOptions()
+	oe := outerr.NewRecordingOutErr()
+
+	ec, err := e.Client.NewContext(context.Background(), cmd, opt, oe)
+	if err != nil {
+		t.Fatalf("failed creating execution context: %v", err)
+	}
+	// Simulating local execution.
+	outPath := filepath.Join(e.ExecRoot, "a/b/out")
+	if err := os.MkdirAll(filepath.Dir(outPath), os.FileMode(0777)); err != nil {
+		t.Fatalf("failed to create output file parents %s: %v", outPath, err)
+	}
+	outBlob := []byte("out!")
+	if err := ioutil.WriteFile(outPath, outBlob, 0777); err != nil {
+		t.Fatalf("failed to write output file %s: %v", outPath, err)
+	}
+	ec.UpdateCachedResult()
+	if diff := cmp.Diff(&command.Result{Status: command.SuccessResultStatus}, ec.Result); diff != "" {
+		t.Errorf("UpdateCachedResult() gave result diff (-want +got):\n%s", diff)
+	}
+	if _, ok := e.Server.CAS.Get(ec.Metadata.ActionDigest); !ok {
+		t.Error("UpdateCachedResult() failed to upload Action proto")
+	}
+	if _, ok := e.Server.CAS.Get(ec.Metadata.CommandDigest); !ok {
+		t.Error("UpdateCachedResult() failed to upload Command proto")
+	}
+	// Now delete the local result and check that we get a remote cache hit and download it.
+	if err := os.Remove(outPath); err != nil {
+		t.Fatalf("failed to remove output file %s", outPath)
+	}
+	ec.GetCachedResult()
+	if diff := cmp.Diff(&command.Result{Status: command.CacheHitResultStatus}, ec.Result); diff != "" {
+		t.Errorf("GetCachedResult() gave result diff (-want +got):\n%s", diff)
+	}
+	contents, err := ioutil.ReadFile(outPath)
+	if err != nil {
+		t.Errorf("error reading from %s: %v", outPath, err)
+	}
+	if !bytes.Equal(contents, outBlob) {
+		t.Errorf("expected %s to contain %q, got %v", outPath, string(outBlob), contents)
+	}
+	if len(oe.Stdout()) != 0 {
+		t.Errorf("GetCachedResult() gave unexpected stdout: %v", oe.Stdout())
+	}
+	if len(oe.Stderr()) != 0 {
+		t.Errorf("GetCachedResult() gave unexpected stdout: %v", oe.Stderr())
 	}
 }

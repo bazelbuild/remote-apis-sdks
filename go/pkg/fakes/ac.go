@@ -96,7 +96,7 @@ func (c *ActionCache) UpdateActionResult(ctx context.Context, req *repb.UpdateAc
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid digest received: %v", req.ActionDigest))
 	}
-	if req.ActionResult != nil {
+	if req.ActionResult == nil {
 		return nil, status.Error(codes.InvalidArgument, "no action result received")
 	}
 	c.results[dg] = req.ActionResult
