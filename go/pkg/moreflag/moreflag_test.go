@@ -1,10 +1,28 @@
 package moreflag
 
 import (
+	"flag"
+	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 )
+
+func TestParseEnvVars(t *testing.T) {
+	f := flag.String("value", "", "Some value")
+
+	ParseEnvVars()
+	if *f != "" {
+		t.Errorf("Flag has wrong value, want '', got %q", *f)
+	}
+
+	os.Setenv("FLAG_value", "test")
+	defer os.Setenv("FLAG_value", "")
+	ParseEnvVars()
+	if *f != "test" {
+		t.Errorf("Flag has wrong value, want 'test', got %q", *f)
+	}
+}
 
 func TestMapValueSet(t *testing.T) {
 	tests := []struct {

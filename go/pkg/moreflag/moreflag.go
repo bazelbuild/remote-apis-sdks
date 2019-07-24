@@ -3,10 +3,23 @@ package moreflag
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 )
+
+// ParseEnvVars parses flags which are set in environment variables using the FLAG_ prefix. That is
+// for a flag named x, x=$FLAG_x if $FLAG_x is set.
+func ParseEnvVars() {
+	flag.VisitAll(func(f *flag.Flag) {
+		v := os.Getenv("FLAG_" + f.Name)
+		if v != "" {
+			flag.Set(f.Name, v)
+		}
+	})
+}
 
 // StringMapValue is a command line flag that interprets a string in the format key1=value1,key2=value2
 // as a map.
