@@ -17,6 +17,7 @@ func TestParseEnvVars(t *testing.T) {
 	}
 
 	os.Setenv("FLAG_value", "test")
+	defer os.Setenv("FLAG_value", "")
 	ParseEnvVars()
 	if *f != "test" {
 		t.Errorf("Flag has wrong value, want 'test', got %q", *f)
