@@ -51,7 +51,7 @@ func initFlags(cmd *command.Command, opt *command.ExecutionOptions) {
 }
 
 func main() {
-	     cmd := &command.Command{InputSpec: &command.InputSpec{}, Identifiers: &command.Identifiers{}}
+	cmd := &command.Command{InputSpec: &command.InputSpec{}, Identifiers: &command.Identifiers{}}
 	opt := &command.ExecutionOptions{}
 	initFlags(cmd, opt)
 	flag.Usage = func() {
