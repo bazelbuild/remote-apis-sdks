@@ -2,10 +2,7 @@
 
 # Source: https://golang.org/misc/git/pre-commit
 
-gofiles=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$')
-[ -z "$gofiles" ] && exit 0
-
-unformatted=$(gofmt -l $gofiles)
+unformatted=$(gofmt -l "$@")
 [ -z "$unformatted" ] && exit 0
 
 # Some files are not gofmt'd. Print message and fail.

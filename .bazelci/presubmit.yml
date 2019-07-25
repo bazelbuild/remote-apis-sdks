@@ -4,7 +4,7 @@ tasks:
   ubuntu1804:
       shell_commands:
           - "echo +++ Check go format"
-          - "bash check-gofmt.sh"
+          - "./check-gofmt.sh `find go -name '*.go'`"
       build_targets:
           - "//..."
       test_targets:
