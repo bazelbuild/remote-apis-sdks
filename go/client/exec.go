@@ -36,8 +36,8 @@ type Action struct {
 	EnvVars map[string]string
 	// InputRoot and InputFiles contain the details of the input tree, in remote execution format.
 	// They should normally be constructed through the PackageTree function.
-	InputRoot  *repb.Digest
-	InputFiles map[digest.Key][]byte
+	InputRoot  digest.Digest
+	InputFiles map[digest.Digest][]byte
 	// OutputFiles is a list of output files requested (full paths).
 	OutputFiles []string
 	// OutputDirs is a list of output directories requested (full paths).
@@ -97,7 +97,8 @@ func (c *Client) ExecuteAction(ctx context.Context, ac *Action) (*repb.ActionRes
 	return res, nil
 }
 
-func (c *Client) checkActionCache(ctx context.Context, acDg *repb.Digest) (*repb.ActionResult, error) {
+// CheckActionCache queries remote action cache, returning an ActionResult or nil if it doesn't exist.
+func (c *Client) CheckActionCache(ctx context.Context, acDg *repb.Digest) (*repb.ActionResult, error) {
 	res, err := c.GetActionResult(ctx, &repb.GetActionResultRequest{
 		InstanceName: c.InstanceName,
 		ActionDigest: acDg,
@@ -151,8 +152,8 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	}
 
 	reAc := &repb.Action{
-		CommandDigest:   comDg,
-		InputRootDigest: ac.InputRoot,
+		CommandDigest:   comDg.ToProto(),
+		InputRootDigest: ac.InputRoot.ToProto(),
 		DoNotCache:      ac.DoNotCache,
 	}
 	// Only set timeout if it's non-zero, because Timeout needs to be nil for the server to use a
@@ -165,12 +166,12 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	if err != nil {
 		return nil, nil, gerrors.WithMessage(err, "marshalling Action proto")
 	}
-	acDg := digest.FromBlob(acBlob)
+	acDg := digest.NewFromBlob(acBlob).ToProto()
 
 	// If the result is cacheable, check if it's already in the cache.
 	if !ac.DoNotCache || !ac.SkipCache {
 		log.V(1).Info("Checking cache")
-		res, err := c.checkActionCache(ctx, acDg)
+		res, err := c.CheckActionCache(ctx, acDg)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -239,7 +239,7 @@ func TestWriteRetries(t *testing.T) {
 	if err != nil {
 		t.Errorf("client.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
 	}
-	if diff := cmp.Diff(digest.FromBlob(blob), gotDg); diff != "" {
+	if diff := cmp.Diff(digest.NewFromBlob(blob), gotDg); diff != "" {
 		t.Errorf("client.WriteBlob(ctx, blob) had diff on digest returned (want -> got):\n%s", diff)
 	}
 }
@@ -249,7 +249,7 @@ func TestReadRetries(t *testing.T) {
 	defer f.shutDown()
 
 	blob := []byte("blob")
-	got, err := f.client.ReadBlob(f.ctx, digest.FromBlob(blob))
+	got, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
 	if err != nil {
 		t.Errorf("client.ReadBlob(ctx, digest) gave error %s, want nil", err)
 	}
@@ -339,9 +339,9 @@ func TestBatchWriteBlobsRpcRetries(t *testing.T) {
 	f := setup(t)
 	defer f.shutDown()
 
-	blobs := map[digest.Key][]byte{
-		digest.ToKey(digest.TestNew("a", 1)): []byte{1},
-		digest.ToKey(digest.TestNew("b", 1)): []byte{2},
+	blobs := map[digest.Digest][]byte{
+		digest.TestNew("a", 1): []byte{1},
+		digest.TestNew("b", 1): []byte{2},
 	}
 	err := f.client.BatchWriteBlobs(f.ctx, blobs)
 	assertUnimplementedErr(t, err, "client.BatchWriteBlobs")
@@ -354,9 +354,9 @@ func TestBatchWriteBlobsRpcRetriesExhausted(t *testing.T) {
 	f.fake.retriableForever = true
 	defer f.shutDown()
 
-	blobs := map[digest.Key][]byte{
-		digest.ToKey(digest.TestNew("a", 1)): []byte{1},
-		digest.ToKey(digest.TestNew("b", 1)): []byte{2},
+	blobs := map[digest.Digest][]byte{
+		digest.TestNew("a", 1): []byte{1},
+		digest.TestNew("b", 1): []byte{2},
 	}
 	err := f.client.BatchWriteBlobs(f.ctx, blobs)
 	assertCanceledErr(t, err, "client.BatchWriteBlobs")
@@ -385,11 +385,11 @@ func (f *flakyBatchUpdateServer) BatchUpdateBlobs(ctx context.Context, req *repb
 		f.numErrors++
 		resp := &repb.BatchUpdateBlobsResponse{
 			Responses: []*repb.BatchUpdateBlobsResponse_Response{
-				{Digest: digest.TestNew("a", 1), Status: &spb.Status{Code: int32(codes.OK)}},
+				{Digest: digest.TestNew("a", 1).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}},
 				// all retriable errors.
-				{Digest: digest.TestNew("b", 1), Status: &spb.Status{Code: int32(codes.Internal)}},
-				{Digest: digest.TestNew("c", 1), Status: &spb.Status{Code: int32(codes.Canceled)}},
-				{Digest: digest.TestNew("d", 1), Status: &spb.Status{Code: int32(codes.Aborted)}},
+				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Canceled)}},
+				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Aborted)}},
 			},
 		}
 		return resp, nil
@@ -398,10 +398,10 @@ func (f *flakyBatchUpdateServer) BatchUpdateBlobs(ctx context.Context, req *repb
 		f.numErrors++
 		resp := &repb.BatchUpdateBlobsResponse{
 			Responses: []*repb.BatchUpdateBlobsResponse_Response{
-				{Digest: digest.TestNew("b", 1), Status: &spb.Status{Code: int32(codes.OK)}},
+				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}},
 				// all retriable errors.
-				{Digest: digest.TestNew("c", 1), Status: &spb.Status{Code: int32(codes.Internal)}},
-				{Digest: digest.TestNew("d", 1), Status: &spb.Status{Code: int32(codes.Canceled)}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Canceled)}},
 			},
 		}
 		return resp, nil
@@ -411,8 +411,8 @@ func (f *flakyBatchUpdateServer) BatchUpdateBlobs(ctx context.Context, req *repb
 		resp := &repb.BatchUpdateBlobsResponse{
 			Responses: []*repb.BatchUpdateBlobsResponse_Response{
 				// One non-retriable error.
-				{Digest: digest.TestNew("c", 1), Status: &spb.Status{Code: int32(codes.Internal)}},
-				{Digest: digest.TestNew("d", 1), Status: &spb.Status{Code: int32(codes.PermissionDenied)}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.PermissionDenied)}},
 			},
 		}
 		return resp, nil
@@ -442,11 +442,11 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 	defer listener.Close()
 	defer client.Close()
 
-	blobs := map[digest.Key][]byte{
-		digest.ToKey(digest.TestNew("a", 1)): []byte{1},
-		digest.ToKey(digest.TestNew("b", 1)): []byte{2},
-		digest.ToKey(digest.TestNew("c", 1)): []byte{3},
-		digest.ToKey(digest.TestNew("d", 1)): []byte{4},
+	blobs := map[digest.Digest][]byte{
+		digest.TestNew("a", 1): []byte{1},
+		digest.TestNew("b", 1): []byte{2},
+		digest.TestNew("c", 1): []byte{3},
+		digest.TestNew("d", 1): []byte{4},
 	}
 	err = client.BatchWriteBlobs(ctx, blobs)
 	if err == nil {
@@ -457,25 +457,25 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 	wantRequests := []*repb.BatchUpdateBlobsRequest{
 		{
 			Requests: []*repb.BatchUpdateBlobsRequest_Request{
-				{Digest: digest.TestNew("a", 1), Data: []byte{1}},
-				{Digest: digest.TestNew("b", 1), Data: []byte{2}},
-				{Digest: digest.TestNew("c", 1), Data: []byte{3}},
-				{Digest: digest.TestNew("d", 1), Data: []byte{4}},
+				{Digest: digest.TestNew("a", 1).ToProto(), Data: []byte{1}},
+				{Digest: digest.TestNew("b", 1).ToProto(), Data: []byte{2}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Data: []byte{3}},
+				{Digest: digest.TestNew("d", 1).ToProto(), Data: []byte{4}},
 			},
 			InstanceName: "instance",
 		},
 		{
 			Requests: []*repb.BatchUpdateBlobsRequest_Request{
-				{Digest: digest.TestNew("b", 1), Data: []byte{2}},
-				{Digest: digest.TestNew("c", 1), Data: []byte{3}},
-				{Digest: digest.TestNew("d", 1), Data: []byte{4}},
+				{Digest: digest.TestNew("b", 1).ToProto(), Data: []byte{2}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Data: []byte{3}},
+				{Digest: digest.TestNew("d", 1).ToProto(), Data: []byte{4}},
 			},
 			InstanceName: "instance",
 		},
 		{
 			Requests: []*repb.BatchUpdateBlobsRequest_Request{
-				{Digest: digest.TestNew("c", 1), Data: []byte{3}},
-				{Digest: digest.TestNew("d", 1), Data: []byte{4}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Data: []byte{3}},
+				{Digest: digest.TestNew("d", 1).ToProto(), Data: []byte{4}},
 			},
 			InstanceName: "instance",
 		},
@@ -497,7 +497,7 @@ func TestGetTreeRetries(t *testing.T) {
 	defer f.shutDown()
 
 	blob := []byte("blob")
-	got, err := f.client.GetDirectoryTree(f.ctx, digest.FromBlob(blob))
+	got, err := f.client.GetDirectoryTree(f.ctx, digest.NewFromBlob(blob).ToProto())
 	if err != nil {
 		t.Errorf("client.GetDirectoryTree(ctx, digest) gave err %s, want nil", err)
 	}

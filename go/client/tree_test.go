@@ -1,10 +1,14 @@
 package client_test
 
 import (
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/kylelemons/godebug/pretty"
@@ -112,6 +116,262 @@ func TestBuildTree(t *testing.T) {
 	}
 }
 
+type inputPath struct {
+	path          string
+	fileContents  []byte
+	isSymlink     bool
+	isAbsolute    bool
+	symlinkTarget string
+}
+
+func construct(dir string, ips []*inputPath) error {
+	for _, ip := range ips {
+		path := filepath.Join(dir, ip.path)
+		if ip.isSymlink {
+			target := ip.symlinkTarget
+			if ip.isAbsolute {
+				target = filepath.Join(dir, target)
+			}
+			if err := os.Symlink(target, path); err != nil {
+				return err
+			}
+			continue
+		}
+		// Regular file.
+		if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+			return err
+		}
+		if err := ioutil.WriteFile(path, ip.fileContents, 0777); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestBuildTreeFromInputs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		desc  string
+		input []*inputPath
+		spec  *command.InputSpec
+		want  *client.FileTree
+	}{
+		{
+			desc:  "empty",
+			input: nil,
+			spec:  &command.InputSpec{},
+			want:  &client.FileTree{},
+		},
+		{
+			desc: "nested",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				{path: "a/b/bar.txt", fileContents: []byte("bar")},
+				{path: "a/b/baz.txt", fileContents: []byte("baz")},
+				{path: "b/bla.txt", fileContents: []byte("bla")},
+				{path: "bla.txt", fileContents: []byte("bla")},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a", "b", "bla.txt"},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bla.txt": []byte("bla")},
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+						Dirs: map[string]*client.FileTree{
+							"b": &client.FileTree{
+								Files: map[string][]byte{
+									"bar.txt": []byte("bar"),
+									"baz.txt": []byte("baz"),
+								},
+							},
+						},
+					},
+					"b": &client.FileTree{Files: map[string][]byte{"bla.txt": []byte("bla")}},
+				},
+			},
+		},
+		{
+			desc: "file_absolute_symlink",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				// The absolute symlink target will actually point to the absolute path of a/foo.txt.
+				{path: "bla.txt", isSymlink: true, isAbsolute: true, symlinkTarget: "a/foo.txt"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a/foo.txt", "bla.txt"},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bla.txt": []byte("foo")},
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+		{
+			desc: "file_relative_symlink",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				{path: "bla.txt", isSymlink: true, symlinkTarget: "a/foo.txt"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a/foo.txt", "bla.txt"},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bla.txt": []byte("foo")},
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+		{
+			desc: "dir_relative_symlink",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				{path: "b", isSymlink: true, symlinkTarget: "a"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a/foo.txt", "b"},
+			},
+			want: &client.FileTree{
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+					"b": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+		{
+			desc: "dir_absolute_symlink",
+			input: []*inputPath{
+				{path: "a/foo.txt", fileContents: []byte("foo")},
+				// The absolute symlink target will actually point to the absolute path of a.
+				{path: "b", isSymlink: true, isAbsolute: true, symlinkTarget: "a"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a/foo.txt", "b"},
+			},
+			want: &client.FileTree{
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+					"b": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+		{
+			desc: "file_exclusions",
+			input: []*inputPath{
+				{path: "a/foo", fileContents: []byte("foo")},
+				{path: "a/b/bar.txt", fileContents: []byte("bar")},
+				{path: "txt/a", fileContents: []byte("a")},
+				{path: "a/b/baz.txt", fileContents: []byte("baz")},
+				{path: "b/bla", fileContents: []byte("bla")},
+				{path: "bla.txt", fileContents: []byte("bla")},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a", "b", "txt", "bla.txt"},
+				InputExclusions: []*command.InputExclusion{
+					&command.InputExclusion{Regex: `txt$`, Type: command.FileInputType},
+				},
+			},
+			want: &client.FileTree{
+				Dirs: map[string]*client.FileTree{
+					"a":   &client.FileTree{Files: map[string][]byte{"foo": []byte("foo")}},
+					"b":   &client.FileTree{Files: map[string][]byte{"bla": []byte("bla")}},
+					"txt": &client.FileTree{Files: map[string][]byte{"a": []byte("a")}},
+				},
+			},
+		},
+		{
+			desc: "dir_exclusions",
+			input: []*inputPath{
+				{path: "b/a", fileContents: []byte("ba")},
+				{path: "a/x", fileContents: []byte("x")},
+				{path: "c/d/aa/x", fileContents: []byte("x")},
+				{path: "bla", fileContents: []byte("bla")},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a", "b", "bla"},
+				InputExclusions: []*command.InputExclusion{
+					&command.InputExclusion{Regex: "a$", Type: command.DirectoryInputType},
+				},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bla": []byte("bla")},
+				Dirs: map[string]*client.FileTree{
+					"b": &client.FileTree{Files: map[string][]byte{"a": []byte("ba")}},
+				},
+			},
+		},
+		{
+			desc: "all_type_exclusions",
+			input: []*inputPath{
+				{path: "b/a", fileContents: []byte("ba")},
+				{path: "a/x", fileContents: []byte("x")},
+				{path: "c/d/aa/x", fileContents: []byte("x")},
+				{path: "bla", fileContents: []byte("bla")},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"a", "b", "bla"},
+				InputExclusions: []*command.InputExclusion{
+					&command.InputExclusion{Regex: "a$", Type: command.UnspecifiedInputType},
+				},
+			},
+			want: &client.FileTree{},
+		},
+		{
+			desc:  "virtual inputs",
+			input: nil,
+			spec: &command.InputSpec{
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "a/foo.txt", Contents: []byte("foo")},
+					&command.VirtualInput{Path: "bar.txt", Contents: []byte("bar")},
+				},
+			},
+			want: &client.FileTree{
+				Files: map[string][]byte{"bar.txt": []byte("bar")},
+				Dirs: map[string]*client.FileTree{
+					"a": &client.FileTree{
+						Files: map[string][]byte{"foo.txt": []byte("foo")},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			root, err := ioutil.TempDir("", tc.desc)
+			if err != nil {
+				t.Fatalf("failed to make temp dir: %v", err)
+			}
+			defer os.RemoveAll(root)
+			if err := construct(root, tc.input); err != nil {
+				t.Fatalf("failed to construct input dir structure: %v", err)
+			}
+			got, err := client.BuildTreeFromInputs(root, tc.spec)
+			if err != nil {
+				t.Errorf("BuildTreeFromInputs(%s, %v) = _, %v want _, nil", root, tc.spec, err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("client.BuildTree(%+v) gave diff (-want +got):\n%s", tc.input, diff)
+			}
+		})
+	}
+}
+
 func MustMarshal(t *testing.T, p proto.Message) []byte {
 	t.Helper()
 	b, err := proto.Marshal(p)
@@ -123,17 +383,19 @@ func MustMarshal(t *testing.T, p proto.Message) []byte {
 
 func TestPackageTree(t *testing.T) {
 	fooBlob, barBlob := []byte("foo"), []byte("bar")
-	fooDg, barDg := digest.FromBlob(fooBlob), digest.FromBlob(barBlob)
+	fooDg, barDg := digest.NewFromBlob(fooBlob), digest.NewFromBlob(barBlob)
+	fooDgPb, barDgPb := fooDg.ToProto(), barDg.ToProto()
 
-	fooDir := &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDg, IsExecutable: true}}}
-	barDir := &repb.Directory{Files: []*repb.FileNode{{Name: "bar", Digest: barDg, IsExecutable: true}}}
+	fooDir := &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true}}}
+	barDir := &repb.Directory{Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb, IsExecutable: true}}}
 	foobarDir := &repb.Directory{Files: []*repb.FileNode{
-		{Name: "bar", Digest: barDg, IsExecutable: true},
-		{Name: "foo", Digest: fooDg, IsExecutable: true},
+		{Name: "bar", Digest: barDgPb, IsExecutable: true},
+		{Name: "foo", Digest: fooDgPb, IsExecutable: true},
 	}}
 
 	fooDirBlob, barDirBlob, foobarDirBlob := MustMarshal(t, fooDir), MustMarshal(t, barDir), MustMarshal(t, foobarDir)
-	fooDirDg, barDirDg, foobarDirDg := digest.FromBlob(fooDirBlob), digest.FromBlob(barDirBlob), digest.FromBlob(foobarDirBlob)
+	fooDirDg, barDirDg, foobarDirDg := digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob)
+	fooDirDgPb, barDirDgPb := fooDirDg.ToProto(), barDirDg.ToProto()
 
 	tests := []struct {
 		desc  string
@@ -163,8 +425,8 @@ func TestPackageTree(t *testing.T) {
 				"barDir": {Files: map[string][]byte{"bar": barBlob}},
 			}},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
-				{Name: "barDir", Digest: barDirDg},
-				{Name: "fooDir", Digest: fooDirDg},
+				{Name: "barDir", Digest: barDirDgPb},
+				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
 		},
@@ -175,8 +437,8 @@ func TestPackageTree(t *testing.T) {
 				"foobarDir": {Files: map[string][]byte{"foo": fooBlob, "bar": barBlob}},
 			}},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
-				{Name: "fooDir", Digest: fooDirDg},
-				{Name: "foobarDir", Digest: foobarDirDg},
+				{Name: "fooDir", Digest: fooDirDgPb},
+				{Name: "foobarDir", Digest: foobarDirDg.ToProto()},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, foobarDirBlob},
 		},
@@ -187,8 +449,8 @@ func TestPackageTree(t *testing.T) {
 				"fooDir2": {Files: map[string][]byte{"foo": fooBlob}},
 			}},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
-				{Name: "fooDir1", Digest: fooDirDg},
-				{Name: "fooDir2", Digest: fooDirDg},
+				{Name: "fooDir1", Digest: fooDirDgPb},
+				{Name: "fooDir2", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
 		},
@@ -199,8 +461,8 @@ func TestPackageTree(t *testing.T) {
 				Dirs:  map[string]*client.FileTree{"fooDir": {Files: map[string][]byte{"foo": fooBlob}}},
 			},
 			rootDir: &repb.Directory{
-				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDg}},
-				Files:       []*repb.FileNode{{Name: "fooDirBlob", Digest: fooDirDg, IsExecutable: true}},
+				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDgPb}},
+				Files:       []*repb.FileNode{{Name: "fooDirBlob", Digest: fooDirDgPb, IsExecutable: true}},
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
 		},
@@ -238,28 +500,28 @@ func TestPackageTree(t *testing.T) {
 			},
 			rootDir: &repb.Directory{
 				Files: []*repb.FileNode{
-					{Name: "a", Digest: fooDg, IsExecutable: true},
-					{Name: "b", Digest: fooDg, IsExecutable: true},
-					{Name: "c", Digest: fooDg, IsExecutable: true},
-					{Name: "d", Digest: fooDg, IsExecutable: true},
-					{Name: "e", Digest: fooDg, IsExecutable: true},
-					{Name: "f", Digest: fooDg, IsExecutable: true},
-					{Name: "g", Digest: fooDg, IsExecutable: true},
-					{Name: "h", Digest: fooDg, IsExecutable: true},
-					{Name: "i", Digest: fooDg, IsExecutable: true},
-					{Name: "j", Digest: fooDg, IsExecutable: true},
+					{Name: "a", Digest: fooDgPb, IsExecutable: true},
+					{Name: "b", Digest: fooDgPb, IsExecutable: true},
+					{Name: "c", Digest: fooDgPb, IsExecutable: true},
+					{Name: "d", Digest: fooDgPb, IsExecutable: true},
+					{Name: "e", Digest: fooDgPb, IsExecutable: true},
+					{Name: "f", Digest: fooDgPb, IsExecutable: true},
+					{Name: "g", Digest: fooDgPb, IsExecutable: true},
+					{Name: "h", Digest: fooDgPb, IsExecutable: true},
+					{Name: "i", Digest: fooDgPb, IsExecutable: true},
+					{Name: "j", Digest: fooDgPb, IsExecutable: true},
 				},
 				Directories: []*repb.DirectoryNode{
-					{Name: "k", Digest: fooDirDg},
-					{Name: "l", Digest: fooDirDg},
-					{Name: "m", Digest: fooDirDg},
-					{Name: "n", Digest: fooDirDg},
-					{Name: "o", Digest: fooDirDg},
-					{Name: "p", Digest: fooDirDg},
-					{Name: "q", Digest: fooDirDg},
-					{Name: "r", Digest: fooDirDg},
-					{Name: "s", Digest: fooDirDg},
-					{Name: "t", Digest: fooDirDg},
+					{Name: "k", Digest: fooDirDgPb},
+					{Name: "l", Digest: fooDirDgPb},
+					{Name: "m", Digest: fooDirDgPb},
+					{Name: "n", Digest: fooDirDgPb},
+					{Name: "o", Digest: fooDirDgPb},
+					{Name: "p", Digest: fooDirDgPb},
+					{Name: "q", Digest: fooDirDgPb},
+					{Name: "r", Digest: fooDirDgPb},
+					{Name: "s", Digest: fooDirDgPb},
+					{Name: "t", Digest: fooDirDgPb},
 				},
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
@@ -268,12 +530,12 @@ func TestPackageTree(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			wantBlobs := make(map[digest.Key][]byte)
+			wantBlobs := make(map[digest.Digest][]byte)
 			rootBlob := MustMarshal(t, tc.rootDir)
-			rootDg := digest.FromBlob(rootBlob)
-			wantBlobs[digest.ToKey(rootDg)] = rootBlob
+			rootDg := digest.NewFromBlob(rootBlob)
+			wantBlobs[rootDg] = rootBlob
 			for _, b := range tc.additionalBlobs {
-				wantBlobs[digest.ToKey(digest.FromBlob(b))] = b
+				wantBlobs[digest.NewFromBlob(b)] = b
 			}
 
 			gotRootDg, gotBlobs, err := client.PackageTree(tc.input)
@@ -282,7 +544,7 @@ func TestPackageTree(t *testing.T) {
 			}
 			if diff := cmp.Diff(rootDg, gotRootDg); diff != "" {
 				t.Errorf("client.PackageTree(...) gave diff (want -> got) on root:\n%s", diff)
-				if gotRootBlob, ok := gotBlobs[digest.ToKey(gotRootDg)]; ok {
+				if gotRootBlob, ok := gotBlobs[gotRootDg]; ok {
 					gotRoot := new(repb.Directory)
 					if err := proto.Unmarshal(gotRootBlob, gotRoot); err != nil {
 						t.Errorf("  When unpacking root blob, got error: %s", err)
@@ -375,30 +637,30 @@ func TestFlattenTreeRepeated(t *testing.T) {
 	barDigest := digest.TestNew("1002", 2)
 	bazDigest := digest.TestNew("1003", 10)
 	dirC := &repb.Directory{}
-	cDigest := digest.TestFromProto(dirC)
+	cDigest := digest.TestNewFromMessage(dirC)
 	dirB := &repb.Directory{
 		Files: []*repb.FileNode{
-			{Name: "foo", Digest: fooDigest, IsExecutable: false},
-			{Name: "bar", Digest: barDigest, IsExecutable: true},
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: false},
+			{Name: "bar", Digest: barDigest.ToProto(), IsExecutable: true},
 		},
 		Directories: []*repb.DirectoryNode{
-			{Name: "c", Digest: cDigest},
+			{Name: "c", Digest: cDigest.ToProto()},
 		},
 	}
-	bDigest := digest.TestFromProto(dirB)
+	bDigest := digest.TestNewFromMessage(dirB)
 	dirA := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
-			{Name: "b", Digest: bDigest},
+			{Name: "b", Digest: bDigest.ToProto()},
 		}}
-	aDigest := digest.TestFromProto(dirA)
+	aDigest := digest.TestNewFromMessage(dirA)
 	root := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
-			{Name: "a", Digest: aDigest},
-			{Name: "b", Digest: bDigest},
-			{Name: "c", Digest: cDigest},
+			{Name: "a", Digest: aDigest.ToProto()},
+			{Name: "b", Digest: bDigest.ToProto()},
+			{Name: "c", Digest: cDigest.ToProto()},
 		},
 		Files: []*repb.FileNode{
-			{Name: "baz", Digest: bazDigest},
+			{Name: "baz", Digest: bazDigest.ToProto()},
 		},
 	}
 	tree := &repb.Tree{
@@ -410,11 +672,11 @@ func TestFlattenTreeRepeated(t *testing.T) {
 		t.Errorf("FlattenTree gave error %v", err)
 	}
 	wantOutputs := map[string]*client.Output{
-		"x/baz":     &client.Output{Digest: digest.ToKey(bazDigest)},
-		"x/a/b/foo": &client.Output{Digest: digest.ToKey(fooDigest)},
-		"x/a/b/bar": &client.Output{Digest: digest.ToKey(barDigest), IsExecutable: true},
-		"x/b/foo":   &client.Output{Digest: digest.ToKey(fooDigest)},
-		"x/b/bar":   &client.Output{Digest: digest.ToKey(barDigest), IsExecutable: true},
+		"x/baz":     &client.Output{Digest: bazDigest},
+		"x/a/b/foo": &client.Output{Digest: fooDigest},
+		"x/a/b/bar": &client.Output{Digest: barDigest, IsExecutable: true},
+		"x/b/foo":   &client.Output{Digest: fooDigest},
+		"x/b/bar":   &client.Output{Digest: barDigest, IsExecutable: true},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenTree gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))

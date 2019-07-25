@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/actas"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/retry"
-	log "github.com/golang/glog"
-
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -23,6 +22,7 @@ import (
 
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	log "github.com/golang/glog"
 	emptypb "github.com/golang/protobuf/ptypes/empty"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
@@ -31,9 +31,6 @@ import (
 )
 
 const (
-	// DefaultMaxWriteChunkSize is the default max chunk size for ByteStream.Write RPCs.
-	DefaultMaxWriteChunkSize = 1024 * 1024
-
 	scopes      = "https://www.googleapis.com/auth/cloud-platform"
 	authority   = "test-server"
 	localPrefix = "localhost"
@@ -61,12 +58,13 @@ type Client struct {
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
 	// This field is logically "protected" and is intended for use by extensions of Client.
-	Retrier        *Retrier
-	chunkMaxSize   ChunkMaxSize
-	useBatchOps    UseBatchOps
-	casConcurrency CASConcurrency
-	rpcTimeout     time.Duration
-	creds          credentials.PerRPCCredentials
+	Retrier *Retrier
+	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
+	ChunkMaxSize ChunkMaxSize
+	useBatchOps  UseBatchOps
+	casUploaders chan bool
+	rpcTimeout   time.Duration
+	creds        credentials.PerRPCCredentials
 	// Used to close the underlying connection.
 	io.Closer
 }
@@ -81,7 +79,7 @@ type ChunkMaxSize int
 
 // Apply sets the client's maximal chunk size s.
 func (s ChunkMaxSize) Apply(c *Client) {
-	c.chunkMaxSize = s
+	c.ChunkMaxSize = s
 }
 
 // UseBatchOps can be set to true to use batch CAS operations when uploading multiple blobs, or
@@ -93,14 +91,16 @@ func (u UseBatchOps) Apply(c *Client) {
 	c.useBatchOps = u
 }
 
-// CASConcurrency is the number of simultaneous requests that will be issued for batch CAS upload an
-// download operations. It is a per-operation limit, not a global one, so N separate calls to CAS
-// methods can result in N * CASConcurrency requests in flight at once.
+// CASConcurrency is the number of simultaneous requests that will be issued for CAS upload and
+// download operations.
 type CASConcurrency int
+
+// DefaultCASConcurrency is the default maximum number of concurrent upload and download operations.
+const DefaultCASConcurrency = 50
 
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
-	c.casConcurrency = cy
+	c.casUploaders = make(chan bool, cy)
 }
 
 // PerRPCCreds sets per-call options that will be set on all RPCs to the underlying connection.
@@ -225,18 +225,18 @@ func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client
 	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
 	client := &Client{
-		InstanceName:   instanceName,
-		actionCache:    regrpc.NewActionCacheClient(conn),
-		byteStream:     bsgrpc.NewByteStreamClient(conn),
-		cas:            regrpc.NewContentAddressableStorageClient(conn),
-		execution:      regrpc.NewExecutionClient(conn),
-		capabilities:   regrpc.NewCapabilitiesClient(conn),
-		operations:     opgrpc.NewOperationsClient(conn),
-		rpcTimeout:     time.Minute,
-		Closer:         conn,
-		chunkMaxSize:   DefaultMaxWriteChunkSize,
-		useBatchOps:    true,
-		casConcurrency: 10,
+		InstanceName: instanceName,
+		actionCache:  regrpc.NewActionCacheClient(conn),
+		byteStream:   bsgrpc.NewByteStreamClient(conn),
+		cas:          regrpc.NewContentAddressableStorageClient(conn),
+		execution:    regrpc.NewExecutionClient(conn),
+		capabilities: regrpc.NewCapabilitiesClient(conn),
+		operations:   opgrpc.NewOperationsClient(conn),
+		rpcTimeout:   time.Minute,
+		Closer:       conn,
+		ChunkMaxSize: chunker.DefaultChunkSize,
+		useBatchOps:  true,
+		casUploaders: make(chan bool, DefaultCASConcurrency),
 	}
 	for _, o := range opts {
 		o.Apply(client)

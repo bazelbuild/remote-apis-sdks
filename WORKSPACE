@@ -6,8 +6,11 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 # Go rules.
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "86ae934bd4c43b99893fc64be9d9fc684b81461581df7ea8fc291c816f5ee8c5",
-    urls = ["https://github.com/bazelbuild/rules_go/releases/download/0.18.3/rules_go-0.18.3.tar.gz"],
+    urls = [
+        "https://storage.googleapis.com/bazel-mirror/github.com/bazelbuild/rules_go/releases/download/0.18.6/rules_go-0.18.6.tar.gz",
+        "https://github.com/bazelbuild/rules_go/releases/download/0.18.6/rules_go-0.18.6.tar.gz",
+    ],
+    sha256 = "f04d2373bcaf8aa09bccb08a98a57e721306c8f6043a2a0ee610fd6853dcde3d",
 )
 
 # Gazelle.
@@ -42,11 +45,9 @@ load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
 
 grpc_deps()
 
-# Go dependencies.
-#
-# Add or update repos using Gazelle:
-# https://github.com/bazelbuild/bazel-gazelle#update-repos
-
+# Go dependencies, add or update repos using Gazelle:
+#  * For more details: https://github.com/bazelbuild/bazel-gazelle#update-repos
+#  * Also manually update the repo in remote-apis-sdks-deps.bzl.
 go_repository(
     name = "com_github_pkg_errors",
     commit = "27936f6d90f9c8e1145f11ed52ffffbfdb9e0af7",
@@ -123,7 +124,9 @@ go_repository(
     commit = "c0682f068a6044f395a7e28526abe1de56beffa8",
     importpath = "github.com/bazelbuild/remote-apis",
 )
+
 load("@com_github_bazelbuild_remote_apis//:repository_rules.bzl", "switched_rules_by_language")
+
 switched_rules_by_language(
     name = "bazel_remote_apis_imports",
     go = True,
