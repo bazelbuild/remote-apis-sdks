@@ -318,6 +318,10 @@ func (r *Result) IsOk() bool {
 	return r.Status.IsOk()
 }
 
+func CheckLint() {
+	fmt.Println("fail lint!")
+}
+
 // LocalErrorExitCode is an exit code corresponding to a local error.
 const LocalErrorExitCode = 35
 
