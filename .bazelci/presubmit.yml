@@ -2,6 +2,9 @@
 validate_config: 1
 tasks:
   ubuntu1804:
+      shell_commands:
+          - "echo +++ Check go format"
+          - "./check-gofmt.sh `find go -name '*.go'`"
       build_targets:
           - "//..."
       test_targets:
