@@ -291,6 +291,11 @@ var resultStatuses = [...]string{
 	"LocalErrorResultStatus",
 }
 
+// IsOk returns whether the status indicates a successful action.
+func (s ResultStatus) IsOk() bool {
+	return s == SuccessResultStatus || s == CacheHitResultStatus
+}
+
 func (s ResultStatus) String() string {
 	if UnspecifiedResultStatus <= s && s <= LocalErrorResultStatus {
 		return resultStatuses[s]
@@ -306,6 +311,11 @@ type Result struct {
 	Status ResultStatus
 	// Any error encountered.
 	Err error
+}
+
+// IsOk returns whether the result was successful.
+func (r *Result) IsOk() bool {
+	return r.Status.IsOk()
 }
 
 // LocalErrorExitCode is an exit code corresponding to a local error.
