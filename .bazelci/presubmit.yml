@@ -6,6 +6,7 @@ tasks:
           - "echo +++ Check go format"
           - "./check-gofmt.sh `find go -name '*.go'`"
           - "echo +++ Check go lint"
+          - "go get -u golang.org/x/lint/golint"
           - "golint ./..."
       build_targets:
           - "//..."
