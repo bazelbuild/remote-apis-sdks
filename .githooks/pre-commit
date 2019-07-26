@@ -1,0 +1,11 @@
+#!/bin/sh
+
+
+########################################################################
+# Check that all Go files have been gofmt'd.
+########################################################################
+# Find all change go files.
+gofiles=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$')
+[ -z "$gofiles" ] && exit 0
+
+source ./check-gofmt.sh "$gofiles"
