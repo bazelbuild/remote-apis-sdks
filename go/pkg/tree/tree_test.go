@@ -90,7 +90,7 @@ func newCallCountingMetadataCache(execRoot string, t *testing.T) *callCountingMe
 	}
 }
 
-func (c *callCountingMetadataCache) Get(path string) (*filemetadata.Metadata, error) {
+func (c *callCountingMetadataCache) Get(path string) *filemetadata.Metadata {
 	c.t.Helper()
 	p, err := filepath.Rel(c.execRoot, path)
 	if err != nil {
