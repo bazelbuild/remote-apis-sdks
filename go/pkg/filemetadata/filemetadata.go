@@ -14,6 +14,7 @@ type Metadata struct {
 	Digest       digest.Digest
 	IsExecutable bool
 	MTime        time.Time
+	Err          error
 }
 
 // FileError is the error returned by the Compute function.
@@ -30,35 +31,33 @@ func (e *FileError) Error() string {
 
 // Compute computes a Metadata from a given file path.
 // If an error is returned, it will be of type *FileError.
-func Compute(filename string) (*Metadata, error) {
+func Compute(filename string) *Metadata {
+	md := &Metadata{Digest: digest.Empty}
 	file, err := os.Stat(filename)
 	if err != nil {
 		fe := &FileError{Err: err}
 		if os.IsNotExist(err) {
 			fe.IsNotFound = true
 		}
-		return nil, fe
+		md.Err = fe
+		return md
 	}
+	md.MTime = file.ModTime()
 	mode := file.Mode()
+	md.IsExecutable = (mode & 0100) != 0
 	if mode.IsDir() {
-		return nil, &FileError{IsDirectory: true, Err: fmt.Errorf("%s is a directory", filename)}
+		md.Err = &FileError{IsDirectory: true, Err: fmt.Errorf("%s is a directory", filename)}
+		return md
 	}
-	dg, err := digest.NewFromFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	return &Metadata{
-		Digest:       dg,
-		IsExecutable: (mode & 0100) != 0,
-		MTime:        file.ModTime(),
-	}, nil
+	md.Digest, md.Err = digest.NewFromFile(filename)
+	return md
 }
 
 // NoopFileMetadataCache is a non-caching metadata cache (always computes).
 type NoopFileMetadataCache struct{}
 
 // Get computes the metadata from the file contents.
-// If an error is returned, it will be of type *FileError.
-func (c *NoopFileMetadataCache) Get(path string) (*Metadata, error) {
+// If an error is returned, it will be in Metadata.Err of type *FileError.
+func (c *NoopFileMetadataCache) Get(path string) *Metadata {
 	return Compute(path)
 }
