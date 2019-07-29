@@ -20,7 +20,7 @@ import (
 
 // FileMetadataCache is a cache for file contents->Metadata.
 type FileMetadataCache interface {
-	Get(path string) (*filemetadata.Metadata, error)
+	Get(path string) *filemetadata.Metadata
 }
 
 // treeNode represents a file tree, which is an intermediate representation used to encode a Merkle
@@ -62,11 +62,11 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 // recursively), and loads their contents into the provided map.
 func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*chunker.Chunker, chunkSize int, cache FileMetadataCache) error {
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
-	meta, err := cache.Get(absPath)
+	meta := cache.Get(absPath)
 	t := command.FileInputType
-	if err != nil {
-		if e, ok := err.(*filemetadata.FileError); !ok || !e.IsDirectory {
-			return err
+	if meta.Err != nil {
+		if e, ok := meta.Err.(*filemetadata.FileError); !ok || !e.IsDirectory {
+			return meta.Err
 		}
 		t = command.DirectoryInputType
 	}
@@ -312,23 +312,23 @@ func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cach
 		if err != nil {
 			return nil, nil, fmt.Errorf("path %v is not under exec root %v: %v", path, execRoot, err)
 		}
-		meta, err := cache.Get(absPath)
-		if err == nil {
+		meta := cache.Get(absPath)
+		if meta.Err == nil {
 			// A regular file.
 			ch := chunker.NewFromFile(absPath, meta.Digest, chunkSize)
 			outs[meta.Digest] = ch
 			resPb.OutputFiles = append(resPb.OutputFiles, &repb.OutputFile{Path: normPath, Digest: meta.Digest.ToProto()})
 			continue
 		}
-		e, ok := err.(*filemetadata.FileError)
+		e, ok := meta.Err.(*filemetadata.FileError)
 		if !ok {
-			return nil, nil, err
+			return nil, nil, meta.Err
 		}
 		if e.IsNotFound {
 			continue // Ignore missing outputs.
 		}
 		if !e.IsDirectory {
-			return nil, nil, err
+			return nil, nil, meta.Err
 		}
 		// A directory.
 		fs := make(map[string]*chunker.Chunker)

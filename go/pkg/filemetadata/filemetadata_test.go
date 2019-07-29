@@ -40,8 +40,8 @@ func TestCompute(t *testing.T) {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
 			after := time.Now().Truncate(margin).Add(margin)
-			got, err := Compute(filename)
-			if err != nil {
+			got := Compute(filename)
+			if got.Err != nil {
 				t.Errorf("Compute(%v) failed. Got error: %v", filename, err)
 			}
 			want := &Metadata{
@@ -55,6 +55,26 @@ func TestCompute(t *testing.T) {
 				t.Errorf("Compute(%v) returned MTime %v, expected time in (%v, %v).", filename, got.MTime, before, after)
 			}
 		})
+	}
+}
+
+func TestComputeDirectory(t *testing.T) {
+	margin := time.Second
+	before := time.Now().Truncate(margin)
+	tmpDir, err := ioutil.TempDir("", "")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory")
+	}
+	after := time.Now().Truncate(margin).Add(margin)
+	got := Compute(tmpDir)
+	if fe, ok := got.Err.(*FileError); !ok || !fe.IsDirectory {
+		t.Errorf("Compute(%v).Err = %v, want FileError{IsDirectory:true}", tmpDir, got.Err)
+	}
+	if got.Digest != digest.Empty {
+		t.Errorf("Compute(%v).Digest = %v, want %v", tmpDir, got.Digest, digest.Empty)
+	}
+	if got.MTime.Before(before) || got.MTime.After(after) {
+		t.Errorf("Compute(%v) returned MTime %v, expected time in (%v, %v).", tmpDir, got.MTime, before, after)
 	}
 }
 
