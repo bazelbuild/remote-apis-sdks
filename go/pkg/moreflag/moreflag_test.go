@@ -143,3 +143,58 @@ func TestMapValueSetErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestListValueSet(t *testing.T) {
+	tests := []struct {
+		name     string
+		str      string
+		wantList []string
+		wantStr  string
+	}{
+		{
+			name:     "ok - single val",
+			str:      "foo",
+			wantList: []string{"foo"},
+			wantStr:  "foo",
+		},
+		{
+			name:     "ok - multiple vals",
+			str:      "foo,bar",
+			wantList: []string{"foo", "bar"},
+			wantStr:  "foo,bar",
+		},
+		{
+			name:     "ok - extra comma",
+			str:      "foo,",
+			wantList: []string{"foo"},
+			wantStr:  "foo",
+		},
+		{
+			name:     "ok - double comma",
+			str:      "foo,,bar",
+			wantList: []string{"foo", "bar"},
+			wantStr:  "foo,bar",
+		},
+		{
+			name:     "empty",
+			str:      "",
+			wantList: []string{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var l []string
+			lv := (*StringListValue)(&l)
+			if err := lv.Set(test.str); err != nil {
+				t.Errorf("StringListValue.Set(%v) returned error: %v", test.str, err)
+			}
+			if diff := cmp.Diff(test.wantList, ([]string)(*lv)); diff != "" {
+				t.Errorf("StringListValue.Set(%v) produced diff in map, (-want +got): %s", test.str, diff)
+			}
+			got := lv.String()
+			if test.wantStr != got {
+				t.Errorf("StringListValue.String() produced diff. Want %s, got %s", test.wantStr, got)
+			}
+		})
+	}
+}

@@ -80,6 +80,9 @@ func (m *StringListValue) String() string {
 
 // Set for StringListValue accepts one list of comma-separated values.
 func (m *StringListValue) Set(s string) error {
-	*m = StringListValue(strings.Split(s, ","))
+	splitFn := func(c rune) bool {
+		return c == ','
+	}
+	*m = StringListValue(strings.FieldsFunc(s, splitFn))
 	return nil
 }
