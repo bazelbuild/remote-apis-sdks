@@ -8,17 +8,17 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func TestParse(t *testing.T) {
+func TestParseFromEnv(t *testing.T) {
 	f := flag.String("value", "", "Some value")
 
-	Parse()
+	ParseFromEnv()
 	if *f != "" {
 		t.Errorf("Flag has wrong value, want '', got %q", *f)
 	}
 
 	os.Setenv("FLAG_value", "test")
 	defer os.Setenv("FLAG_value", "")
-	Parse()
+	ParseFromEnv()
 	if *f != "test" {
 		t.Errorf("Flag has wrong value, want 'test', got %q", *f)
 	}

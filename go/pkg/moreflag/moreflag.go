@@ -13,14 +13,22 @@ import (
 // Parse parses flags which are set in environment variables using the FLAG_ prefix. That is
 // for a flag named x, x=$FLAG_x if $FLAG_x is set. If the flag is set in the command line, the
 // command line value of the flag takes precedence over the environment variable value.
+// It also calls flag.Parse() to parse flags sent directly as arguments.
 func Parse() {
+	ParseFromEnv()
+	flag.Parse()
+}
+
+// ParseFromEnv parses flags which are set in environment variables using the FLAG_ prefix. That is
+// for a flag named x, x=$FLAG_x if $FLAG_x is set. If the flag is set in the command line, the
+// command line value of the flag takes precedence over the environment variable value.
+func ParseFromEnv() {
 	flag.VisitAll(func(f *flag.Flag) {
 		v := os.Getenv("FLAG_" + f.Name)
 		if v != "" {
 			flag.Set(f.Name, v)
 		}
 	})
-	flag.Parse()
 }
 
 // StringMapValue is a command line flag that interprets a string in the format key1=value1,key2=value2
