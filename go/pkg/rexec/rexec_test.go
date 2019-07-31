@@ -345,6 +345,12 @@ func TestUpdateRemoteCache(t *testing.T) {
 	if !bytes.Equal(contents, outBlob) {
 		t.Errorf("expected %s to contain %q, got %v", outPath, string(outBlob), contents)
 	}
+	file, err := os.Stat(outPath)
+	if err != nil {
+		t.Errorf("error reading from %s: %v", outPath, err)
+	} else if (file.Mode() & 0100) == 0 {
+		t.Errorf("expected %s to have executable permission", outPath)
+	}
 	if len(oe.Stdout()) != 0 {
 		t.Errorf("GetCachedResult() gave unexpected stdout: %v", oe.Stdout())
 	}
