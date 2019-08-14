@@ -121,7 +121,7 @@ http_archive(
 
 go_repository(
     name = "com_github_bazelbuild_remote_apis",
-    commit = "c0682f068a6044f395a7e28526abe1de56beffa8",
+    commit = "e7282cf0f0e16e7ba84209be5417279e6815bee7",
     importpath = "github.com/bazelbuild/remote-apis",
 )
 
