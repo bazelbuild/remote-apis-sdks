@@ -100,7 +100,10 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
 	return &TestEnv{
-			Client:   &rexec.Client{&filemetadata.NoopFileMetadataCache{}, grpcClient},
+			Client: &rexec.Client{
+				FileMetadataCache: &filemetadata.NoopFileMetadataCache{},
+				GrpcClient:        grpcClient,
+			},
 			Server:   s,
 			ExecRoot: execRoot,
 			t:        t,

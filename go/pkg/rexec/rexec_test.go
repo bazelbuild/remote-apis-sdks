@@ -37,7 +37,8 @@ func TestExecCacheHit(t *testing.T) {
 	}
 	opt := command.DefaultExecutionOptions()
 	wantRes := &command.Result{Status: command.CacheHitResultStatus}
-	cmdDg, acDg := e.Set(cmd, opt, wantRes, &fakes.OutputFile{"a/b/out", "output"}, fakes.StdOut("stdout"), fakes.StdErrRaw("stderr"))
+	cmdDg, acDg := e.Set(cmd, opt, wantRes, &fakes.OutputFile{Path: "a/b/out", Contents: "output"},
+		fakes.StdOut("stdout"), fakes.StdErrRaw("stderr"))
 	oe := outerr.NewRecordingOutErr()
 
 	res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
@@ -195,7 +196,7 @@ func TestExecRemoteFailureDownloadsPartialResults(t *testing.T) {
 				ExecRoot:    e.ExecRoot,
 			}
 			opt := command.DefaultExecutionOptions()
-			e.Set(cmd, opt, tc.wantRes, fakes.StdErr("stderr"), &fakes.OutputFile{"a/b/out", "output"})
+			e.Set(cmd, opt, tc.wantRes, fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output"})
 			oe := outerr.NewRecordingOutErr()
 
 			res, _ := e.Client.Run(context.Background(), cmd, opt, oe)
@@ -268,7 +269,7 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 				ExecRoot:    e.ExecRoot,
 			}
 			opt := &command.ExecutionOptions{AcceptCached: true, DownloadOutputs: false}
-			e.Set(cmd, opt, tc.wantRes, fakes.StdErr("stderr"), &fakes.OutputFile{"a/b/out", "output"}, fakes.ExecutionCacheHit(tc.cached))
+			e.Set(cmd, opt, tc.wantRes, fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output"}, fakes.ExecutionCacheHit(tc.cached))
 			oe := outerr.NewRecordingOutErr()
 
 			res, _ := e.Client.Run(context.Background(), cmd, opt, oe)
