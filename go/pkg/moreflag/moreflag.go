@@ -13,10 +13,13 @@ import (
 // Parse parses flags which are set in environment variables using the FLAG_ prefix. That is
 // for a flag named x, x=$FLAG_x if $FLAG_x is set. If the flag is set in the command line, the
 // command line value of the flag takes precedence over the environment variable value.
-// It also calls flag.Parse() to parse flags sent directly as arguments.
+// It also calls flag.Parse() to parse flags sent directly as arguments, unless flag.Parse
+// has been previously called.
 func Parse() {
 	ParseFromEnv()
-	flag.Parse()
+	if !flag.Parsed() {
+		flag.Parse()
+	}
 }
 
 // ParseFromEnv parses flags which are set in environment variables using the FLAG_ prefix. That is
