@@ -67,7 +67,7 @@ func (c *Client) NewContext(ctx context.Context, cmd *command.Command, opt *comm
 func (ec *Context) downloadStream(raw []byte, dgPb *repb.Digest, write func([]byte)) error {
 	if raw != nil {
 		write(raw)
-	} else if dgPb != nil {
+	} else if dgPb != nil && dgPb.SizeBytes > 0 {
 		dg, err := digest.NewFromProto(dgPb)
 		if err != nil {
 			return err
