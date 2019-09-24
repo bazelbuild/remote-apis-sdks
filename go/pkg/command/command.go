@@ -368,6 +368,11 @@ func NewTimeoutResult() *Result {
 	}
 }
 
+// TimeInterval is a time window for an event.
+type TimeInterval struct {
+	From, To time.Time
+}
+
 // Metadata is general information associated with a Command execution.
 type Metadata struct {
 	// CommandDigest is a digest of the command being executed. It can be used
@@ -382,6 +387,8 @@ type Metadata struct {
 	InputDirectories int
 	// The overall number of bytes from all the inputs.
 	TotalInputBytes int64
+	// Event times for remote events, by event name.
+	EventTimes map[string]*TimeInterval
 	// TODO(olaola): Add a lot of other fields.
 }
 

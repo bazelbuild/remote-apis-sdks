@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -19,6 +20,7 @@ import (
 	rc "github.com/bazelbuild/remote-apis-sdks/go/client"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
+	tspb "github.com/golang/protobuf/ptypes/timestamp"
 )
 
 // Client is a remote execution client.
@@ -60,7 +62,7 @@ func (c *Client) NewContext(ctx context.Context, cmd *command.Command, opt *comm
 		opt:      opt,
 		oe:       oe,
 		client:   c,
-		Metadata: &command.Metadata{},
+		Metadata: &command.Metadata{EventTimes: make(map[string]*command.TimeInterval)},
 	}, nil
 }
 
@@ -82,6 +84,8 @@ func (ec *Context) downloadStream(raw []byte, dgPb *repb.Digest, write func([]by
 }
 
 func (ec *Context) downloadResults() *command.Result {
+	ec.Metadata.EventTimes["DownloadResults"] = &command.TimeInterval{From: time.Now()}
+	defer func() { ec.Metadata.EventTimes["DownloadResults"].To = time.Now() }()
 	if err := ec.downloadStream(ec.resPb.StdoutRaw, ec.resPb.StdoutDigest, ec.oe.WriteOut); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
@@ -102,6 +106,8 @@ func (ec *Context) computeInputs() error {
 		// Already computed inputs.
 		return nil
 	}
+	ec.Metadata.EventTimes["ComputeMerkleTree"] = &command.TimeInterval{From: time.Now()}
+	defer func() { ec.Metadata.EventTimes["ComputeMerkleTree"].To = time.Now() }()
 	cmdID := ec.cmd.Identifiers.CommandID
 	cmdPb := ec.cmd.ToREProto()
 	log.V(2).Infof("%s> Command: \n%s\n", cmdID, proto.MarshalTextString(cmdPb))
@@ -152,7 +158,9 @@ func (ec *Context) GetCachedResult() {
 		return
 	}
 	if ec.opt.AcceptCached && !ec.opt.DoNotCache {
+		ec.Metadata.EventTimes["CheckActionCache"] = &command.TimeInterval{From: time.Now()}
 		resPb, err := ec.client.GrpcClient.CheckActionCache(ec.ctx, ec.Metadata.ActionDigest.ToProto())
+		ec.Metadata.EventTimes["CheckActionCache"].To = time.Now()
 		if err != nil {
 			ec.Result = command.NewRemoteErrorResult(err)
 			return
@@ -183,6 +191,8 @@ func (ec *Context) UpdateCachedResult() {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
+	ec.Metadata.EventTimes["UpdateCachedResult"] = &command.TimeInterval{From: time.Now()}
+	defer func() { ec.Metadata.EventTimes["UpdateCachedResult"].To = time.Now() }()
 	chunkSize := int(ec.client.GrpcClient.ChunkMaxSize)
 	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
 	blobs, resPb, err := tree.ComputeOutputsToUpload(ec.cmd.ExecRoot, outPaths, chunkSize, ec.client.FileMetadataCache)
@@ -221,16 +231,21 @@ func (ec *Context) ExecuteRemotely() {
 	cmdID := ec.cmd.Identifiers.CommandID
 	log.V(1).Infof("%s> Checking inputs to upload...", cmdID)
 	// TODO(olaola): compute input cache hit stats.
-	if err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, ec.inputBlobs...); err != nil {
+	ec.Metadata.EventTimes["UploadInputs"] = &command.TimeInterval{From: time.Now()}
+	err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, ec.inputBlobs...)
+	ec.Metadata.EventTimes["UploadInputs"].To = time.Now()
+	if err != nil {
 		ec.Result = command.NewRemoteErrorResult(err)
 		return
 	}
 	log.V(1).Infof("%s> Executing remotely...\n%s", cmdID, strings.Join(ec.cmd.Args, " "))
+	ec.Metadata.EventTimes["ExecuteRemotely"] = &command.TimeInterval{From: time.Now()}
 	op, err := ec.client.GrpcClient.ExecuteAndWait(ec.ctx, &repb.ExecuteRequest{
 		InstanceName:    ec.client.GrpcClient.InstanceName,
 		SkipCacheLookup: !ec.opt.AcceptCached || ec.opt.DoNotCache,
 		ActionDigest:    ec.Metadata.ActionDigest.ToProto(),
 	})
+	ec.Metadata.EventTimes["ExecuteRemotely"].To = time.Now()
 	if err != nil {
 		ec.Result = command.NewRemoteErrorResult(err)
 		return
@@ -247,6 +262,7 @@ func (ec *Context) ExecuteRemotely() {
 		return
 	}
 	ec.resPb = resp.Result
+	setTimingMetadata(ec.Metadata, resp.Result.GetExecutionMetadata())
 	st := status.FromProto(resp.Status)
 	message := resp.Message
 	if message != "" && (st.Code() != codes.OK || ec.resPb != nil && ec.resPb.ExitCode != 0) {
@@ -271,6 +287,35 @@ func (ec *Context) ExecuteRemotely() {
 	if ec.resPb == nil {
 		ec.Result = command.NewRemoteErrorResult(fmt.Errorf("execute did not return action result"))
 	}
+}
+
+func timeFromProto(tPb *tspb.Timestamp) time.Time {
+	if tPb == nil {
+		return time.Time{}
+	}
+	t, err := ptypes.Timestamp(tPb)
+	if err != nil {
+		log.Errorf("Failed to parse RBE timestamp: %+v - > %v", tPb, err)
+	}
+	return t
+}
+
+func setEventTimes(cm *command.Metadata, event string, start, end *tspb.Timestamp) {
+	cm.EventTimes[event] = &command.TimeInterval{
+		From: timeFromProto(start),
+		To:   timeFromProto(end),
+	}
+}
+
+func setTimingMetadata(cm *command.Metadata, em *repb.ExecutedActionMetadata) {
+	if em == nil {
+		return
+	}
+	setEventTimes(cm, "RBEQueued", em.QueuedTimestamp, em.WorkerStartTimestamp)
+	setEventTimes(cm, "RBEWorker", em.WorkerStartTimestamp, em.WorkerCompletedTimestamp)
+	setEventTimes(cm, "RBEWorkerInputFetch", em.InputFetchStartTimestamp, em.InputFetchCompletedTimestamp)
+	setEventTimes(cm, "RBEWorkerExecution", em.ExecutionStartTimestamp, em.ExecutionCompletedTimestamp)
+	setEventTimes(cm, "RBEWorkerOutputUpload", em.OutputUploadStartTimestamp, em.OutputUploadCompletedTimestamp)
 }
 
 // Run executes a command remotely.
