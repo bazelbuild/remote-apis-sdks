@@ -69,7 +69,11 @@ func TestExecCacheHit(t *testing.T) {
 			t.Errorf("Run() gave bad timing stats for event %v: %v", name, interval)
 		}
 	}
-	wantNames := []string{"ComputeMerkleTree", "CheckActionCache", "DownloadResults"}
+	wantNames := []string{
+		command.EventComputeMerkleTree,
+		command.EventCheckActionCache,
+		command.EventDownloadResults,
+	}
 	if diff := cmp.Diff(wantNames, eventNames, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
 		t.Errorf("Run gave different events: want %v, got %v", wantNames, eventNames)
 	}
@@ -120,15 +124,15 @@ func TestExecNotAcceptCached(t *testing.T) {
 		}
 	}
 	wantNames := []string{
-		"ComputeMerkleTree",
-		"UploadInputs",
-		"ExecuteRemotely",
-		"RBEQueued",
-		"RBEWorker",
-		"RBEWorkerInputFetch",
-		"RBEWorkerExecution",
-		"RBEWorkerOutputUpload",
-		"DownloadResults",
+		command.EventComputeMerkleTree,
+		command.EventUploadInputs,
+		command.EventExecuteRemotely,
+		command.EventServerQueued,
+		command.EventServerWorker,
+		command.EventServerWorkerInputFetch,
+		command.EventServerWorkerExecution,
+		command.EventServerWorkerOutputUpload,
+		command.EventDownloadResults,
 	}
 	if diff := cmp.Diff(wantNames, eventNames, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
 		t.Errorf("Run gave different events: want %v, got %v", wantNames, eventNames)
