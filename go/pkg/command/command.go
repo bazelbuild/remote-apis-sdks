@@ -368,6 +368,48 @@ func NewTimeoutResult() *Result {
 	}
 }
 
+// TimeInterval is a time window for an event.
+type TimeInterval struct {
+	From, To time.Time
+}
+
+// These are the events that we export time metrics on:
+const (
+	// EventServerQueued: Queued time on the remote server.
+	EventServerQueued = "ServerQueued"
+
+	// EventServerWorker: The total remote worker (bot) time.
+	EventServerWorker = "ServerWorker"
+
+	// EventServerWorkerInputFetch: Time to fetch inputs to the remote bot.
+	EventServerWorkerInputFetch = "ServerWorkerInputFetch"
+
+	// EventServerWorkerExecution: The actual execution on the remote bot.
+	EventServerWorkerExecution = "ServerWorkerExecution"
+
+	// EventServerWorkerOutputUpload: Uploading outputs to the CAS on the bot.
+	EventServerWorkerOutputUpload = "ServerWorkerOutputUpload"
+
+	// EventDownloadResults: Downloading action results from CAS.
+	EventDownloadResults = "DownloadResults"
+
+	// EventComputeMerkleTree: Computing the input Merkle tree.
+	EventComputeMerkleTree = "ComputeMerkleTree"
+
+	// EventCheckActionCache: Checking the action cache.
+	EventCheckActionCache = "CheckActionCache"
+
+	// EventUpdateCachedResult: Uploading local outputs to CAS and updating cached
+	// action result.
+	EventUpdateCachedResult = "UpdateCachedResult"
+
+	// EventUploadInputs: Uploading action inputs to CAS for remote execution.
+	EventUploadInputs = "UploadInputs"
+
+	// EventExecuteRemotely: Total time to execute remotely.
+	EventExecuteRemotely = "ExecuteRemotely"
+)
+
 // Metadata is general information associated with a Command execution.
 type Metadata struct {
 	// CommandDigest is a digest of the command being executed. It can be used
@@ -382,6 +424,8 @@ type Metadata struct {
 	InputDirectories int
 	// The overall number of bytes from all the inputs.
 	TotalInputBytes int64
+	// Event times for remote events, by event name.
+	EventTimes map[string]*TimeInterval
 	// TODO(olaola): Add a lot of other fields.
 }
 

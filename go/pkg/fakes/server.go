@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
@@ -21,6 +22,8 @@ import (
 	rc "github.com/bazelbuild/remote-apis-sdks/go/client"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	log "github.com/golang/glog"
+	tspb "github.com/golang/protobuf/ptypes/timestamp"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 )
 
@@ -111,6 +114,18 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 		}
 }
 
+func timeToProto(t time.Time) *tspb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	ts, err := ptypes.TimestampProto(t)
+	if err != nil {
+		log.Warningf("Unable to convert time to Timestamp: %v", err.Error())
+		return nil
+	}
+	return ts
+}
+
 // Set sets up the fake to return the given result on the given command execution.
 // It is not possible to make the fake result in a LocalErrorResultStatus or an InterruptedResultStatus.
 func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...option) (cmdDg, acDg digest.Digest) {
@@ -137,8 +152,20 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 	if cmd.Timeout > 0 {
 		ac.Timeout = ptypes.DurationProto(cmd.Timeout)
 	}
+	t, _ := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
 	ar := &repb.ActionResult{
 		ExitCode: int32(res.ExitCode),
+		ExecutionMetadata: &repb.ExecutedActionMetadata{
+			QueuedTimestamp:                timeToProto(t.Add(time.Millisecond)),
+			WorkerStartTimestamp:           timeToProto(t.Add(2 * time.Millisecond)),
+			WorkerCompletedTimestamp:       timeToProto(t.Add(3 * time.Millisecond)),
+			InputFetchStartTimestamp:       timeToProto(t.Add(4 * time.Millisecond)),
+			InputFetchCompletedTimestamp:   timeToProto(t.Add(5 * time.Millisecond)),
+			ExecutionStartTimestamp:        timeToProto(t.Add(6 * time.Millisecond)),
+			ExecutionCompletedTimestamp:    timeToProto(t.Add(7 * time.Millisecond)),
+			OutputUploadStartTimestamp:     timeToProto(t.Add(8 * time.Millisecond)),
+			OutputUploadCompletedTimestamp: timeToProto(t.Add(9 * time.Millisecond)),
+		},
 	}
 	acDg = digest.TestNewFromMessage(ac)
 	for _, o := range opts {

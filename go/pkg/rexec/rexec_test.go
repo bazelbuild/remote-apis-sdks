@@ -15,6 +15,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -58,8 +59,23 @@ func TestExecCacheHit(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(wantMeta, meta); diff != "" {
+	if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "EventTimes")); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
+	}
+	var eventNames []string
+	for name, interval := range meta.EventTimes {
+		eventNames = append(eventNames, name)
+		if interval == nil || interval.To.Before(interval.From) {
+			t.Errorf("Run() gave bad timing stats for event %v: %v", name, interval)
+		}
+	}
+	wantNames := []string{
+		command.EventComputeMerkleTree,
+		command.EventCheckActionCache,
+		command.EventDownloadResults,
+	}
+	if diff := cmp.Diff(wantNames, eventNames, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
+		t.Errorf("Run gave different events: want %v, got %v", wantNames, eventNames)
 	}
 	if !bytes.Equal(oe.Stdout(), []byte("stdout")) {
 		t.Errorf("Run() gave stdout diff: want \"stdout\", got: %v", oe.Stdout())
@@ -89,7 +105,38 @@ func TestExecNotAcceptCached(t *testing.T) {
 
 	oe := outerr.NewRecordingOutErr()
 
-	res, _ := e.Client.Run(context.Background(), cmd, opt, oe)
+	res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
+	wantMeta := &command.Metadata{
+		ActionDigest:     acDg,
+		InputDirectories: 1,
+	}
+	if diff := cmp.Diff(wantRes, res); diff != "" {
+		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes")); diff != "" {
+		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
+	}
+	var eventNames []string
+	for name, interval := range meta.EventTimes {
+		eventNames = append(eventNames, name)
+		if interval == nil || interval.To.Before(interval.From) {
+			t.Errorf("Run() gave bad timing stats for event %v: %v", name, interval)
+		}
+	}
+	wantNames := []string{
+		command.EventComputeMerkleTree,
+		command.EventUploadInputs,
+		command.EventExecuteRemotely,
+		command.EventServerQueued,
+		command.EventServerWorker,
+		command.EventServerWorkerInputFetch,
+		command.EventServerWorkerExecution,
+		command.EventServerWorkerOutputUpload,
+		command.EventDownloadResults,
+	}
+	if diff := cmp.Diff(wantNames, eventNames, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
+		t.Errorf("Run gave different events: want %v, got %v", wantNames, eventNames)
+	}
 
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
