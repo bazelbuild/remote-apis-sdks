@@ -71,7 +71,10 @@ func main() {
 		log.Exitf("error connecting to remote execution client: %v", err)
 	}
 	defer grpcClient.Close()
-	c := &rexec.Client{&filemetadata.NoopFileMetadataCache{}, grpcClient}
+	c := &rexec.Client{
+		FileMetadataCache: &filemetadata.NoopFileMetadataCache{},
+		GrpcClient:        grpcClient,
+	}
 	res, _ := c.Run(ctx, cmd, opt, outerr.SystemOutErr)
 	switch res.Status {
 	case command.NonZeroExitResultStatus:
