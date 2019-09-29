@@ -19,7 +19,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"
 
-	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 )
@@ -233,24 +232,10 @@ func TestWrite(t *testing.T) {
 
 func TestMissingBlobs(t *testing.T) {
 	ctx := context.Background()
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("Cannot listen: %v", err)
-	}
-	defer listener.Close()
-	server := grpc.NewServer()
-	fake := fakes.NewCAS()
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
-	go server.Serve(listener)
-	defer server.Stop()
-	c, err := client.Dial(ctx, instance, client.DialParams{
-		Service:    listener.Addr().String(),
-		NoSecurity: true,
-	})
-	if err != nil {
-		t.Fatalf("Error connecting to server: %v", err)
-	}
-	defer c.Close()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
 
 	tests := []struct {
 		name string
@@ -420,25 +405,10 @@ func TestUpload(t *testing.T) {
 
 func TestWriteBlobsBatching(t *testing.T) {
 	ctx := context.Background()
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("Cannot listen: %v", err)
-	}
-	defer listener.Close()
-	server := grpc.NewServer()
-	fake := fakes.NewCAS()
-	bsgrpc.RegisterByteStreamServer(server, fake)
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
-	go server.Serve(listener)
-	defer server.Stop()
-	c, err := client.Dial(ctx, instance, client.DialParams{
-		Service:    listener.Addr().String(),
-		NoSecurity: true,
-	}, client.UseBatchOps(true))
-	if err != nil {
-		t.Fatalf("Error connecting to server: %v", err)
-	}
-	defer c.Close()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
 
 	const mb = 1024 * 1024
 	tests := []struct {
@@ -513,25 +483,10 @@ func TestWriteBlobsBatching(t *testing.T) {
 
 func TestFlattenActionOutputs(t *testing.T) {
 	ctx := context.Background()
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("Cannot listen: %v", err)
-	}
-	defer listener.Close()
-	server := grpc.NewServer()
-	fake := fakes.NewCAS()
-	bsgrpc.RegisterByteStreamServer(server, fake)
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
-	go server.Serve(listener)
-	defer server.Stop()
-	c, err := client.Dial(ctx, instance, client.DialParams{
-		Service:    listener.Addr().String(),
-		NoSecurity: true,
-	}, client.UseBatchOps(true))
-	if err != nil {
-		t.Fatalf("Error connecting to server: %v", err)
-	}
-	defer c.Close()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
 
 	fooDigest := digest.TestNew("1001", 1)
 	barDigest := digest.TestNew("1002", 2)
@@ -625,25 +580,10 @@ func TestFlattenActionOutputs(t *testing.T) {
 
 func TestDownloadActionOutputs(t *testing.T) {
 	ctx := context.Background()
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("Cannot listen: %v", err)
-	}
-	defer listener.Close()
-	server := grpc.NewServer()
-	fake := fakes.NewCAS()
-	bsgrpc.RegisterByteStreamServer(server, fake)
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
-	go server.Serve(listener)
-	defer server.Stop()
-	c, err := client.Dial(ctx, instance, client.DialParams{
-		Service:    listener.Addr().String(),
-		NoSecurity: true,
-	}, client.UseBatchOps(true))
-	if err != nil {
-		t.Fatalf("Error connecting to server: %v", err)
-	}
-	defer c.Close()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
 
 	fooDigest := fake.Put([]byte("foo"))
 	barDigest := fake.Put([]byte("bar"))
@@ -774,6 +714,143 @@ func TestDownloadActionOutputs(t *testing.T) {
 			if !bytes.Equal(contents, out.contents) {
 				t.Errorf("expected %s to contain %v, got %v", path, out.contents, contents)
 			}
+			if out.isExecutable && fi.Mode()&0100 == 0 {
+				t.Errorf("expected %s to be a executable, got %v", path, fi.Mode())
+			}
 		}
+	}
+}
+
+func TestDownloadActionOutputsBatching(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+
+	const mb = 1024 * 1024
+	tests := []struct {
+		name      string
+		sizes     []int
+		batchReqs int
+	}{
+		{
+			name:      "single small blob",
+			sizes:     []int{1},
+			batchReqs: 0,
+		},
+		{
+			name:      "large and small blobs hitting max exactly",
+			sizes:     []int{client.MaxBatchSz - 1, client.MaxBatchSz - 1, client.MaxBatchSz - 1, 1, 1, 1},
+			batchReqs: 3,
+		},
+		{
+			name:      "small batches of big blobs",
+			sizes:     []int{1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1},
+			batchReqs: 2,
+		},
+		{
+			name:      "batch with blob that's too big",
+			sizes:     []int{5 * mb, 1 * mb, 1 * mb, 1 * mb},
+			batchReqs: 1,
+		},
+		{
+			name:      "many small blobs",
+			sizes:     []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+			batchReqs: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake.Clear()
+			var dgs []digest.Digest
+			blobs := make(map[digest.Digest][]byte)
+			ar := &repb.ActionResult{}
+			for i, sz := range tc.sizes {
+				blob := make([]byte, int(sz))
+				blob[0] = byte(i) // Ensure blobs are distinct
+				dg := digest.NewFromBlob(blob)
+				blobs[dg] = blob
+				dgs = append(dgs, dg)
+				fake.Put(blob)
+				name := fmt.Sprintf("foo_%s", dg)
+				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dg.ToProto()})
+			}
+			execRoot, err := ioutil.TempDir("", "DownloadOuts")
+			if err != nil {
+				t.Fatalf("failed to make temp dir: %v", err)
+			}
+			defer os.RemoveAll(execRoot)
+			err = c.DownloadActionOutputs(ctx, ar, execRoot)
+			if err != nil {
+				t.Errorf("error in DownloadActionOutputs: %s", err)
+			}
+			for dg, data := range blobs {
+				path := filepath.Join(execRoot, fmt.Sprintf("foo_%s", dg))
+				contents, err := ioutil.ReadFile(path)
+				if err != nil {
+					t.Errorf("error reading from %s: %v", path, err)
+				}
+				if !bytes.Equal(contents, data) {
+					t.Errorf("expected %s to contain %v, got %v", path, contents, data)
+				}
+			}
+			if fake.BatchReqs() != tc.batchReqs {
+				t.Errorf("%d requests were made to BatchReadBlobs, wanted %d", fake.BatchReqs(), tc.batchReqs)
+			}
+		})
+	}
+}
+
+func TestDownloadActionOutputsConcurrency(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+
+	blobs := make(map[digest.Digest][]byte)
+	for i := 0; i < 1000; i++ {
+		var buf = new(bytes.Buffer)
+		binary.Write(buf, binary.LittleEndian, i)
+		blob := buf.Bytes()
+		blobs[digest.NewFromBlob(blob)] = blob
+	}
+
+	for _, ub := range []client.UseBatchOps{false, true} {
+		t.Run(fmt.Sprintf("%sUsingBatch:%t", t.Name(), ub), func(t *testing.T) {
+			ub.Apply(c)
+			fake.Clear()
+			ar := &repb.ActionResult{}
+			for dg, blob := range blobs {
+				fake.Put(blob)
+				name := fmt.Sprintf("foo_%s", dg)
+				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dg.ToProto()})
+			}
+
+			execRoot, err := ioutil.TempDir("", "DownloadOuts")
+			if err != nil {
+				t.Fatalf("failed to make temp dir: %v", err)
+			}
+			defer os.RemoveAll(execRoot)
+			err = c.DownloadActionOutputs(ctx, ar, execRoot)
+			if err != nil {
+				t.Errorf("error in DownloadActionOutputs: %s", err)
+			}
+			for dg, data := range blobs {
+				path := filepath.Join(execRoot, fmt.Sprintf("foo_%s", dg))
+				contents, err := ioutil.ReadFile(path)
+				if err != nil {
+					t.Errorf("error reading from %s: %v", path, err)
+				}
+				if !bytes.Equal(contents, data) {
+					t.Errorf("expected %s to contain %v, got %v", path, contents, data)
+				}
+			}
+			if fake.MaxConcurrency() > client.DefaultCASConcurrency {
+				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), client.DefaultCASConcurrency)
+			}
+		})
 	}
 }

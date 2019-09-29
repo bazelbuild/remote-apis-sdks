@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -207,6 +208,67 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 		return nil
 	}
 	return c.Retrier.Do(ctx, closure)
+}
+
+// BatchDownloadBlobs downloads a number of blobs from the CAS to memory. They must collectively be below the
+// maximum total size for a batch read, which is about 4 MB (see MaxBatchSz). Digests must be
+// computed in advance by the caller. In case multiple errors occur during the blob read, the
+// last error will be returned.
+func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (map[digest.Digest][]byte, error) {
+	if len(dgs) > MaxBatchDigests {
+		return nil, fmt.Errorf("batch read of %d total blobs exceeds maximum of %d", len(dgs), MaxBatchDigests)
+	}
+	req := &repb.BatchReadBlobsRequest{InstanceName: c.InstanceName}
+	var sz int64
+	for _, dg := range dgs {
+		sz += dg.Size
+		req.Digests = append(req.Digests, dg.ToProto())
+	}
+	if sz > MaxBatchSz {
+		return nil, fmt.Errorf("batch read of %d total bytes exceeds maximum of %d", sz, MaxBatchSz)
+	}
+	res := make(map[digest.Digest][]byte)
+	closure := func() error {
+		var resp *repb.BatchReadBlobsResponse
+		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+			resp, e = c.cas.BatchReadBlobs(ctx, req)
+			return e
+		})
+		if err != nil {
+			return err
+		}
+
+		numErrs, errDg, errMsg := 0, &repb.Digest{}, ""
+		var failedDgs []*repb.Digest
+		var retriableError error
+		allRetriable := true
+		for _, r := range resp.Responses {
+			st := status.FromProto(r.Status)
+			if st.Code() != codes.OK {
+				e := st.Err()
+				if c.Retrier.ShouldRetry(e) {
+					failedDgs = append(failedDgs, r.Digest)
+					retriableError = e
+				} else {
+					allRetriable = false
+				}
+				numErrs++
+				errDg = r.Digest
+				errMsg = r.Status.Message
+			} else {
+				res[digest.NewFromProtoUnvalidated(r.Digest)] = r.Data
+			}
+		}
+		req.Digests = failedDgs
+		if numErrs > 0 {
+			if allRetriable {
+				return retriableError // Retriable errors only, retry the failed digests.
+			}
+			return fmt.Errorf("downloading blobs as part of a batch resulted in %d failures, including blob %s: %s", numErrs, errDg, errMsg)
+		}
+		return nil
+	}
+	return res, c.Retrier.Do(ctx, closure)
 }
 
 // makeBatches splits a list of digests into batches of size no more than the maximum.
@@ -477,11 +539,11 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	if err != nil {
 		return err
 	}
-	var symlinks []*Output
+	var symlinks, copies []*Output
+	downloads := make(map[digest.Digest]*Output)
 	for _, out := range outs {
 		path := filepath.Join(execRoot, out.Path)
 		// TODO(olaola): fix the (upstream) bug that this doesn't download empty directory trees.
-		// TODO(olaola): download results in parallel and batches.
 		if err := os.MkdirAll(filepath.Dir(path), os.FileMode(0777)); err != nil {
 			return err
 		}
@@ -491,13 +553,18 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 			symlinks = append(symlinks, out)
 			continue
 		}
-		if _, err := c.ReadBlobToFile(ctx, out.Digest, path); err != nil {
-			return err
+		if _, ok := downloads[out.Digest]; ok {
+			copies = append(copies, out)
+		} else {
+			downloads[out.Digest] = out
 		}
-		if out.IsExecutable {
-			if err := os.Chmod(path, os.FileMode(0777)); err != nil {
-				return err
-			}
+	}
+	if err := c.downloadFiles(ctx, execRoot, downloads); err != nil {
+		return err
+	}
+	for _, out := range copies {
+		if err := copyFile(execRoot, downloads[out.Digest].Path, out.Path); err != nil {
+			return err
 		}
 	}
 	for _, out := range symlinks {
@@ -506,4 +573,107 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 		}
 	}
 	return nil
+}
+
+func copyFile(execRoot, from, to string) error {
+	src := filepath.Join(execRoot, from)
+	st, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", src)
+	}
+
+	s, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	dst := filepath.Join(execRoot, to)
+	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, st.Mode())
+	if err != nil {
+		return err
+	}
+	defer t.Close()
+	_, err = io.Copy(t, s)
+	return err
+}
+
+func (c *Client) downloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*Output) error {
+	if cap(c.casDownloaders) <= 0 {
+		return fmt.Errorf("CASConcurrency should be at least 1")
+	}
+	const (
+		logInterval = 25
+	)
+
+	var dgs []digest.Digest
+	for dg := range outputs {
+		dgs = append(dgs, dg)
+	}
+
+	log.V(2).Infof("%d items to download", len(dgs))
+	var batches [][]digest.Digest
+	if c.useBatchOps {
+		batches = makeBatches(dgs)
+	} else {
+		log.V(2).Info("Downloading them individually")
+		for i := range dgs {
+			log.V(3).Infof("Creating single batch of blob %s", dgs[i])
+			batches = append(batches, dgs[i:i+1])
+		}
+	}
+
+	eg, eCtx := errgroup.WithContext(ctx)
+	for i, batch := range batches {
+		i, batch := i, batch     // https://golang.org/doc/faq#closures_and_goroutines
+		c.casDownloaders <- true // Reserve an downloader thread.
+		eg.Go(func() error {
+			defer func() { <-c.casDownloaders }()
+			if i%logInterval == 0 {
+				log.V(2).Infof("%d batches left to download", len(batches)-i)
+			}
+			if len(batch) > 1 {
+				log.V(3).Infof("Downloading batch of %d files", len(batch))
+				bchMap, err := c.BatchDownloadBlobs(eCtx, batch)
+				if err != nil {
+					return err
+				}
+				for dg, data := range bchMap {
+					out := outputs[dg]
+					perm := os.FileMode(0644)
+					if out.IsExecutable {
+						perm = os.FileMode(0777)
+					}
+					if err := ioutil.WriteFile(filepath.Join(execRoot, out.Path), data, perm); err != nil {
+						return err
+					}
+				}
+			} else {
+				out := outputs[batch[0]]
+				path := filepath.Join(execRoot, out.Path)
+				log.V(3).Infof("Downloading single file with digest %s to %s", out.Digest, path)
+				if _, err := c.ReadBlobToFile(ctx, out.Digest, path); err != nil {
+					return err
+				}
+				if out.IsExecutable {
+					if err := os.Chmod(path, os.FileMode(0777)); err != nil {
+						return err
+					}
+				}
+			}
+			if eCtx.Err() != nil {
+				return eCtx.Err()
+			}
+			return nil
+		})
+	}
+
+	log.V(3).Info("Waiting for remaining jobs")
+	err := eg.Wait()
+	log.V(3).Info("Done")
+	return err
 }

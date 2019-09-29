@@ -11,6 +11,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/pborman/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -337,7 +338,52 @@ func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRe
 
 // BatchReadBlobs implements the corresponding RE API function.
 func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (*repb.BatchReadBlobsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "test fake does not implement method")
+	f.mu.Lock()
+	f.batchReqs++
+	f.concReqs++
+	defer func() {
+		f.mu.Lock()
+		f.concReqs--
+		f.mu.Unlock()
+	}()
+	if f.concReqs > f.maxConcReqs {
+		f.maxConcReqs = f.concReqs
+	}
+	f.mu.Unlock()
+
+	if req.InstanceName != "instance" {
+		return nil, status.Error(codes.InvalidArgument, "test fake expected instance name \"instance\"")
+	}
+
+	var tot int64
+	for _, dg := range req.Digests {
+		tot += dg.SizeBytes
+	}
+	if tot > client.MaxBatchSz {
+		return nil, status.Errorf(codes.InvalidArgument, "test fake received batch read for more than the maximum of %d bytes: %d bytes", client.MaxBatchSz, tot)
+	}
+
+	var resps []*repb.BatchReadBlobsResponse_Response
+	for _, dgPb := range req.Digests {
+		dg := digest.NewFromProtoUnvalidated(dgPb)
+		f.mu.Lock()
+		data, ok := f.blobs[dg]
+		if !ok {
+			resps = append(resps, &repb.BatchReadBlobsResponse_Response{
+				Digest: dgPb,
+				Status: status.Newf(codes.NotFound, "digest %s was not found in the fake CAS", dg).Proto(),
+			})
+			continue
+		}
+		f.reads[dg]++
+		f.mu.Unlock()
+		resps = append(resps, &repb.BatchReadBlobsResponse_Response{
+			Digest: dgPb,
+			Status: status.New(codes.OK, "").Proto(),
+			Data:   data,
+		})
+	}
+	return &repb.BatchReadBlobsResponse{Responses: resps}, nil
 }
 
 // GetTree implements the corresponding RE API function.
@@ -458,7 +504,20 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", dg)
 	}
 
-	return stream.Send(&bspb.ReadResponse{Data: blob})
+	ch := chunker.NewFromBlob(blob, 2*1024*1024)
+	resp := &bspb.ReadResponse{}
+	for ch.HasNext() {
+		chunk, err := ch.Next()
+		resp.Data = chunk.Data
+		if err != nil {
+			return err
+		}
+		err = stream.Send(resp)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // QueryWriteStatus implements the corresponding RE API function.

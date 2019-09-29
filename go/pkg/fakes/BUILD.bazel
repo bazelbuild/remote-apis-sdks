@@ -13,6 +13,7 @@ go_library(
     deps = [
         "//go/client:go_default_library",
         "//go/digest:go_default_library",
+        "//go/pkg/chunker:go_default_library",
         "//go/pkg/command:go_default_library",
         "//go/pkg/filemetadata:go_default_library",
         "//go/pkg/rexec:go_default_library",

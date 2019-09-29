@@ -60,11 +60,12 @@ type Client struct {
 	// This field is logically "protected" and is intended for use by extensions of Client.
 	Retrier *Retrier
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
-	ChunkMaxSize ChunkMaxSize
-	useBatchOps  UseBatchOps
-	casUploaders chan bool
-	rpcTimeout   time.Duration
-	creds        credentials.PerRPCCredentials
+	ChunkMaxSize   ChunkMaxSize
+	useBatchOps    UseBatchOps
+	casUploaders   chan bool
+	casDownloaders chan bool
+	rpcTimeout     time.Duration
+	creds          credentials.PerRPCCredentials
 	// Used to close the underlying connection.
 	io.Closer
 }
@@ -101,6 +102,7 @@ const DefaultCASConcurrency = 50
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casUploaders = make(chan bool, cy)
+	c.casDownloaders = make(chan bool, cy)
 }
 
 // PerRPCCreds sets per-call options that will be set on all RPCs to the underlying connection.
@@ -225,18 +227,19 @@ func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client
 	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
 	client := &Client{
-		InstanceName: instanceName,
-		actionCache:  regrpc.NewActionCacheClient(conn),
-		byteStream:   bsgrpc.NewByteStreamClient(conn),
-		cas:          regrpc.NewContentAddressableStorageClient(conn),
-		execution:    regrpc.NewExecutionClient(conn),
-		capabilities: regrpc.NewCapabilitiesClient(conn),
-		operations:   opgrpc.NewOperationsClient(conn),
-		rpcTimeout:   time.Minute,
-		Closer:       conn,
-		ChunkMaxSize: chunker.DefaultChunkSize,
-		useBatchOps:  true,
-		casUploaders: make(chan bool, DefaultCASConcurrency),
+		InstanceName:   instanceName,
+		actionCache:    regrpc.NewActionCacheClient(conn),
+		byteStream:     bsgrpc.NewByteStreamClient(conn),
+		cas:            regrpc.NewContentAddressableStorageClient(conn),
+		execution:      regrpc.NewExecutionClient(conn),
+		capabilities:   regrpc.NewCapabilitiesClient(conn),
+		operations:     opgrpc.NewOperationsClient(conn),
+		rpcTimeout:     time.Minute,
+		Closer:         conn,
+		ChunkMaxSize:   chunker.DefaultChunkSize,
+		useBatchOps:    true,
+		casUploaders:   make(chan bool, DefaultCASConcurrency),
+		casDownloaders: make(chan bool, DefaultCASConcurrency),
 	}
 	for _, o := range opts {
 		o.Apply(client)
