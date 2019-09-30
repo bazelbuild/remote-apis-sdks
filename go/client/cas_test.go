@@ -23,7 +23,10 @@ import (
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 )
 
-const instance = "instance"
+const (
+	instance     = "instance"
+	thirdBatchSz = client.MaxBatchSz / 3
+)
 
 func TestRead(t *testing.T) {
 	ctx := context.Background()
@@ -410,7 +413,6 @@ func TestWriteBlobsBatching(t *testing.T) {
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
 
-	const mb = 1024 * 1024
 	tests := []struct {
 		name      string
 		sizes     []int
@@ -431,13 +433,13 @@ func TestWriteBlobsBatching(t *testing.T) {
 		},
 		{
 			name:      "small batches of big blobs",
-			sizes:     []int{1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1},
+			sizes:     []int{thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz},
 			batchReqs: 2,
 			writeReqs: 1,
 		},
 		{
 			name:      "batch with blob that's too big",
-			sizes:     []int{5 * mb, 1 * mb, 1 * mb, 1 * mb},
+			sizes:     []int{client.MaxBatchSz + 1, thirdBatchSz, thirdBatchSz, thirdBatchSz},
 			batchReqs: 1,
 			writeReqs: 1,
 		},
@@ -728,7 +730,6 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
 
-	const mb = 1024 * 1024
 	tests := []struct {
 		name      string
 		sizes     []int
@@ -746,12 +747,12 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 		},
 		{
 			name:      "small batches of big blobs",
-			sizes:     []int{1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1, 1*mb + 1},
+			sizes:     []int{thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz},
 			batchReqs: 2,
 		},
 		{
 			name:      "batch with blob that's too big",
-			sizes:     []int{5 * mb, 1 * mb, 1 * mb, 1 * mb},
+			sizes:     []int{client.MaxBatchSz + 1, thirdBatchSz, thirdBatchSz, thirdBatchSz},
 			batchReqs: 1,
 		},
 		{
