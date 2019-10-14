@@ -5,6 +5,8 @@ tasks:
       shell_commands:
           - "echo +++ Check go format"
           - "./check-gofmt.sh `find go -name '*.go'`"
+          - "echo +++ Check go vet"
+          - "go vet ./..."
       build_targets:
           - "//..."
       test_targets:
