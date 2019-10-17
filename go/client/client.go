@@ -57,8 +57,9 @@ type Client struct {
 	operations   opgrpc.OperationsClient
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
-	// This field is logically "protected" and is intended for use by extensions of Client.
-	Retrier *Retrier
+	// These fields are logically "protected" and are intended for use by extensions of Client.
+	Retrier    *Retrier
+	Connection *grpc.ClientConn
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
 	ChunkMaxSize   ChunkMaxSize
 	useBatchOps    UseBatchOps
@@ -235,6 +236,7 @@ func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client
 		capabilities:   regrpc.NewCapabilitiesClient(conn),
 		operations:     opgrpc.NewOperationsClient(conn),
 		rpcTimeout:     time.Minute,
+		Connection:     conn,
 		Closer:         conn,
 		ChunkMaxSize:   chunker.DefaultChunkSize,
 		useBatchOps:    true,
