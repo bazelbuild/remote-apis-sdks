@@ -37,6 +37,7 @@ var (
 
 // DialFromFlags dials a remote execution service and returns a client suitable for higher-level
 // functionality. It uses the flags from above to configure the connection to remote execution.
+// TODO(olaola): remove this overload when everyone uses NewClientFromFlags.
 func DialFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
 	return client.Dial(ctx, *Instance, client.DialParams{
 		Service:               *Service,
@@ -44,4 +45,11 @@ func DialFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, err
 		UseApplicationDefault: *UseApplicationDefaultCreds,
 		UseComputeEngine:      *UseGCECredentials,
 	}, opts...)
+}
+
+// NewClientFromFlags connects to a remote execution service and returns a client
+// suitable for higher-level functionality. It uses the flags from above to configure
+// the connection to remote execution.
+func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
+	return DialFromFlags(ctx, opts...)
 }

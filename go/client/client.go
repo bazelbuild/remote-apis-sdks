@@ -213,20 +213,20 @@ func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, error) {
 
 // Dial dials a remote execution service and returns a client suitable for higher-level
 // functionality.
+// TODO(olaola): rename to separate creating a gRPC connection from creating a Client:
+//   Dial -> NewClient
+//   DialFromFlags -> NewClientFromFlags
+//   DialRaw -> Dial
+// TODO(olaola): remove this overload when everyone uses NewClient.
 func Dial(ctx context.Context, instanceName string, params DialParams, opts ...Opt) (*Client, error) {
-	conn, err := DialRaw(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	return NewClient(conn, instanceName, opts...)
-}
-
-// NewClient creates a client from an existing gRPC connection.
-func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client, error) {
 	if instanceName == "" {
 		return nil, fmt.Errorf("instance needs to be specified")
 	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
+	conn, err := DialRaw(ctx, params)
+	if err != nil {
+		return nil, err
+	}
 	client := &Client{
 		InstanceName:   instanceName,
 		actionCache:    regrpc.NewActionCacheClient(conn),
@@ -247,6 +247,12 @@ func NewClient(conn *grpc.ClientConn, instanceName string, opts ...Opt) (*Client
 		o.Apply(client)
 	}
 	return client, nil
+}
+
+// NewClient connects to a remote execution service and returns a Client suitable
+// for higher-level functionality.
+func NewClient(ctx context.Context, instanceName string, params DialParams, opts ...Opt) (*Client, error) {
+	return Dial(ctx, instanceName, params, opts...)
 }
 
 // RPCTimeout is a Opt that sets the per-RPC deadline.
