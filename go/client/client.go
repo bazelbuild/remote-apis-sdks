@@ -4,7 +4,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os/user"
 	"strings"
@@ -58,8 +57,9 @@ type Client struct {
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
 	// These fields are logically "protected" and are intended for use by extensions of Client.
-	Retrier    *Retrier
-	Connection *grpc.ClientConn
+	Retrier       *Retrier
+	Connection    *grpc.ClientConn
+	CASConnection *grpc.ClientConn // Can be different from Connection a separate CAS endpoint is provided.
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
 	ChunkMaxSize   ChunkMaxSize
 	useBatchOps    UseBatchOps
@@ -67,8 +67,14 @@ type Client struct {
 	casDownloaders chan bool
 	rpcTimeout     time.Duration
 	creds          credentials.PerRPCCredentials
-	// Used to close the underlying connection.
-	io.Closer
+}
+
+// Close closes the underlying gRPC connection(s).
+func (c *Client) Close() {
+	c.Connection.Close()
+	if c.CASConnection != c.Connection {
+		c.CASConnection.Close()
+	}
 }
 
 // Opt is an option that can be passed to Dial in order to configure the behaviour of the client.
@@ -145,6 +151,10 @@ type DialParams struct {
 	// Service contains the address of remote execution service.
 	Service string
 
+	// CASService contains the address of the CAS service, if it is separate from
+	// the remote execution service.
+	CASService string
+
 	// UseApplicationDefault indicates that the default credentials should be used.
 	UseApplicationDefault bool
 
@@ -167,14 +177,10 @@ type DialParams struct {
 	TransportCredsOnly bool
 }
 
-// DialRaw dials a remote execution service and returns the grpc connection that is established.
-func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, error) {
+// Dial dials a given endpoint and returns the grpc connection that is established.
+func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, error) {
 	var opts []grpc.DialOption = []grpc.DialOption{grpc.WithWaitForHandshake()}
 
-	if params.Service == "" {
-		return nil, fmt.Errorf("service needs to be specified")
-	}
-	log.Infof("Connecting to remote execution service %s", params.Service)
 	if params.NoSecurity {
 		opts = append(opts, grpc.WithInsecure())
 	} else {
@@ -204,40 +210,54 @@ func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, error) {
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
 
-	conn, err := grpc.Dial(params.Service, opts...)
+	conn, err := grpc.Dial(endpoint, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't dial gRPC %q: %v", params.Service, err)
+		return nil, fmt.Errorf("couldn't dial gRPC %q: %v", endpoint, err)
 	}
 	return conn, nil
 }
 
-// Dial dials a remote execution service and returns a client suitable for higher-level
+// DialRaw dials a remote execution service and returns the grpc connection that is established.
+// TODO(olaola): remove this overload when all clients use Dial.
+func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, error) {
+	if params.Service == "" {
+		return nil, fmt.Errorf("service needs to be specified")
+	}
+	log.Infof("Connecting to remote execution service %s", params.Service)
+	return Dial(ctx, params.Service, params)
+}
+
+// NewClient connects to a remote execution service and returns a client suitable for higher-level
 // functionality.
-// TODO(olaola): rename to separate creating a gRPC connection from creating a Client:
-//   Dial -> NewClient
-//   DialFromFlags -> NewClientFromFlags
-//   DialRaw -> Dial
-// TODO(olaola): remove this overload when everyone uses NewClient.
-func Dial(ctx context.Context, instanceName string, params DialParams, opts ...Opt) (*Client, error) {
+func NewClient(ctx context.Context, instanceName string, params DialParams, opts ...Opt) (*Client, error) {
 	if instanceName == "" {
 		return nil, fmt.Errorf("instance needs to be specified")
 	}
+	if params.Service == "" {
+		return nil, fmt.Errorf("service needs to be specified")
+	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
-	conn, err := DialRaw(ctx, params)
+	log.Infof("Connecting to remote execution service %s", params.Service)
+	conn, err := Dial(ctx, params.Service, params)
+	casConn := conn
+	if params.CASService != "" && params.CASService != params.Service {
+		log.Infof("Connecting to CAS service %s", params.Service)
+		casConn, err = Dial(ctx, params.CASService, params)
+	}
 	if err != nil {
 		return nil, err
 	}
 	client := &Client{
 		InstanceName:   instanceName,
-		actionCache:    regrpc.NewActionCacheClient(conn),
-		byteStream:     bsgrpc.NewByteStreamClient(conn),
-		cas:            regrpc.NewContentAddressableStorageClient(conn),
+		actionCache:    regrpc.NewActionCacheClient(casConn),
+		byteStream:     bsgrpc.NewByteStreamClient(casConn),
+		cas:            regrpc.NewContentAddressableStorageClient(casConn),
 		execution:      regrpc.NewExecutionClient(conn),
 		capabilities:   regrpc.NewCapabilitiesClient(conn),
 		operations:     opgrpc.NewOperationsClient(conn),
 		rpcTimeout:     time.Minute,
 		Connection:     conn,
-		Closer:         conn,
+		CASConnection:  casConn,
 		ChunkMaxSize:   chunker.DefaultChunkSize,
 		useBatchOps:    true,
 		casUploaders:   make(chan bool, DefaultCASConcurrency),
@@ -247,12 +267,6 @@ func Dial(ctx context.Context, instanceName string, params DialParams, opts ...O
 		o.Apply(client)
 	}
 	return client, nil
-}
-
-// NewClient connects to a remote execution service and returns a Client suitable
-// for higher-level functionality.
-func NewClient(ctx context.Context, instanceName string, params DialParams, opts ...Opt) (*Client, error) {
-	return Dial(ctx, instanceName, params, opts...)
 }
 
 // RPCTimeout is a Opt that sets the per-RPC deadline.

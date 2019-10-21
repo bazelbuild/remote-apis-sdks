@@ -214,7 +214,7 @@ func setup(t *testing.T) *flakyFixture {
 	regrpc.RegisterExecutionServer(f.server, f.fake)
 	opgrpc.RegisterOperationsServer(f.server, f.fake)
 	go f.server.Serve(f.listener)
-	f.client, err = client.Dial(f.ctx, instance, client.DialParams{
+	f.client, err = client.NewClient(f.ctx, instance, client.DialParams{
 		Service:    f.listener.Addr().String(),
 		NoSecurity: true,
 	}, client.ChunkMaxSize(2), client.RetryTransient(), client.RPCTimeout(time.Second))
@@ -431,7 +431,7 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 	regrpc.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
 	ctx := context.Background()
-	client, err := client.Dial(ctx, instance, client.DialParams{
+	client, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
 	}, client.RetryTransient())

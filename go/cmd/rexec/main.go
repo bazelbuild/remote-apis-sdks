@@ -66,7 +66,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	grpcClient, err := rflags.DialFromFlags(ctx)
+	grpcClient, err := rflags.NewClientFromFlags(ctx)
 	if err != nil {
 		log.Exitf("error connecting to remote execution client: %v", err)
 	}
