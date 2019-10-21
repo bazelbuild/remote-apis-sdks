@@ -28,6 +28,49 @@ const (
 	thirdBatchSz = client.MaxBatchSz / 3
 )
 
+func TestSplitEndpoints(t *testing.T) {
+	ctx := context.Background()
+	l1, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("Cannot listen: %v", err)
+	}
+	l2, err := net.Listen("tcp", ":8090")
+	if err != nil {
+		t.Fatalf("Cannot listen: %v", err)
+	}
+	defer l1.Close()
+	defer l2.Close()
+	execServer := grpc.NewServer()
+	casServer := grpc.NewServer()
+	blob := []byte("foobar")
+	fake := &fakes.Reader{
+		Blob:   blob,
+		Chunks: []int{6},
+	}
+	bsgrpc.RegisterByteStreamServer(casServer, fake)
+	go execServer.Serve(l1)
+	go casServer.Serve(l2)
+	defer casServer.Stop()
+	defer execServer.Stop()
+	c, err := client.NewClient(ctx, instance, client.DialParams{
+		Service:    l1.Addr().String(),
+		CASService: l2.Addr().String(),
+		NoSecurity: true,
+	})
+	if err != nil {
+		t.Fatalf("Error connecting to server: %v", err)
+	}
+	defer c.Close()
+
+	got, err := c.ReadBlob(ctx, digest.NewFromBlob(blob))
+	if err != nil {
+		t.Errorf("c.ReadBlob(ctx, digest) gave error %s, want nil", err)
+	}
+	if !bytes.Equal(blob, got) {
+		t.Errorf("c.ReadBlob(ctx, digest) gave diff: want %v, got %v", blob, got)
+	}
+}
+
 func TestRead(t *testing.T) {
 	ctx := context.Background()
 	listener, err := net.Listen("tcp", ":0")
@@ -40,7 +83,7 @@ func TestRead(t *testing.T) {
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	go server.Serve(listener)
 	defer server.Stop()
-	c, err := client.Dial(ctx, instance, client.DialParams{
+	c, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
 	})
@@ -186,7 +229,7 @@ func TestWrite(t *testing.T) {
 	bsgrpc.RegisterByteStreamServer(server, fake)
 	go server.Serve(listener)
 	defer server.Stop()
-	c, err := client.Dial(ctx, instance, client.DialParams{
+	c, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
 	}, client.ChunkMaxSize(20)) // Use small write chunk size for tests.

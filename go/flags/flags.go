@@ -30,26 +30,21 @@ var (
 	UseGCECredentials = flag.Bool("use_gce_credentials", false, "If true (and --use_application_default_credentials is false), use the default GCE credentials to authenticate with remote execution.")
 	// Service represents the host (and, if applicable, port) of the remote execution service.
 	Service = flag.String("service", "", "The remote execution service to dial when calling via gRPC, including port, such as 'localhost:8790' or 'remotebuildexecution.googleapis.com:443'")
+	// CASService represents the host (and, if applicable, port) of the CAS service, if different from the remote execution service.
+	CASService = flag.String("cas_service", "", "The CAS service to dial when calling via gRPC, including port, such as 'localhost:8790' or 'remotebuildexecution.googleapis.com:443'")
 	// Instance gives the instance of remote execution to test (in
 	// projects/[PROJECT_ID]/instances/[INSTANCE_NAME] format for Google RBE).
 	Instance = flag.String("instance", "", "The instance ID to target when calling remote execution via gRPC (e.g., projects/$PROJECT/instances/default_instance for Google RBE).")
 )
 
-// DialFromFlags dials a remote execution service and returns a client suitable for higher-level
+// NewClientFromFlags connects to a remote execution service and returns a client suitable for higher-level
 // functionality. It uses the flags from above to configure the connection to remote execution.
-// TODO(olaola): remove this overload when everyone uses NewClientFromFlags.
-func DialFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
-	return client.Dial(ctx, *Instance, client.DialParams{
+func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
+	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
+		CASService:            *CASService,
 		CredFile:              *CredFile,
 		UseApplicationDefault: *UseApplicationDefaultCreds,
 		UseComputeEngine:      *UseGCECredentials,
 	}, opts...)
-}
-
-// NewClientFromFlags connects to a remote execution service and returns a client
-// suitable for higher-level functionality. It uses the flags from above to configure
-// the connection to remote execution.
-func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
-	return DialFromFlags(ctx, opts...)
 }
