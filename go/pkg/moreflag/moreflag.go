@@ -81,6 +81,11 @@ func (m *StringMapValue) Set(s string) error {
 	return nil
 }
 
+// Get returns the flag value as a map of strings.
+func (m *StringMapValue) Get() interface{} {
+	return map[string]string(*m)
+}
+
 // StringListValue is a command line flag that interprets a string as a list of comma-separated values.
 type StringListValue []string
 
@@ -96,4 +101,9 @@ func (m *StringListValue) Set(s string) error {
 	}
 	*m = StringListValue(strings.FieldsFunc(s, splitFn))
 	return nil
+}
+
+// Get returns the flag value as a list of strings.
+func (m *StringListValue) Get() interface{} {
+	return []string(*m)
 }
