@@ -15,6 +15,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"
@@ -34,7 +35,11 @@ func TestSplitEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cannot listen: %v", err)
 	}
-	l2, err := net.Listen("tcp", ":8090")
+	port, err := portpicker.PickUnusedPort()
+	if err != nil {
+		t.Fatalf("Failed picking unused port: %v", err)
+	}
+	l2, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		t.Fatalf("Cannot listen: %v", err)
 	}

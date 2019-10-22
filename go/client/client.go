@@ -73,7 +73,7 @@ type Client struct {
 func (c *Client) Close() error {
 	err := c.Connection.Close()
 	if err != nil {
-	  return err
+		return err
 	}
 	if c.CASConnection != c.Connection {
 		return c.CASConnection.Close()
