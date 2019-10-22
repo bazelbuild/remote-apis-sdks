@@ -70,11 +70,15 @@ type Client struct {
 }
 
 // Close closes the underlying gRPC connection(s).
-func (c *Client) Close() {
-	c.Connection.Close()
-	if c.CASConnection != c.Connection {
-		c.CASConnection.Close()
+func (c *Client) Close() error {
+	err := c.Connection.Close()
+	if err != nil {
+	  return err
 	}
+	if c.CASConnection != c.Connection {
+		return c.CASConnection.Close()
+	}
+	return nil
 }
 
 // Opt is an option that can be passed to Dial in order to configure the behaviour of the client.
