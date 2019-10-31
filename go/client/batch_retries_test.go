@@ -275,33 +275,33 @@ type sleepyBatchServer struct {
 	readRequests   int
 }
 
-func (f *sleepyBatchServer) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
+func (s *sleepyBatchServer) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (f *sleepyBatchServer) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
+func (s *sleepyBatchServer) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
 	return status.Error(codes.Unimplemented, "")
 }
 
-func (f *sleepyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (*repb.BatchReadBlobsResponse, error) {
-	f.readRequests++
-	if f.numErrors < 3 {
-		f.numErrors++
-		time.Sleep(f.timeout)
+func (s *sleepyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (*repb.BatchReadBlobsResponse, error) {
+	s.readRequests++
+	s.numErrors++
+	if s.numErrors < 4 {
+		time.Sleep(s.timeout)
 		return &repb.BatchReadBlobsResponse{}, nil
 	}
-	// Will not be reached.
+	// Should not be reached.
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (f *sleepyBatchServer) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (*repb.BatchUpdateBlobsResponse, error) {
-	f.updateRequests++
-	if f.numErrors < 3 {
-		f.numErrors++
-		time.Sleep(f.timeout)
+func (s *sleepyBatchServer) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (*repb.BatchUpdateBlobsResponse, error) {
+	s.updateRequests++
+	s.numErrors++
+	if s.numErrors < 4 {
+		time.Sleep(s.timeout)
 		return &repb.BatchUpdateBlobsResponse{}, nil
 	}
-	// Will not be reached.
+	// Should not be reached.
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
