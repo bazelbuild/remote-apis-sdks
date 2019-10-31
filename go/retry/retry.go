@@ -44,6 +44,11 @@ func ExponentialBackoff(baseDelay, maxDelay time.Duration, attempts Attempts) Ba
 	return BackoffPolicy{baseDelay, maxDelay, attempts}
 }
 
+// Immediately returns a retrier that retries right away.
+func Immediately(attempts Attempts) BackoffPolicy {
+	return BackoffPolicy{0, 0, attempts}
+}
+
 // Attempts is the number of times to attempt something before giving up. A value of 0 represents
 // an effectively unlimited number of attempts, or you can use the equivalent
 // retry.UnlimitedAttempts.
