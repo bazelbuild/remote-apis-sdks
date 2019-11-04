@@ -183,7 +183,7 @@ type DialParams struct {
 
 // Dial dials a given endpoint and returns the grpc connection that is established.
 func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, error) {
-	var opts []grpc.DialOption = []grpc.DialOption{grpc.WithWaitForHandshake()}
+	var opts []grpc.DialOption
 
 	if params.NoSecurity {
 		opts = append(opts, grpc.WithInsecure())

@@ -1,27 +1,27 @@
 workspace(name = "bazel_remote_apis_sdks")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 # Go rules.
 http_archive(
     name = "io_bazel_rules_go",
+    sha256 = "842ec0e6b4fbfdd3de6150b61af92901eeb73681fd4d185746644c338f51d4c0",
     urls = [
-        "https://storage.googleapis.com/bazel-mirror/github.com/bazelbuild/rules_go/releases/download/0.18.6/rules_go-0.18.6.tar.gz",
-        "https://github.com/bazelbuild/rules_go/releases/download/0.18.6/rules_go-0.18.6.tar.gz",
+        "https://storage.googleapis.com/bazel-mirror/github.com/bazelbuild/rules_go/releases/download/v0.20.1/rules_go-v0.20.1.tar.gz",
+        "https://github.com/bazelbuild/rules_go/releases/download/v0.20.1/rules_go-v0.20.1.tar.gz",
     ],
-    sha256 = "f04d2373bcaf8aa09bccb08a98a57e721306c8f6043a2a0ee610fd6853dcde3d",
 )
 
 # Gazelle.
 http_archive(
     name = "bazel_gazelle",
-    sha256 = "3c681998538231a2d24d0c07ed5a7658cb72bfb5fd4bf9911157c0e9ac6a2687",
-    urls = ["https://github.com/bazelbuild/bazel-gazelle/releases/download/0.17.0/bazel-gazelle-0.17.0.tar.gz"],
+    sha256 = "41bff2a0b32b02f20c227d234aa25ef3783998e5453f7eade929704dcff7cd4b",
+    urls = ["https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.19.0/bazel-gazelle-v0.19.0.tar.gz"],
 )
 
-load("@io_bazel_rules_go//go:deps.bzl", "go_rules_dependencies", "go_register_toolchains")
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
+load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
 
 go_rules_dependencies()
 
@@ -32,12 +32,9 @@ gazelle_dependencies()
 # gRPC.
 http_archive(
     name = "com_github_grpc_grpc",
-    sha256 = "8da7f32cc8978010d2060d740362748441b81a34e5425e108596d3fcd63a97f2",
-    strip_prefix = "grpc-1.21.0",
-    urls = [
-        "https://github.com/grpc/grpc/archive/v1.21.0.tar.gz",
-        "https://mirror.bazel.build/github.com/grpc/grpc/archive/v1.21.0.tar.gz",
-    ],
+    sha256 = "b391a327429279f6f29b9ae7e5317cd80d5e9d49cc100e6d682221af73d984a6",
+    strip_prefix = "grpc-93e8830070e9afcbaa992c75817009ee3f4b63a0",  # v1.24.3 with fixes
+    urls = ["https://github.com/grpc/grpc/archive/93e8830070e9afcbaa992c75817009ee3f4b63a0.zip"],
 )
 
 # Pull in all gRPC dependencies.
@@ -47,67 +44,12 @@ grpc_deps()
 
 # Go dependencies, add or update repos using Gazelle:
 #  * For more details: https://github.com/bazelbuild/bazel-gazelle#update-repos
-#  * Also manually update the repo in remote-apis-sdks-deps.bzl.
-go_repository(
-    name = "com_github_pkg_errors",
-    commit = "27936f6d90f9c8e1145f11ed52ffffbfdb9e0af7",
-    importpath = "github.com/pkg/errors",
-)
+#  * Alternatively, manually update the repo in remote-apis-sdks-deps.bzl.
 
-go_repository(
-    name = "com_github_golang_protobuf",
-    commit = "e91709a02e0e8ff8b86b7aa913fdc9ae9498e825",
-    importpath = "github.com/golang/protobuf",
-)
+load("//:remote-apis-sdks-deps.bzl", "remote_apis_sdks_go_deps")
 
-go_repository(
-    name = "com_github_google_go_cmp",
-    commit = "6f77996f0c42f7b84e5a2b252227263f93432e9b",
-    importpath = "github.com/google/go-cmp",
-)
-
-go_repository(
-    name = "org_golang_google_grpc",
-    commit = "a8b5bd3c39ac82177c7bad36e1dd695096cd0ef5",
-    importpath = "google.golang.org/grpc",
-)
-
-go_repository(
-    name = "org_golang_x_oauth2",
-    commit = "9f3314589c9a9136388751d9adae6b0ed400978a",
-    importpath = "golang.org/x/oauth2",
-)
-
-go_repository(
-    name = "com_github_golang_glog",
-    commit = "23def4e6c14b4da8ac2ed8007337bc5eb5007998",
-    importpath = "github.com/golang/glog",
-)
-
-go_repository(
-    name = "com_github_google_uuid",
-    build_file_generation = "on",
-    commit = "c2e93f3ae59f2904160ceaab466009f965df46d6",
-    importpath = "github.com/google/uuid",
-)
-
-go_repository(
-    name = "org_golang_x_sync",
-    commit = "112230192c580c3556b8cee6403af37a4fc5f28c",
-    importpath = "golang.org/x/sync",
-)
-
-go_repository(
-    name = "com_google_cloud_go",
-    commit = "09ad026a62f0561b7f7e276569eda11a6afc9773",
-    importpath = "cloud.google.com/go",
-)
-
-go_repository(
-    name = "com_github_pborman_uuid",
-    commit = "8b1b92947f46224e3b97bb1a3a5b0382be00d31e",
-    importpath = "github.com/pborman/uuid",
-)
+# TODO(olaola): conditionally load dependencies by language.
+remote_apis_sdks_go_deps()
 
 # Needed for the googleapis protos used by com_github_bazelbuild_remote_apis
 # below.
@@ -121,8 +63,8 @@ http_archive(
 
 go_repository(
     name = "com_github_bazelbuild_remote_apis",
-    commit = "e7282cf0f0e16e7ba84209be5417279e6815bee7",
     importpath = "github.com/bazelbuild/remote-apis",
+    tag = "v2.0.0",
 )
 
 load("@com_github_bazelbuild_remote_apis//:repository_rules.bzl", "switched_rules_by_language")
@@ -130,10 +72,4 @@ load("@com_github_bazelbuild_remote_apis//:repository_rules.bzl", "switched_rule
 switched_rules_by_language(
     name = "bazel_remote_apis_imports",
     go = True,
-)
-
-go_repository(
-    name = "com_github_kylelemons_godebug",
-    commit = "9ff306d4fbead574800b66369df5b6144732d58e",
-    importpath = "github.com/kylelemons/godebug",
 )
