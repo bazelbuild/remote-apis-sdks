@@ -3,6 +3,7 @@ package command
 import (
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
@@ -368,7 +369,7 @@ func TestToREProto(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.cmd.FillDefaultFieldValues()
 			gotCmd := tc.cmd.ToREProto()
-			if diff := cmp.Diff(tc.wantCmd, gotCmd, cmpopts.EquateEmpty()); diff != "" {
+			if diff := cmp.Diff(tc.wantCmd, gotCmd, cmpopts.EquateEmpty(), cmp.Comparer(proto.Equal)); diff != "" {
 				t.Errorf("%s: buildCommand gave result diff (-want +got):\n%s", tc.name, diff)
 			}
 		})

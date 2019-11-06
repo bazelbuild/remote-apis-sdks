@@ -11,7 +11,6 @@ import (
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
-	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -271,7 +270,7 @@ func (c *Client) ExecuteAndWait(ctx context.Context, req *repb.ExecuteRequest) (
 	// values and without returning an error, then lastOp will never be modified. Alternatively
 	// the server could return an empty operation explicitly prior to closing the stream. Either
 	// case is a server error.
-	if cmp.Equal(lastOp, &oppb.Operation{}) {
+	if proto.Equal(lastOp, &oppb.Operation{}) {
 		return nil, errors.New("unexpected server behaviour: an empty Operation was returned, or no operation was returned")
 	}
 
