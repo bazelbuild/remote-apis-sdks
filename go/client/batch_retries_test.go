@@ -10,6 +10,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/retry"
+	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/grpc"
@@ -184,7 +185,7 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 	for i, req := range wantRequests {
 		if diff := cmp.Diff(req, fake.updateRequests[i], cmpopts.SortSlices(func(a, b interface{}) bool {
 			return fmt.Sprint(a) < fmt.Sprint(b)
-		})); diff != "" {
+		}), cmp.Comparer(proto.Equal)); diff != "" {
 			t.Errorf("client.BatchWriteBlobs(ctx, blobs) diff on request at index %d (want -> got):\n%s", i, diff)
 		}
 	}
@@ -262,7 +263,7 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 	for i, req := range wantRequests {
 		if diff := cmp.Diff(req, fake.readRequests[i], cmpopts.SortSlices(func(a, b interface{}) bool {
 			return fmt.Sprint(a) < fmt.Sprint(b)
-		})); diff != "" {
+		}), cmp.Comparer(proto.Equal)); diff != "" {
 			t.Errorf("client.BatchWriteBlobs(ctx, blobs) diff on request at index %d (want -> got):\n%s", i, diff)
 		}
 	}

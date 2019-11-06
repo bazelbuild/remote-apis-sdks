@@ -14,6 +14,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
+	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/grpc/codes"
@@ -146,7 +147,7 @@ func TestExecNotAcceptCached(t *testing.T) {
 		t.Errorf("Run() gave stdout diff: want \"not cached\", got: %v", oe.Stdout())
 	}
 	// We did specify DoNotCache=false, so the new result should now be cached:
-	if diff := cmp.Diff(e.Server.Exec.ActionResult, e.Server.ActionCache.Get(acDg)); diff != "" {
+	if diff := cmp.Diff(e.Server.Exec.ActionResult, e.Server.ActionCache.Get(acDg), cmp.Comparer(proto.Equal)); diff != "" {
 		t.Errorf("Run() did not cache executed result  (-want +got):\n%s", diff)
 	}
 }
@@ -248,7 +249,7 @@ func TestExecRemoteFailureDownloadsPartialResults(t *testing.T) {
 
 			res, _ := e.Client.Run(context.Background(), cmd, opt, oe)
 
-			if diff := cmp.Diff(tc.wantRes, res); diff != "" {
+			if diff := cmp.Diff(tc.wantRes, res, cmp.Comparer(proto.Equal), cmp.Comparer(equalError)); diff != "" {
 				t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 			}
 			if len(oe.Stdout()) != 0 {
@@ -267,6 +268,10 @@ func TestExecRemoteFailureDownloadsPartialResults(t *testing.T) {
 			}
 		})
 	}
+}
+
+func equalError(x, y error) bool {
+	return x == y || (x != nil && y != nil && x.Error() == y.Error())
 }
 
 func TestDoNotDownloadOutputs(t *testing.T) {
@@ -321,7 +326,7 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 
 			res, _ := e.Client.Run(context.Background(), cmd, opt, oe)
 
-			if diff := cmp.Diff(tc.wantRes, res); diff != "" {
+			if diff := cmp.Diff(tc.wantRes, res, cmp.Comparer(proto.Equal), cmp.Comparer(equalError)); diff != "" {
 				t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 			}
 			if len(oe.Stdout()) != 0 {
