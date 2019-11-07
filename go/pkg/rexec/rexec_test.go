@@ -56,6 +56,9 @@ func TestExecCacheHit(t *testing.T) {
 		InputDirectories: 1,
 		InputFiles:       1,
 		TotalInputBytes:  fooDirDg.Size + cmdDg.Size + acDg.Size + fooDg.Size,
+		OutputFiles:      1,
+		TotalOutputBytes: 18, // "output" + "stdout" + "stderr"
+		OutputDigests:    map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
 	}
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
@@ -110,11 +113,12 @@ func TestExecNotAcceptCached(t *testing.T) {
 	wantMeta := &command.Metadata{
 		ActionDigest:     acDg,
 		InputDirectories: 1,
+		TotalOutputBytes: 10,
 	}
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes")); diff != "" {
+	if diff := cmp.Diff(wantMeta, meta, cmpopts.EquateEmpty(), cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes")); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
 	var eventNames []string

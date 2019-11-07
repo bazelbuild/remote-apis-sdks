@@ -426,6 +426,14 @@ type Metadata struct {
 	TotalInputBytes int64
 	// Event times for remote events, by event name.
 	EventTimes map[string]*TimeInterval
+	// The total number of output files (incl symlinks).
+	OutputFiles int
+	// The total number of output directories (incl symlinks, but not recursive).
+	OutputDirectories int
+	// The overall number of bytes from all the output files (incl. stdout/stderr, but not symlinks).
+	TotalOutputBytes int64
+	// Output digests.
+	OutputDigests map[string]digest.Digest
 	// TODO(olaola): Add a lot of other fields.
 }
 
