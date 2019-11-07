@@ -83,7 +83,32 @@ func (ec *Context) downloadStream(raw []byte, dgPb *repb.Digest, write func([]by
 	return nil
 }
 
+func (ec *Context) setOutputMetadata() {
+	if ec.resPb == nil {
+		return
+	}
+	ec.Metadata.OutputFiles = len(ec.resPb.OutputFiles) + len(ec.resPb.OutputFileSymlinks)
+	ec.Metadata.OutputDirectories = len(ec.resPb.OutputDirectories) + len(ec.resPb.OutputDirectorySymlinks)
+	ec.Metadata.OutputDigests = make(map[string]digest.Digest)
+	for _, file := range ec.resPb.OutputFiles {
+		dg := digest.NewFromProtoUnvalidated(file.Digest)
+		ec.Metadata.OutputDigests[file.Path] = dg
+		ec.Metadata.TotalOutputBytes += dg.Size
+	}
+	if ec.resPb.StdoutRaw != nil {
+		ec.Metadata.TotalOutputBytes += int64(len(ec.resPb.StdoutRaw))
+	} else if ec.resPb.StdoutDigest != nil {
+		ec.Metadata.TotalOutputBytes += ec.resPb.StdoutDigest.SizeBytes
+	}
+	if ec.resPb.StderrRaw != nil {
+		ec.Metadata.TotalOutputBytes += int64(len(ec.resPb.StderrRaw))
+	} else if ec.resPb.StderrDigest != nil {
+		ec.Metadata.TotalOutputBytes += ec.resPb.StderrDigest.SizeBytes
+	}
+}
+
 func (ec *Context) downloadResults() *command.Result {
+	ec.setOutputMetadata()
 	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
 	if err := ec.downloadStream(ec.resPb.StdoutRaw, ec.resPb.StdoutDigest, ec.oe.WriteOut); err != nil {
@@ -200,6 +225,8 @@ func (ec *Context) UpdateCachedResult() {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
+	ec.resPb = resPb
+	ec.setOutputMetadata()
 	toUpload := []*chunker.Chunker{ec.acCh, ec.cmdCh}
 	for _, ch := range blobs {
 		toUpload = append(toUpload, ch)
