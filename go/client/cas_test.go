@@ -76,6 +76,26 @@ func TestSplitEndpoints(t *testing.T) {
 	}
 }
 
+func TestReadEmptyBlobDoesNotCallServer(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+
+	got, err := c.ReadBlob(ctx, digest.Empty)
+	if err != nil {
+		t.Errorf("c.ReadBlob(ctx, Empty) gave error %s, want nil", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("c.ReadBlob(ctx, Empty) gave diff: want nil, got %v", got)
+	}
+	reads := fake.BlobReads(digest.Empty)
+	if reads != 0 {
+		t.Errorf("expected no blob reads to the fake, got %v", reads)
+	}
+}
+
 func TestRead(t *testing.T) {
 	ctx := context.Background()
 	listener, err := net.Listen("tcp", ":0")
@@ -804,7 +824,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 		},
 		{
 			name:      "many small blobs",
-			sizes:     []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+			sizes:     []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 			batchReqs: 1,
 		},
 	}
@@ -817,11 +837,16 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 			ar := &repb.ActionResult{}
 			for i, sz := range tc.sizes {
 				blob := make([]byte, int(sz))
-				blob[0] = byte(i) // Ensure blobs are distinct
+				if sz > 0 {
+					blob[0] = byte(i) // Ensure blobs are distinct
+				}
 				dg := digest.NewFromBlob(blob)
 				blobs[dg] = blob
 				dgs = append(dgs, dg)
-				fake.Put(blob)
+				if sz > 0 {
+					// Don't seed fake with empty blob, because it should not be called.
+					fake.Put(blob)
+				}
 				name := fmt.Sprintf("foo_%s", dg)
 				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dg.ToProto()})
 			}
