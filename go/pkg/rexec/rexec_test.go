@@ -42,58 +42,62 @@ func TestExecCacheHit(t *testing.T) {
 		fakes.StdOut("stdout"), fakes.StdErrRaw("stderr"))
 	oe := outerr.NewRecordingOutErr()
 
-	res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
+	for i := 0; i < 2; i++ {
+		res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
 
-	fooDg := digest.NewFromBlob(fooBlob)
-	fooDir := &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDg.ToProto(), IsExecutable: true}}}
-	fooDirDg, err := digest.NewFromMessage(fooDir)
-	if err != nil {
-		t.Fatalf("failed digesting message %v: %v", fooDir, err)
-	}
-	wantMeta := &command.Metadata{
-		CommandDigest:    cmdDg,
-		ActionDigest:     acDg,
-		InputDirectories: 1,
-		InputFiles:       1,
-		TotalInputBytes:  fooDirDg.Size + cmdDg.Size + acDg.Size + fooDg.Size,
-		OutputFiles:      1,
-		TotalOutputBytes: 18, // "output" + "stdout" + "stderr"
-		OutputDigests:    map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
-	}
-	if diff := cmp.Diff(wantRes, res); diff != "" {
-		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
-	}
-	if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "EventTimes")); diff != "" {
-		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
-	}
-	var eventNames []string
-	for name, interval := range meta.EventTimes {
-		eventNames = append(eventNames, name)
-		if interval == nil || interval.To.Before(interval.From) {
-			t.Errorf("Run() gave bad timing stats for event %v: %v", name, interval)
+		fooDg := digest.NewFromBlob(fooBlob)
+		fooDir := &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDg.ToProto(), IsExecutable: true}}}
+		fooDirDg, err := digest.NewFromMessage(fooDir)
+		if err != nil {
+			t.Fatalf("failed digesting message %v: %v", fooDir, err)
 		}
-	}
-	wantNames := []string{
-		command.EventComputeMerkleTree,
-		command.EventCheckActionCache,
-		command.EventDownloadResults,
-	}
-	if diff := cmp.Diff(wantNames, eventNames, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
-		t.Errorf("Run gave different events: want %v, got %v", wantNames, eventNames)
-	}
-	if !bytes.Equal(oe.Stdout(), []byte("stdout")) {
-		t.Errorf("Run() gave stdout diff: want \"stdout\", got: %v", oe.Stdout())
-	}
-	if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
-		t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
-	}
-	path := filepath.Join(e.ExecRoot, "a/b/out")
-	contents, err := ioutil.ReadFile(path)
-	if err != nil {
-		t.Errorf("error reading from %s: %v", path, err)
-	}
-	if !bytes.Equal(contents, []byte("output")) {
-		t.Errorf("expected %s to contain \"output\", got %v", path, contents)
+		wantMeta := &command.Metadata{
+			CommandDigest:    cmdDg,
+			ActionDigest:     acDg,
+			InputDirectories: 1,
+			InputFiles:       1,
+			TotalInputBytes:  fooDirDg.Size + cmdDg.Size + acDg.Size + fooDg.Size,
+			OutputFiles:      1,
+			TotalOutputBytes: 18, // "output" + "stdout" + "stderr"
+			OutputDigests:    map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
+		}
+		if diff := cmp.Diff(wantRes, res); diff != "" {
+			t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "EventTimes")); diff != "" {
+			t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
+		}
+		var eventNames []string
+		for name, interval := range meta.EventTimes {
+			eventNames = append(eventNames, name)
+			if interval == nil || interval.To.Before(interval.From) {
+				t.Errorf("Run() gave bad timing stats for event %v: %v", name, interval)
+			}
+		}
+		wantNames := []string{
+			command.EventComputeMerkleTree,
+			command.EventCheckActionCache,
+			command.EventDownloadResults,
+		}
+		if diff := cmp.Diff(wantNames, eventNames, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
+			t.Errorf("Run gave different events: want %v, got %v", wantNames, eventNames)
+		}
+		if i == 0 {
+			if !bytes.Equal(oe.Stdout(), []byte("stdout")) {
+				t.Errorf("Run() gave stdout diff: want \"stdout\", got: %v", oe.Stdout())
+			}
+			if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
+				t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
+			}
+		}
+		path := filepath.Join(e.ExecRoot, "a/b/out")
+		contents, err := ioutil.ReadFile(path)
+		if err != nil {
+			t.Errorf("error reading from %s: %v", path, err)
+		}
+		if !bytes.Equal(contents, []byte("output")) {
+			t.Errorf("expected %s to contain \"output\", got %v", path, contents)
+		}
 	}
 }
 
