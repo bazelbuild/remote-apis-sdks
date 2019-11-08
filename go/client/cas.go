@@ -220,7 +220,12 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 	}
 	req := &repb.BatchReadBlobsRequest{InstanceName: c.InstanceName}
 	var sz int64
+	foundEmpty := false
 	for _, dg := range dgs {
+		if dg.Size == 0 {
+			foundEmpty = true
+			continue
+		}
 		sz += dg.Size
 		req.Digests = append(req.Digests, dg.ToProto())
 	}
@@ -228,6 +233,9 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 		return nil, fmt.Errorf("batch read of %d total bytes exceeds maximum of %d", sz, MaxBatchSz)
 	}
 	res := make(map[digest.Digest][]byte)
+	if foundEmpty {
+		res[digest.Empty] = nil
+	}
 	closure := func() error {
 		var resp *repb.BatchReadBlobsResponse
 		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
@@ -368,6 +376,10 @@ func (c *Client) ReadBlobStreamed(ctx context.Context, d digest.Digest, w io.Wri
 }
 
 func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, offset, limit int64, w io.Writer) (int64, error) {
+	if sizeBytes == 0 {
+		// Do not download empty blobs.
+		return 0, nil
+	}
 	n, err := c.readStreamed(ctx, c.resourceNameRead(hash, sizeBytes), offset, limit, w)
 	if err != nil {
 		return n, err
