@@ -14,6 +14,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -134,12 +135,7 @@ func timeToProto(t time.Time) *tspb.Timestamp {
 func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...option) (cmdDg, acDg digest.Digest) {
 	e.t.Helper()
 	cmd.FillDefaultFieldValues()
-	ft, err := rc.BuildTreeFromInputs(cmd.ExecRoot, cmd.InputSpec)
-	if err != nil {
-		e.t.Fatalf("error building input tree in fake setup: %v", err)
-		return digest.Empty, digest.Empty
-	}
-	root, _, err := rc.PackageTree(ft)
+	root, _, _, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, int(e.Client.GrpcClient.ChunkMaxSize), e.Client.FileMetadataCache)
 	if err != nil {
 		e.t.Fatalf("error building input tree in fake setup: %v", err)
 		return digest.Empty, digest.Empty
