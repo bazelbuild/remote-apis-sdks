@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"testing"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/retry"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -183,9 +183,10 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 		t.Errorf("client.BatchWriteBlobs(ctx, blobs) wrong number of requests; expected %d, got %d", len(wantRequests), len(fake.updateRequests))
 	}
 	for i, req := range wantRequests {
-		if diff := cmp.Diff(req, fake.updateRequests[i], cmpopts.SortSlices(func(a, b interface{}) bool {
-			return fmt.Sprint(a) < fmt.Sprint(b)
-		}), cmp.Comparer(proto.Equal)); diff != "" {
+		sort.Slice(req.Requests, func(a, b int) bool {
+			return fmt.Sprint(req.Requests[a]) < fmt.Sprint(req.Requests[b])
+		})
+		if diff := cmp.Diff(req, fake.updateRequests[i], cmp.Comparer(proto.Equal)); diff != "" {
 			t.Errorf("client.BatchWriteBlobs(ctx, blobs) diff on request at index %d (want -> got):\n%s", i, diff)
 		}
 	}
@@ -261,9 +262,10 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 		t.Errorf("client.BatchWriteBlobs(ctx, blobs) wrong number of requests; expected %d, got %d", len(wantRequests), len(fake.readRequests))
 	}
 	for i, req := range wantRequests {
-		if diff := cmp.Diff(req, fake.readRequests[i], cmpopts.SortSlices(func(a, b interface{}) bool {
-			return fmt.Sprint(a) < fmt.Sprint(b)
-		}), cmp.Comparer(proto.Equal)); diff != "" {
+		sort.Slice(req.Digests, func(a, b int) bool {
+			return fmt.Sprint(req.Digests[a]) < fmt.Sprint(req.Digests[b])
+		})
+		if diff := cmp.Diff(req, fake.readRequests[i], cmp.Comparer(proto.Equal)); diff != "" {
 			t.Errorf("client.BatchWriteBlobs(ctx, blobs) diff on request at index %d (want -> got):\n%s", i, diff)
 		}
 	}
