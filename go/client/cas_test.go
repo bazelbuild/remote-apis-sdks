@@ -16,6 +16,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"
@@ -581,11 +582,11 @@ func TestFlattenActionOutputs(t *testing.T) {
 			{Name: "b", Digest: bDigest.ToProto()},
 		},
 	}
-	tree := &repb.Tree{
+	tr := &repb.Tree{
 		Root:     root,
 		Children: []*repb.Directory{dirA, dirB},
 	}
-	treeBlob, err := proto.Marshal(tree)
+	treeBlob, err := proto.Marshal(tr)
 	if err != nil {
 		t.Errorf("failed marshalling Tree: %s", err)
 	}
@@ -615,15 +616,15 @@ func TestFlattenActionOutputs(t *testing.T) {
 	if err != nil {
 		t.Errorf("error in FlattenActionOutputs: %s", err)
 	}
-	wantOutputs := map[string]*client.Output{
-		"dir/a/b/foo": &client.Output{Digest: fooDigest, IsExecutable: true},
-		"dir/a/bar":   &client.Output{Digest: barDigest},
-		"dir/b/foo":   &client.Output{Digest: fooDigest, IsExecutable: true},
-		"dir2/b/foo":  &client.Output{Digest: fooDigest, IsExecutable: true},
-		"dir2/bar":    &client.Output{Digest: barDigest},
-		"foo":         &client.Output{Digest: fooDigest},
-		"x/a":         &client.Output{SymlinkTarget: "../dir/a"},
-		"x/bar":       &client.Output{SymlinkTarget: "../dir/a/bar"},
+	wantOutputs := map[string]*tree.Output{
+		"dir/a/b/foo": &tree.Output{Digest: fooDigest, IsExecutable: true},
+		"dir/a/bar":   &tree.Output{Digest: barDigest},
+		"dir/b/foo":   &tree.Output{Digest: fooDigest, IsExecutable: true},
+		"dir2/b/foo":  &tree.Output{Digest: fooDigest, IsExecutable: true},
+		"dir2/bar":    &tree.Output{Digest: barDigest},
+		"foo":         &tree.Output{Digest: fooDigest},
+		"x/a":         &tree.Output{SymlinkTarget: "../dir/a"},
+		"x/bar":       &tree.Output{SymlinkTarget: "../dir/a/bar"},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenActionOutputs gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))
