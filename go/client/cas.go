@@ -13,6 +13,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
 	"golang.org/x/sync/errgroup"
@@ -506,34 +507,34 @@ func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result [
 
 // FlattenActionOutputs collects and flattens all the outputs of an action.
 // It downloads the output directory metadata, if required, but not the leaf file blobs.
-func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult) (map[string]*Output, error) {
-	outs := make(map[string]*Output)
+func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult) (map[string]*tree.Output, error) {
+	outs := make(map[string]*tree.Output)
 	for _, file := range ar.OutputFiles {
-		outs[file.Path] = &Output{
+		outs[file.Path] = &tree.Output{
 			Path:         file.Path,
 			Digest:       digest.NewFromProtoUnvalidated(file.Digest),
 			IsExecutable: file.IsExecutable,
 		}
 	}
 	for _, sm := range ar.OutputFileSymlinks {
-		outs[sm.Path] = &Output{
+		outs[sm.Path] = &tree.Output{
 			Path:          sm.Path,
 			SymlinkTarget: sm.Target,
 		}
 	}
 	for _, sm := range ar.OutputDirectorySymlinks {
-		outs[sm.Path] = &Output{
+		outs[sm.Path] = &tree.Output{
 			Path:          sm.Path,
 			SymlinkTarget: sm.Target,
 		}
 	}
 	for _, dir := range ar.OutputDirectories {
 		if blob, err := c.ReadBlob(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest)); err == nil {
-			tree := &repb.Tree{}
-			if err := proto.Unmarshal(blob, tree); err != nil {
+			t := &repb.Tree{}
+			if err := proto.Unmarshal(blob, t); err != nil {
 				return nil, err
 			}
-			dirouts, err := FlattenTree(tree, dir.Path)
+			dirouts, err := tree.FlattenTree(t, dir.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -551,8 +552,8 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	if err != nil {
 		return err
 	}
-	var symlinks, copies []*Output
-	downloads := make(map[digest.Digest]*Output)
+	var symlinks, copies []*tree.Output
+	downloads := make(map[digest.Digest]*tree.Output)
 	for _, out := range outs {
 		path := filepath.Join(execRoot, out.Path)
 		// TODO(olaola): fix the (upstream) bug that this doesn't download empty directory trees.
@@ -614,7 +615,7 @@ func copyFile(execRoot, from, to string) error {
 	return err
 }
 
-func (c *Client) downloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*Output) error {
+func (c *Client) downloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
 	if cap(c.casDownloaders) <= 0 {
 		return fmt.Errorf("CASConcurrency should be at least 1")
 	}
