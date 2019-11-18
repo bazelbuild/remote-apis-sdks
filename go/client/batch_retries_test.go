@@ -183,8 +183,9 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 		t.Errorf("client.BatchWriteBlobs(ctx, blobs) wrong number of requests; expected %d, got %d", len(wantRequests), len(fake.updateRequests))
 	}
 	for i, req := range wantRequests {
-		sort.Slice(req.Requests, func(a, b int) bool {
-			return fmt.Sprint(req.Requests[a]) < fmt.Sprint(req.Requests[b])
+		reqs := fake.updateRequests[i].Requests
+		sort.Slice(reqs, func(a, b int) bool {
+			return fmt.Sprint(reqs[a]) < fmt.Sprint(reqs[b])
 		})
 		if diff := cmp.Diff(req, fake.updateRequests[i], cmp.Comparer(proto.Equal)); diff != "" {
 			t.Errorf("client.BatchWriteBlobs(ctx, blobs) diff on request at index %d (want -> got):\n%s", i, diff)
@@ -262,8 +263,9 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 		t.Errorf("client.BatchWriteBlobs(ctx, blobs) wrong number of requests; expected %d, got %d", len(wantRequests), len(fake.readRequests))
 	}
 	for i, req := range wantRequests {
-		sort.Slice(req.Digests, func(a, b int) bool {
-			return fmt.Sprint(req.Digests[a]) < fmt.Sprint(req.Digests[b])
+		dgs := fake.readRequests[i].Digests
+		sort.Slice(dgs, func(a, b int) bool {
+			return fmt.Sprint(dgs[a]) < fmt.Sprint(dgs[b])
 		})
 		if diff := cmp.Diff(req, fake.readRequests[i], cmp.Comparer(proto.Equal)); diff != "" {
 			t.Errorf("client.BatchWriteBlobs(ctx, blobs) diff on request at index %d (want -> got):\n%s", i, diff)
