@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 )
 
 // Metadata contains details for a particular file.

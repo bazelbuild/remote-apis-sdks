@@ -29,7 +29,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
 
-	rflags "github.com/bazelbuild/remote-apis-sdks/go/flags"
+	rflags "github.com/bazelbuild/remote-apis-sdks/go/pkg/flags"
 	log "github.com/golang/glog"
 )
 

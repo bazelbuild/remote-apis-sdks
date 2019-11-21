@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 

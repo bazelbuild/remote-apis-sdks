@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/pborman/uuid"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"

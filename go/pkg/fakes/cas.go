@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/client"
-	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/pborman/uuid"
 	"google.golang.org/grpc/codes"
