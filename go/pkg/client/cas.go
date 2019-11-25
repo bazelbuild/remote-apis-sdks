@@ -552,6 +552,12 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	if err != nil {
 		return err
 	}
+	// Remove the existing output directories before downloading.
+	for _, dir := range resPb.OutputDirectories {
+		if err := os.RemoveAll(filepath.Join(execRoot, dir.Path)); err != nil {
+			return err
+		}
+	}
 	var symlinks, copies []*tree.Output
 	downloads := make(map[digest.Digest]*tree.Output)
 	for _, out := range outs {
