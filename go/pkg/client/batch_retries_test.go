@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/client"
-	"github.com/bazelbuild/remote-apis-sdks/go/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/retry"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"

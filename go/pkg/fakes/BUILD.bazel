@@ -11,10 +11,10 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/client:go_default_library",
-        "//go/digest:go_default_library",
         "//go/pkg/chunker:go_default_library",
+        "//go/pkg/client:go_default_library",
         "//go/pkg/command:go_default_library",
+        "//go/pkg/digest:go_default_library",
         "//go/pkg/filemetadata:go_default_library",
         "//go/pkg/rexec:go_default_library",
         "//go/pkg/tree:go_default_library",

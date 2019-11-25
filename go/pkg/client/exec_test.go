@@ -3,7 +3,7 @@ package client_test
 import (
 	"testing"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/golang/protobuf/ptypes"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"

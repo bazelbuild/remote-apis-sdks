@@ -5,7 +5,7 @@ import (
 	"context"
 	"flag"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 )
 
 var (

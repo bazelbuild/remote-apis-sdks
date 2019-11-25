@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/actas"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
-	"github.com/bazelbuild/remote-apis-sdks/go/retry"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

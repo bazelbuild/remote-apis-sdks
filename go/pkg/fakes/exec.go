@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
