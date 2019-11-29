@@ -11,8 +11,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
@@ -393,6 +393,15 @@ func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, o
 		return n, fmt.Errorf("CAS fetch read %d bytes but %d were expected", n, sz)
 	}
 	return n, nil
+}
+
+// ReadProto reads a blob from the CAS and unmarshals it into the given message.
+func (c *Client) ReadProto(ctx context.Context, d digest.Digest, msg proto.Message) error {
+	bytes, err := c.ReadBlob(ctx, d)
+	if err != nil {
+		return err
+	}
+	return proto.Unmarshal(bytes, msg)
 }
 
 // MissingBlobs queries the CAS to determine if it has the listed blobs. It returns a list of the

@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
@@ -926,5 +926,32 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), client.DefaultCASConcurrency)
 			}
 		})
+	}
+}
+
+func TestWriteAndReadProto(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+
+	fooDigest := fake.Put([]byte("foo"))
+	dirA := &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
+		},
+	}
+	d, err := c.WriteProto(ctx, dirA)
+	if err != nil {
+		t.Errorf("Failed writing proto: %s", err)
+	}
+
+	dirB := &repb.Directory{}
+	if err := c.ReadProto(ctx, d, dirB); err != nil {
+		t.Errorf("Failed reading proto: %s", err)
+	}
+	if !proto.Equal(dirA, dirB) {
+		t.Errorf("Protos not equal: %s / %s", dirA, dirB)
 	}
 }
