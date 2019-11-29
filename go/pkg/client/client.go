@@ -522,6 +522,20 @@ func (c *Client) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesR
 	if err != nil {
 		return nil, err
 	}
+	// If the CAS server is different to the execution server, we need to get its capabilities separately.
+	if c.CASConnection != c.Connection {
+		var res2 *repb.ServerCapabilities
+		err = c.Retrier.Do(ctx, func() (e error) {
+			return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+				res2, e = regrpc.NewCapabilitiesClient(c.CASConnection).GetCapabilities(ctx, req, opts...)
+				return e
+			})
+		})
+		if err != nil {
+			return nil, err
+		}
+		res.CacheCapabilities = res2.CacheCapabilities
+	}
 	return res, nil
 }
 
