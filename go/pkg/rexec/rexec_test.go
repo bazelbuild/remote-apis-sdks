@@ -246,6 +246,7 @@ func TestExecRemoteFailureDownloadsPartialResults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
+			e.Client.GrpcClient.Retrier = nil // Disable retries
 			cmd := &command.Command{
 				Args:        []string{"tool"},
 				OutputFiles: []string{"a/b/out"},
@@ -323,6 +324,7 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
+			e.Client.GrpcClient.Retrier = nil // Disable retries
 			cmd := &command.Command{
 				Args:        []string{"tool"},
 				OutputFiles: []string{"a/b/out"},

@@ -133,7 +133,7 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 	client, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
-	}, client.RetryTransient())
+	})
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 	client, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
-	}, client.RetryTransient())
+	})
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}

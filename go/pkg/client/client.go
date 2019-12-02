@@ -266,6 +266,7 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		useBatchOps:    true,
 		casUploaders:   make(chan bool, DefaultCASConcurrency),
 		casDownloaders: make(chan bool, DefaultCASConcurrency),
+		Retrier:        RetryTransient(),
 	}
 	for _, o := range opts {
 		o.Apply(client)
