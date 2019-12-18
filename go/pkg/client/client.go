@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"golang.org/x/oauth2"
@@ -19,6 +20,7 @@ import (
 	"google.golang.org/grpc/credentials/oauth"
 	"google.golang.org/grpc/status"
 
+	configpb "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer/proto"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
@@ -110,6 +112,14 @@ type CASConcurrency int
 // DefaultCASConcurrency is the default maximum number of concurrent upload and download operations.
 const DefaultCASConcurrency = 50
 
+// MaxConcurrentRequests specifies the maximum number of concurrent requests on a single connection
+// that the GRPC balancer can perform.
+const MaxConcurrentRequests = 1000
+
+// ConcurrentStreamsThreshold specifies the threshold value at which the GRPC balancer should create
+// new sub-connections.
+const ConcurrentStreamsThreshold = 90
+
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casUploaders = make(chan bool, cy)
@@ -181,6 +191,25 @@ type DialParams struct {
 	TransportCredsOnly bool
 }
 
+func createGRPCInterceptor() *balancer.GCPInterceptor {
+	apiConfig := &configpb.ApiConfig{
+		ChannelPool: &configpb.ChannelPoolConfig{
+			MaxSize:                          MaxConcurrentRequests,
+			MaxConcurrentStreamsLowWatermark: ConcurrentStreamsThreshold,
+		},
+		Method: []*configpb.MethodConfig{
+			&configpb.MethodConfig{
+				Name: []string{".*"},
+				Affinity: &configpb.AffinityConfig{
+					Command:     configpb.AffinityConfig_BIND,
+					AffinityKey: "bind-affinity",
+				},
+			},
+		},
+	}
+	return balancer.NewGCPInterceptor(apiConfig)
+}
+
 // Dial dials a given endpoint and returns the grpc connection that is established.
 func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, error) {
 	var opts []grpc.DialOption
@@ -213,6 +242,10 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		tlsCreds := credentials.NewClientTLSFromCert(nil, "")
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
+	grpcInt := createGRPCInterceptor()
+	opts = append(opts, grpc.WithBalancerName(balancer.Name))
+	opts = append(opts, grpc.WithUnaryInterceptor(grpcInt.GCPUnaryClientInterceptor))
+	opts = append(opts, grpc.WithStreamInterceptor(grpcInt.GCPStreamClientInterceptor))
 
 	conn, err := grpc.Dial(endpoint, opts...)
 	if err != nil {

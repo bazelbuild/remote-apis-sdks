@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
