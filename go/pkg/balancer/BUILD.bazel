@@ -1,0 +1,21 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "gcp_balancer.go",
+        "gcp_interceptor.go",
+        "gcp_picker.go",
+    ],
+    importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/pkg/balancer/proto:go_default_library",
+        "@com_github_golang_protobuf//jsonpb:go_default_library_gen",
+        "@org_golang_google_grpc//:go_default_library",
+        "@org_golang_google_grpc//balancer:go_default_library",
+        "@org_golang_google_grpc//connectivity:go_default_library",
+        "@org_golang_google_grpc//grpclog:go_default_library",
+        "@org_golang_google_grpc//resolver:go_default_library",
+    ],
+)

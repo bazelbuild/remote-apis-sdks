@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
@@ -381,14 +381,19 @@ func TestUpload(t *testing.T) {
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
 
+	chunkSize := 5
+	var twoThousandBlobs [][]byte
 	var thousandBlobs [][]byte
-	var halfThousandBlobs [][]byte
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 2000; i++ {
 		var buf = new(bytes.Buffer)
 		binary.Write(buf, binary.LittleEndian, i)
-		thousandBlobs = append(thousandBlobs, buf.Bytes())
+		// Write a few extra bytes so that we have > chunkSize sized blobs.
+		for j := 0; j < 10; j++ {
+			binary.Write(buf, binary.LittleEndian, 0)
+		}
+		twoThousandBlobs = append(twoThousandBlobs, buf.Bytes())
 		if i%2 == 0 {
-			halfThousandBlobs = append(halfThousandBlobs, buf.Bytes())
+			thousandBlobs = append(thousandBlobs, buf.Bytes())
 		}
 	}
 
@@ -399,6 +404,9 @@ func TestUpload(t *testing.T) {
 		// present is the blobs already present in the CAS; they're pre-loaded into the fakes.CAS object
 		// and the test verifies no attempt was made to upload them.
 		present [][]byte
+		// concurrency is the CAS concurrency with which we should be uploading the blobs. If not
+		// specified, it uses client.DefaultCASConcurrency.
+		concurrency client.CASConcurrency
 	}{
 		{
 			name:    "No blobs",
@@ -421,9 +429,10 @@ func TestUpload(t *testing.T) {
 			present: [][]byte{[]byte("bar")},
 		},
 		{
-			name:    "1000 blobs heavy concurrency",
-			input:   thousandBlobs,
-			present: halfThousandBlobs,
+			name:    "2000 blobs heavy concurrency",
+			input:   twoThousandBlobs,
+			present: thousandBlobs,
+			concurrency: client.CASConcurrency(500),
 		},
 	}
 
@@ -433,6 +442,10 @@ func TestUpload(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
 					fake.Clear()
+					if tc.concurrency > 0 {
+						tc.concurrency.Apply(c)
+					}
+
 					present := make(map[digest.Digest]bool)
 					for _, blob := range tc.present {
 						fake.Put(blob)
@@ -440,7 +453,7 @@ func TestUpload(t *testing.T) {
 					}
 					var input []*chunker.Chunker
 					for _, blob := range tc.input {
-						input = append(input, chunker.NewFromBlob(blob, 20))
+						input = append(input, chunker.NewFromBlob(blob, chunkSize))
 					}
 
 					err := c.UploadIfMissing(ctx, input...)

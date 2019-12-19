@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
