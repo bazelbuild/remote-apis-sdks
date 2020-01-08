@@ -58,6 +58,11 @@ type VirtualInput struct {
 
 	// Whether the file should be staged as executable.
 	IsExecutable bool
+
+	// Whether the file is actually an empty directory. This is used to provide
+	// empty directory inputs. When this is set, Contents and IsExecutable are
+	// ignored.
+	IsEmptyDirectory bool
 }
 
 // InputSpec represents all the required inputs to a remote command.

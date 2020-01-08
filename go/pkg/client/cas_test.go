@@ -429,9 +429,9 @@ func TestUpload(t *testing.T) {
 			present: [][]byte{[]byte("bar")},
 		},
 		{
-			name:    "2000 blobs heavy concurrency",
-			input:   twoThousandBlobs,
-			present: thousandBlobs,
+			name:        "2000 blobs heavy concurrency",
+			input:       twoThousandBlobs,
+			present:     thousandBlobs,
 			concurrency: client.CASConcurrency(500),
 		},
 	}
