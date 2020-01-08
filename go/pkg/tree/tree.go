@@ -32,8 +32,9 @@ type treeNode struct {
 }
 
 type fileNode struct {
-	Chunker      *chunker.Chunker
-	IsExecutable bool
+	Chunker              *chunker.Chunker
+	IsExecutable         bool
+	EmptyDirectoryMarker bool
 }
 
 // Stats contains various stats/metadata of the constructed Merkle tree.
@@ -79,7 +80,10 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return nil
 	}
 	if t == command.FileInputType {
-		fs[path] = &fileNode{chunker.NewFromFile(absPath, meta.Digest, chunkSize), meta.IsExecutable}
+		fs[path] = &fileNode{
+			Chunker:      chunker.NewFromFile(absPath, meta.Digest, chunkSize),
+			IsExecutable: meta.IsExecutable,
+		}
 		return nil
 	}
 	// Directory
@@ -88,6 +92,10 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return err
 	}
 
+	if len(files) == 0 {
+		fs[path] = &fileNode{EmptyDirectoryMarker: true}
+		return nil
+	}
 	for _, f := range files {
 		if e := loadFiles(execRoot, excl, filepath.Join(path, f.Name()), fs, chunkSize, cache); e != nil {
 			return e
@@ -112,7 +120,14 @@ func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, ca
 		if i.Path == "" {
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
 		}
-		fs[i.Path] = &fileNode{chunker.NewFromBlob(i.Contents, chunkSize), i.IsExecutable}
+		if i.IsEmptyDirectory {
+			fs[i.Path] = &fileNode{EmptyDirectoryMarker: true}
+			continue
+		}
+		fs[i.Path] = &fileNode{
+			Chunker:      chunker.NewFromBlob(i.Contents, chunkSize),
+			IsExecutable: i.IsExecutable,
+		}
 	}
 	ft := buildTree(fs)
 	var blobs map[digest.Digest]*chunker.Chunker
@@ -146,6 +161,13 @@ func buildTree(files map[string]*fileNode) *treeNode {
 			node = child
 		}
 
+		if fn.EmptyDirectoryMarker {
+			if node.Dirs == nil {
+				node.Dirs = make(map[string]*treeNode)
+			}
+			node.Dirs[base] = &treeNode{}
+			continue
+		}
 		if node.Files == nil {
 			node.Files = make(map[string]*fileNode)
 		}

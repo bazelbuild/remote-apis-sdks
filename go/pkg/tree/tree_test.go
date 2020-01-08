@@ -44,6 +44,7 @@ func mustMarshal(p proto.Message) []byte {
 
 type inputPath struct {
 	path          string
+	emptyDir      bool
 	fileContents  []byte
 	isExecutable  bool
 	isSymlink     bool
@@ -60,6 +61,12 @@ func construct(dir string, ips []*inputPath) error {
 				target = filepath.Join(dir, target)
 			}
 			if err := os.Symlink(target, path); err != nil {
+				return err
+			}
+			continue
+		}
+		if ip.emptyDir {
+			if err := os.MkdirAll(path, 0777); err != nil {
 				return err
 			}
 			continue
@@ -103,6 +110,195 @@ func (c *callCountingMetadataCache) Get(path string) *filemetadata.Metadata {
 	}
 	c.calls[p]++
 	return c.cache.Get(path)
+}
+
+func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
+	fileBlob := []byte("bla")
+	fileDg := digest.NewFromBlob(fileBlob)
+	fileDgPb := fileDg.ToProto()
+	emptyDirDgPb := digest.Empty.ToProto()
+	cDir := &repb.Directory{
+		Files:       []*repb.FileNode{{Name: "file", Digest: fileDgPb}},
+		Directories: []*repb.DirectoryNode{{Name: "empty", Digest: emptyDirDgPb}},
+	}
+	cDirBlob := mustMarshal(cDir)
+	cDirDg := digest.NewFromBlob(cDirBlob)
+	cDirDgPb := cDirDg.ToProto()
+	bDir := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "c", Digest: cDirDgPb},
+			{Name: "empty", Digest: emptyDirDgPb},
+		},
+	}
+	bDirBlob := mustMarshal(bDir)
+	bDirDg := digest.NewFromBlob(bDirBlob)
+	bDirDgPb := bDirDg.ToProto()
+	aDir := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "b", Digest: bDirDgPb},
+			{Name: "empty", Digest: emptyDirDgPb},
+		},
+	}
+	aDirBlob := mustMarshal(aDir)
+	aDirDg := digest.NewFromBlob(aDirBlob)
+
+	ips := []*inputPath{
+		{path: "empty", emptyDir: true},
+		{path: "b/empty", emptyDir: true},
+		{path: "b/c/empty", emptyDir: true},
+		{path: "b/c/file", fileContents: fileBlob},
+	}
+	root, err := ioutil.TempDir("", t.Name())
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(root)
+	if err := construct(root, ips); err != nil {
+		t.Fatalf("failed to construct input dir structure: %v", err)
+	}
+	inputSpec := &command.InputSpec{Inputs: []string{"b", "empty"}}
+	wantBlobs := map[digest.Digest][]byte{
+		aDirDg:       aDirBlob,
+		bDirDg:       bDirBlob,
+		cDirDg:       cDirBlob,
+		fileDg:       fileBlob,
+		digest.Empty: []byte{},
+	}
+
+	gotBlobs := make(map[digest.Digest][]byte)
+	cache := newCallCountingMetadataCache(root, t)
+	gotRootDg, inputs, stats, err := ComputeMerkleTree(root, inputSpec, chunker.DefaultChunkSize, cache)
+	if err != nil {
+		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
+	}
+	for _, ch := range inputs {
+		blob, err := ch.FullData()
+		if err != nil {
+			t.Errorf("chunker %v FullData() returned error %v", ch, err)
+		}
+		gotBlobs[ch.Digest()] = blob
+	}
+	if diff := cmp.Diff(aDirDg, gotRootDg); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
+		if gotRootBlob, ok := gotBlobs[gotRootDg]; ok {
+			gotRoot := new(repb.Directory)
+			if err := proto.Unmarshal(gotRootBlob, gotRoot); err != nil {
+				t.Errorf("  When unpacking root blob, got error: %s", err)
+			} else {
+				diff := cmp.Diff(aDir, gotRoot)
+				t.Errorf("  Diff between unpacked roots (-want +got):\n%s", diff)
+			}
+		} else {
+			t.Errorf("  Root digest gotten not present in blobs map")
+		}
+	}
+	if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on blobs:\n%s", diff)
+	}
+	wantCacheCalls := map[string]int{
+		"empty":     1,
+		"b":         1,
+		"b/empty":   1,
+		"b/c":       1,
+		"b/c/empty": 1,
+		"b/c/file":  1,
+	}
+	if diff := cmp.Diff(wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
+	}
+	wantStats := &Stats{
+		InputDirectories: 6,
+		InputFiles:       1,
+		TotalInputBytes:  fileDg.Size + aDirDg.Size + bDirDg.Size + cDirDg.Size,
+	}
+	if diff := cmp.Diff(wantStats, stats); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff on stats (-want +got) on blobs:\n%s", diff)
+	}
+}
+
+func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
+	emptyDirDgPb := digest.Empty.ToProto()
+	cDir := &repb.Directory{
+		Directories: []*repb.DirectoryNode{{Name: "empty", Digest: emptyDirDgPb}},
+	}
+	cDirBlob := mustMarshal(cDir)
+	cDirDg := digest.NewFromBlob(cDirBlob)
+	cDirDgPb := cDirDg.ToProto()
+	bDir := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "c", Digest: cDirDgPb},
+			{Name: "empty", Digest: emptyDirDgPb},
+		},
+	}
+	bDirBlob := mustMarshal(bDir)
+	bDirDg := digest.NewFromBlob(bDirBlob)
+	bDirDgPb := bDirDg.ToProto()
+	aDir := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "b", Digest: bDirDgPb},
+			{Name: "empty", Digest: emptyDirDgPb},
+		},
+	}
+	aDirBlob := mustMarshal(aDir)
+	aDirDg := digest.NewFromBlob(aDirBlob)
+
+	root, err := ioutil.TempDir("", t.Name())
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(root)
+	inputSpec := &command.InputSpec{VirtualInputs: []*command.VirtualInput{
+		&command.VirtualInput{Path: "b/c/empty", IsEmptyDirectory: true},
+		&command.VirtualInput{Path: "b/empty", IsEmptyDirectory: true},
+		&command.VirtualInput{Path: "empty", IsEmptyDirectory: true},
+	}}
+	wantBlobs := map[digest.Digest][]byte{
+		aDirDg:       aDirBlob,
+		bDirDg:       bDirBlob,
+		cDirDg:       cDirBlob,
+		digest.Empty: []byte{},
+	}
+
+	gotBlobs := make(map[digest.Digest][]byte)
+	cache := newCallCountingMetadataCache(root, t)
+	gotRootDg, inputs, stats, err := ComputeMerkleTree(root, inputSpec, chunker.DefaultChunkSize, cache)
+	if err != nil {
+		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
+	}
+	for _, ch := range inputs {
+		blob, err := ch.FullData()
+		if err != nil {
+			t.Errorf("chunker %v FullData() returned error %v", ch, err)
+		}
+		gotBlobs[ch.Digest()] = blob
+	}
+	if diff := cmp.Diff(aDirDg, gotRootDg); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
+		if gotRootBlob, ok := gotBlobs[gotRootDg]; ok {
+			gotRoot := new(repb.Directory)
+			if err := proto.Unmarshal(gotRootBlob, gotRoot); err != nil {
+				t.Errorf("  When unpacking root blob, got error: %s", err)
+			} else {
+				diff := cmp.Diff(aDir, gotRoot)
+				t.Errorf("  Diff between unpacked roots (-want +got):\n%s", diff)
+			}
+		} else {
+			t.Errorf("  Root digest gotten not present in blobs map")
+		}
+	}
+	if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on blobs:\n%s", diff)
+	}
+	if len(cache.calls) != 0 {
+		t.Errorf("ComputeMerkleTree(...) gave diff on file metadata cache access (want 0, got %v)", cache.calls)
+	}
+	wantStats := &Stats{
+		InputDirectories: 6,
+		TotalInputBytes:  aDirDg.Size + bDirDg.Size + cDirDg.Size,
+	}
+	if diff := cmp.Diff(wantStats, stats); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff on stats (-want +got) on blobs:\n%s", diff)
+	}
 }
 
 func TestComputeMerkleTree(t *testing.T) {
