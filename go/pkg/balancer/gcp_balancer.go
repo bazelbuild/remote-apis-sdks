@@ -40,7 +40,7 @@ func (bb *gcpBalancerBuilder) Build(
 		csEvltr:     &connectivityStateEvaluator{},
 		// Initialize picker to a picker that always return
 		// ErrNoSubConnAvailable, because when state of a SubConn changes, we
-		// may call UpdateBalancerState with this picker.
+		// may call UpdateState with this picker.
 		picker: newErrPicker(balancer.ErrNoSubConnAvailable),
 	}
 }
@@ -144,7 +144,7 @@ type gcpBalancer struct {
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
 
-	picker balancer.Picker
+	picker balancer.V2Picker
 }
 
 func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
@@ -302,7 +302,7 @@ func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectiv
 	if (s == connectivity.Ready) != (oldS == connectivity.Ready) ||
 		(gb.state == connectivity.TransientFailure) != (oldAggrState == connectivity.TransientFailure) {
 		gb.regeneratePicker()
-		gb.cc.UpdateBalancerState(gb.state, gb.picker)
+		gb.cc.UpdateState(balancer.State{ConnectivityState: gb.state, Picker: gb.picker})
 	}
 }
 

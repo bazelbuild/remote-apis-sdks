@@ -1,7 +1,6 @@
 package balancer
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"sort"
@@ -12,7 +11,7 @@ import (
 	"google.golang.org/grpc/balancer"
 )
 
-func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.Picker {
+func newGCPPicker(readySCRefs []*subConnRef, gb *gcpBalancer) balancer.V2Picker {
 	return &gcpPicker{
 		gcpBalancer: gb,
 		scRefs:      readySCRefs,
@@ -28,18 +27,15 @@ type gcpPicker struct {
 }
 
 // Pick picks the appropriate subconnection.
-func (p *gcpPicker) Pick(
-	ctx context.Context,
-	opts balancer.PickOptions,
-) (balancer.SubConn, func(balancer.DoneInfo), error) {
+func (p *gcpPicker) Pick(info balancer.PickInfo) (result balancer.PickResult, err error) {
 	if len(p.scRefs) <= 0 {
-		return nil, nil, balancer.ErrNoSubConnAvailable
+		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	gcpCtx, hasGcpCtx := ctx.Value(gcpKey).(*gcpContext)
+	gcpCtx, hasGcpCtx := info.Ctx.Value(gcpKey).(*gcpContext)
 	boundKey := ""
 
 	if hasGcpCtx {
@@ -54,7 +50,7 @@ func (p *gcpPicker) Pick(
 			if cmd == pb.AffinityConfig_BOUND || cmd == pb.AffinityConfig_UNBIND {
 				a, err := getAffinityKeyFromMessage(locator, gcpCtx.reqMsg)
 				if err != nil {
-					return nil, nil, fmt.Errorf(
+					return balancer.PickResult{}, fmt.Errorf(
 						"failed to retrieve affinity key from request message: %v", err)
 				}
 				boundKey = a
@@ -62,14 +58,16 @@ func (p *gcpPicker) Pick(
 		}
 	}
 
-	scRef, err := p.getSubConnRef(boundKey)
+	var scRef *subConnRef
+	scRef, err = p.getSubConnRef(boundKey)
 	if err != nil {
-		return nil, nil, err
+		return balancer.PickResult{}, err
 	}
+	result.SubConn = scRef.subConn
 	scRef.streamsIncr()
 
 	// define callback for post process once call is done
-	callback := func(info balancer.DoneInfo) {
+	result.Done = func(info balancer.DoneInfo) {
 		if info.Err == nil {
 			if hasGcpCtx {
 				affinity := gcpCtx.affinityCfg
@@ -87,7 +85,7 @@ func (p *gcpPicker) Pick(
 		}
 		scRef.streamsDecr()
 	}
-	return scRef.subConn, callback, nil
+	return result, err
 }
 
 // getSubConnRef returns the subConnRef object that contains the subconn
@@ -157,7 +155,7 @@ func getAffinityKeyFromMessage(
 }
 
 // NewErrPicker returns a picker that always returns err on Pick().
-func newErrPicker(err error) balancer.Picker {
+func newErrPicker(err error) balancer.V2Picker {
 	return &errPicker{err: err}
 }
 
@@ -165,6 +163,6 @@ type errPicker struct {
 	err error // Pick() always returns this err.
 }
 
-func (p *errPicker) Pick(ctx context.Context, opts balancer.PickOptions) (balancer.SubConn, func(balancer.DoneInfo), error) {
-	return nil, nil, p.err
+func (p *errPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
+	return balancer.PickResult{}, p.err
 }
