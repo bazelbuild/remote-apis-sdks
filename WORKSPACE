@@ -31,9 +31,9 @@ gazelle_dependencies()
 # gRPC.
 http_archive(
     name = "com_github_grpc_grpc",
-    sha256 = "b391a327429279f6f29b9ae7e5317cd80d5e9d49cc100e6d682221af73d984a6",
-    strip_prefix = "grpc-93e8830070e9afcbaa992c75817009ee3f4b63a0",  # v1.24.3 with fixes
-    urls = ["https://github.com/grpc/grpc/archive/93e8830070e9afcbaa992c75817009ee3f4b63a0.zip"],
+    sha256 = "2fcb7f1ab160d6fd3aaade64520be3e5446fc4c6fa7ba6581afdc4e26094bd81",
+    strip_prefix = "grpc-1.26.0",
+    urls = ["https://github.com/grpc/grpc/archive/v1.26.0.tar.gz"],
 )
 
 # Pull in all gRPC dependencies.
