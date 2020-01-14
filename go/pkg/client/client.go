@@ -268,7 +268,7 @@ func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, error) {
 // functionality.
 func NewClient(ctx context.Context, instanceName string, params DialParams, opts ...Opt) (*Client, error) {
 	if instanceName == "" {
-		return nil, fmt.Errorf("instance needs to be specified")
+		log.Warning("Instance name was not specified.")
 	}
 	if params.Service == "" {
 		return nil, fmt.Errorf("service needs to be specified")
