@@ -1,7 +1,6 @@
 workspace(name = "bazel_remote_apis_sdks")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 # Go rules.
 http_archive(
