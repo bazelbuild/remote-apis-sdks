@@ -680,6 +680,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	dirA := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
 			{Name: "b", Digest: bDigest.ToProto()},
+			{Name: "e2", Digest: digest.Empty.ToProto()},
 		},
 		Files: []*repb.FileNode{
 			{Name: "bar", Digest: barDigest.ToProto()},
@@ -690,11 +691,12 @@ func TestDownloadActionOutputs(t *testing.T) {
 		Directories: []*repb.DirectoryNode{
 			{Name: "a", Digest: aDigest.ToProto()},
 			{Name: "b", Digest: bDigest.ToProto()},
+			{Name: "e1", Digest: digest.Empty.ToProto()},
 		},
 	}
 	tree := &repb.Tree{
 		Root:     root,
-		Children: []*repb.Directory{dirA, dirB},
+		Children: []*repb.Directory{dirA, dirB, &repb.Directory{}},
 	}
 	treeBlob, err := proto.Marshal(tree)
 	if err != nil {
@@ -702,7 +704,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	}
 	treeA := &repb.Tree{
 		Root:     dirA,
-		Children: []*repb.Directory{dirB},
+		Children: []*repb.Directory{dirB, &repb.Directory{}},
 	}
 	treeABlob, err := proto.Marshal(treeA)
 	if err != nil {
@@ -732,11 +734,20 @@ func TestDownloadActionOutputs(t *testing.T) {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
 	wantOutputs := []struct {
-		path          string
-		isExecutable  bool
-		contents      []byte
-		symlinkTarget string
+		path             string
+		isExecutable     bool
+		contents         []byte
+		symlinkTarget    string
+		isEmptyDirectory bool
 	}{
+		{
+			path:             "dir/e1",
+			isEmptyDirectory: true,
+		},
+		{
+			path:             "dir/a/e2",
+			isEmptyDirectory: true,
+		},
 		{
 			path:         "dir/a/b/foo",
 			isExecutable: true,
@@ -750,6 +761,10 @@ func TestDownloadActionOutputs(t *testing.T) {
 			path:         "dir/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
+		},
+		{
+			path:             "dir2/e2",
+			isEmptyDirectory: true,
 		},
 		{
 			path:         "dir2/b/foo",
@@ -789,6 +804,17 @@ func TestDownloadActionOutputs(t *testing.T) {
 			}
 			if target != out.symlinkTarget {
 				t.Errorf("expected %s to be a symlink to %s, got %s", path, out.symlinkTarget, target)
+			}
+		} else if out.isEmptyDirectory {
+			if !fi.Mode().IsDir() {
+				t.Errorf("expected %s to be a directory, got %s", path, fi.Mode())
+			}
+			files, err := ioutil.ReadDir(path)
+			if err != nil {
+				t.Errorf("expected %s to be a directory, got error reading directory: %v", path, err)
+			}
+			if len(files) != 0 {
+				t.Errorf("expected %s to be an empty directory, got contents: %v", path, files)
 			}
 		} else {
 			contents, err := ioutil.ReadFile(path)

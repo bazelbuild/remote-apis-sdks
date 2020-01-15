@@ -212,19 +212,18 @@ func packageTree(t *treeNode, chunkSize int, stats *Stats) (root digest.Digest, 
 	return dg, blobs, nil
 }
 
-// Output represents a leaf output node in a nested directory structure (either a file or a
-// symlink).
+// Output represents a leaf output node in a nested directory structure (a file, a symlink, or an empty directory).
 type Output struct {
-	Digest        digest.Digest
-	Path          string
-	IsExecutable  bool
-	SymlinkTarget string
+	Digest           digest.Digest
+	Path             string
+	IsExecutable     bool
+	IsEmptyDirectory bool
+	SymlinkTarget    string
 }
 
 // FlattenTree takes a Tree message and calculates the relative paths of all the files to
-// the tree root. Note that only files are included in the returned slice, not the intermediate
-// directories. Empty directories will be skipped, and directories containing only other directories
-// will be omitted as well.
+// the tree root. Note that only files/symlinks/empty directories are included in the returned slice,
+// not the intermediate directories. Directories containing only other directories will be omitted.
 func FlattenTree(tree *repb.Tree, rootPath string) (map[string]*Output, error) {
 	root, err := digest.NewFromMessage(tree.Root)
 	if err != nil {
@@ -263,6 +262,14 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 			return nil, fmt.Errorf("couldn't find directory %s with digest %s", flatDir.p, flatDir.d)
 		}
 
+		// Check whether this is an empty directory.
+		if len(dir.Files) + len(dir.Directories) + len(dir.Symlinks) == 0 {
+			flatFiles[flatDir.p] = &Output{
+				Path:             flatDir.p,
+				IsEmptyDirectory: true,
+			}
+			continue
+		}
 		// Add files to the set to return
 		for _, file := range dir.Files {
 			out := &Output{
