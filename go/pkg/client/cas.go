@@ -562,7 +562,12 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	downloads := make(map[digest.Digest]*tree.Output)
 	for _, out := range outs {
 		path := filepath.Join(execRoot, out.Path)
-		// TODO(olaola): fix the (upstream) bug that this doesn't download empty directory trees.
+		if out.IsEmptyDirectory {
+			if err := os.MkdirAll(path, os.FileMode(0777)); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(path), os.FileMode(0777)); err != nil {
 			return err
 		}
