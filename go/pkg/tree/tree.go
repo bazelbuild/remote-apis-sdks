@@ -263,7 +263,7 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 		}
 
 		// Check whether this is an empty directory.
-		if len(dir.Files) == 0 && len(dir.Directories) == 0 && len(dir.Symlinks) == 0 {
+		if len(dir.Files) + len(dir.Directories) + len(dir.Symlinks) == 0 {
 			flatFiles[flatDir.p] = &Output{
 				Path:             flatDir.p,
 				IsEmptyDirectory: true,
