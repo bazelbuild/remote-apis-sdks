@@ -52,7 +52,6 @@ type Client struct {
 	byteStream   bsgrpc.ByteStreamClient
 	cas          regrpc.ContentAddressableStorageClient
 	execution    regrpc.ExecutionClient
-	capabilities regrpc.CapabilitiesClient
 	operations   opgrpc.OperationsClient
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
@@ -257,7 +256,6 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		byteStream:     bsgrpc.NewByteStreamClient(casConn),
 		cas:            regrpc.NewContentAddressableStorageClient(casConn),
 		execution:      regrpc.NewExecutionClient(conn),
-		capabilities:   regrpc.NewCapabilitiesClient(conn),
 		operations:     opgrpc.NewOperationsClient(conn),
 		rpcTimeout:     time.Minute,
 		Connection:     conn,
@@ -530,16 +528,13 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientCo
 // If the CAS URL was set differently to the execution server then the CacheCapabilities will
 // be determined from that; ExecutionCapabilities will always come from the main URL.
 func (c *Client) GetCapabilities(ctx context.Context) (res *repb.ServerCapabilities, err error) {
-	caps, err := c.GetBackendCapabilities(ctx, c.Connection, &repb.GetCapabilitiesRequest{
-		InstanceName: c.InstanceName,
-	})
+	req := &repb.GetCapabilitiesRequest{InstanceName: c.InstanceName}
+	caps, err := c.GetBackendCapabilities(ctx, c.Connection, req)
 	if err != nil {
 		return nil, err
 	}
 	if c.CASConnection != c.Connection {
-		casCaps, err := c.GetBackendCapabilities(ctx, c.CASConnection, &repb.GetCapabilitiesRequest{
-			InstanceName: c.InstanceName,
-		})
+		casCaps, err := c.GetBackendCapabilities(ctx, c.CASConnection, req)
 		if err != nil {
 			return nil, err
 		}
