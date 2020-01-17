@@ -395,6 +395,15 @@ func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, o
 	return n, nil
 }
 
+// ReadProto reads a blob from the CAS and unmarshals it into the given message.
+func (c *Client) ReadProto(ctx context.Context, d digest.Digest, msg proto.Message) error {
+	bytes, err := c.ReadBlob(ctx, d)
+	if err != nil {
+		return err
+	}
+	return proto.Unmarshal(bytes, msg)
+}
+
 // MissingBlobs queries the CAS to determine if it has the listed blobs. It returns a list of the
 // missing blobs.
 func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest.Digest, error) {
@@ -529,18 +538,16 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 		}
 	}
 	for _, dir := range ar.OutputDirectories {
-		if blob, err := c.ReadBlob(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest)); err == nil {
-			t := &repb.Tree{}
-			if err := proto.Unmarshal(blob, t); err != nil {
-				return nil, err
-			}
-			dirouts, err := tree.FlattenTree(t, dir.Path)
-			if err != nil {
-				return nil, err
-			}
-			for _, out := range dirouts {
-				outs[out.Path] = out
-			}
+		t := &repb.Tree{}
+		if err := c.ReadProto(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest), t); err != nil {
+			return nil, err
+		}
+		dirouts, err := tree.FlattenTree(t, dir.Path)
+		if err != nil {
+			return nil, err
+		}
+		for _, out := range dirouts {
+			outs[out.Path] = out
 		}
 	}
 	return outs, nil

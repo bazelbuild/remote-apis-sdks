@@ -967,3 +967,30 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteAndReadProto(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+
+	fooDigest := fake.Put([]byte("foo"))
+	dirA := &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
+		},
+	}
+	d, err := c.WriteProto(ctx, dirA)
+	if err != nil {
+		t.Errorf("Failed writing proto: %s", err)
+	}
+
+	dirB := &repb.Directory{}
+	if err := c.ReadProto(ctx, d, dirB); err != nil {
+		t.Errorf("Failed reading proto: %s", err)
+	}
+	if !proto.Equal(dirA, dirB) {
+		t.Errorf("Protos not equal: %s / %s", dirA, dirB)
+	}
+}
