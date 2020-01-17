@@ -54,7 +54,6 @@ type Client struct {
 	byteStream   bsgrpc.ByteStreamClient
 	cas          regrpc.ContentAddressableStorageClient
 	execution    regrpc.ExecutionClient
-	capabilities regrpc.CapabilitiesClient
 	operations   opgrpc.OperationsClient
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
@@ -294,7 +293,6 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		byteStream:     bsgrpc.NewByteStreamClient(casConn),
 		cas:            regrpc.NewContentAddressableStorageClient(casConn),
 		execution:      regrpc.NewExecutionClient(conn),
-		capabilities:   regrpc.NewCapabilitiesClient(conn),
 		operations:     opgrpc.NewOperationsClient(conn),
 		rpcTimeout:     time.Minute,
 		Connection:     conn,
@@ -548,12 +546,13 @@ func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionReque
 	return res, nil
 }
 
-// GetCapabilities wraps the underlying call with specific client options.
-func (c *Client) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
+// GetBackendCapabilities returns the capabilities for a specific server connection
+// (either the main connection or the CAS connection).
+func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientConn, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
-			res, e = c.capabilities.GetCapabilities(ctx, req, opts...)
+			res, e = regrpc.NewCapabilitiesClient(conn).GetCapabilities(ctx, req, opts...)
 			return e
 		})
 	})
@@ -561,6 +560,25 @@ func (c *Client) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesR
 		return nil, err
 	}
 	return res, nil
+}
+
+// GetCapabilities returns the capabilities for the targeted servers.
+// If the CAS URL was set differently to the execution server then the CacheCapabilities will
+// be determined from that; ExecutionCapabilities will always come from the main URL.
+func (c *Client) GetCapabilities(ctx context.Context) (res *repb.ServerCapabilities, err error) {
+	req := &repb.GetCapabilitiesRequest{InstanceName: c.InstanceName}
+	caps, err := c.GetBackendCapabilities(ctx, c.Connection, req)
+	if err != nil {
+		return nil, err
+	}
+	if c.CASConnection != c.Connection {
+		casCaps, err := c.GetBackendCapabilities(ctx, c.CASConnection, req)
+		if err != nil {
+			return nil, err
+		}
+		caps.CacheCapabilities = casCaps.CacheCapabilities
+	}
+	return caps, nil
 }
 
 // GetOperation wraps the underlying call with specific client options.
