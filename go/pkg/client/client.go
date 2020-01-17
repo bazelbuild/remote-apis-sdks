@@ -189,6 +189,9 @@ type DialParams struct {
 	// on individual calls. This overrides ActAsAccount, UseApplicationDefault, and UseComputeEngine.
 	// This is not the same as NoSecurity, as transport credentials will still be set.
 	TransportCredsOnly bool
+
+	// DialOpts defines the set of gRPC DialOptions to apply, in addition to any used internally.
+	DialOpts []grpc.DialOption
 }
 
 func createGRPCInterceptor() *balancer.GCPInterceptor {
@@ -213,6 +216,7 @@ func createGRPCInterceptor() *balancer.GCPInterceptor {
 // Dial dials a given endpoint and returns the grpc connection that is established.
 func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, error) {
 	var opts []grpc.DialOption
+	opts = append(opts, params.DialOpts...)
 
 	if params.NoSecurity {
 		opts = append(opts, grpc.WithInsecure())
