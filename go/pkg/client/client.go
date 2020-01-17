@@ -510,33 +510,42 @@ func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionReque
 	return res, nil
 }
 
-// GetCapabilities wraps the underlying call with specific client options.
-func (c *Client) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
+// GetBackendCapabilities returns the capabilities for a specific server connection
+// (either the main connection or the CAS connection).
+func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientConn, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
-			res, e = c.capabilities.GetCapabilities(ctx, req, opts...)
+			res, e = regrpc.NewCapabilitiesClient(conn).GetCapabilities(ctx, req, opts...)
 			return e
 		})
 	})
 	if err != nil {
 		return nil, err
 	}
-	// If the CAS server is different to the execution server, we need to get its capabilities separately.
+	return res, nil
+}
+
+// GetCapabilities returns the capabilities for the targeted servers.
+// If the CAS URL was set differently to the execution server then the CacheCapabilities will
+// be determined from that; ExecutionCapabilities will always come from the main URL.
+func (c *Client) GetCapabilities(ctx context.Context) (res *repb.ServerCapabilities, err error) {
+	caps, err := c.GetBackendCapabilities(ctx, c.Connection, &repb.GetCapabilitiesRequest{
+		InstanceName: c.InstanceName,
+	})
+	if err != nil {
+		return nil, err
+	}
 	if c.CASConnection != c.Connection {
-		var res2 *repb.ServerCapabilities
-		err = c.Retrier.Do(ctx, func() (e error) {
-			return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
-				res2, e = regrpc.NewCapabilitiesClient(c.CASConnection).GetCapabilities(ctx, req, opts...)
-				return e
-			})
+		casCaps, err := c.GetBackendCapabilities(ctx, c.CASConnection, &repb.GetCapabilitiesRequest{
+			InstanceName: c.InstanceName,
 		})
 		if err != nil {
 			return nil, err
 		}
-		res.CacheCapabilities = res2.CacheCapabilities
+		caps.CacheCapabilities = casCaps.CacheCapabilities
 	}
-	return res, nil
+	return caps, nil
 }
 
 // GetOperation wraps the underlying call with specific client options.
