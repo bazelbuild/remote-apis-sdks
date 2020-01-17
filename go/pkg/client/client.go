@@ -566,7 +566,14 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientCo
 // If the CAS URL was set differently to the execution server then the CacheCapabilities will
 // be determined from that; ExecutionCapabilities will always come from the main URL.
 func (c *Client) GetCapabilities(ctx context.Context) (res *repb.ServerCapabilities, err error) {
-	req := &repb.GetCapabilitiesRequest{InstanceName: c.InstanceName}
+	return c.GetCapabilitiesForInstance(ctx, c.InstanceName)
+}
+
+// GetCapabilitiesForInstance returns the capabilities for the targeted servers.
+// If the CAS URL was set differently to the execution server then the CacheCapabilities will
+// be determined from that; ExecutionCapabilities will always come from the main URL.
+func (c *Client) GetCapabilitiesForInstance(ctx context.Context, instance string) (res *repb.ServerCapabilities, err error) {
+	req := &repb.GetCapabilitiesRequest{InstanceName: instance}
 	caps, err := c.GetBackendCapabilities(ctx, c.Connection, req)
 	if err != nil {
 		return nil, err
