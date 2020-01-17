@@ -538,18 +538,16 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 		}
 	}
 	for _, dir := range ar.OutputDirectories {
-		if blob, err := c.ReadBlob(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest)); err == nil {
-			t := &repb.Tree{}
-			if err := proto.Unmarshal(blob, t); err != nil {
-				return nil, err
-			}
-			dirouts, err := tree.FlattenTree(t, dir.Path)
-			if err != nil {
-				return nil, err
-			}
-			for _, out := range dirouts {
-				outs[out.Path] = out
-			}
+		t := &repb.Tree{}
+		if err := c.ReadProto(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest), t); err != nil {
+			return nil, err
+		}
+		dirouts, err := tree.FlattenTree(t, dir.Path)
+		if err != nil {
+			return nil, err
+		}
+		for _, out := range dirouts {
+			outs[out.Path] = out
 		}
 	}
 	return outs, nil
