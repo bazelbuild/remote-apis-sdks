@@ -12,6 +12,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -198,6 +199,8 @@ func (f *Writer) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest
 // CAS is a fake CAS that implements FindMissingBlobs, Read and Write, storing stored blobs
 // in a map. It also counts the number of requests to store received, for validating batching logic.
 type CAS struct {
+	// Maximum batch byte size to verify requests against.
+	BatchSize   int
 	blobs       map[digest.Digest][]byte
 	reads       map[digest.Digest]int
 	writes      map[digest.Digest]int
@@ -210,7 +213,7 @@ type CAS struct {
 
 // NewCAS returns a new empty fake CAS.
 func NewCAS() *CAS {
-	c := &CAS{}
+	c := &CAS{BatchSize: client.DefaultMaxBatchSize}
 	c.Clear()
 	return c
 }
@@ -304,12 +307,10 @@ func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRe
 		return nil, status.Error(codes.InvalidArgument, "test fake expected instance name \"instance\"")
 	}
 
-	var tot int64
-	for _, r := range req.Requests {
-		tot += r.Digest.SizeBytes
-	}
-	if tot > client.MaxBatchSz {
-		return nil, status.Errorf(codes.InvalidArgument, "test fake received batch update for more than the maximum of %d bytes: %d bytes", client.MaxBatchSz, tot)
+	reqBlob, _ := proto.Marshal(req)
+	size := len(reqBlob)
+	if size > f.BatchSize {
+		return nil, status.Errorf(codes.InvalidArgument, "test fake received batch update for more than the maximum of %d bytes: %d bytes", f.BatchSize, size)
 	}
 
 	var resps []*repb.BatchUpdateBlobsResponse_Response
@@ -355,12 +356,10 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 		return nil, status.Error(codes.InvalidArgument, "test fake expected instance name \"instance\"")
 	}
 
-	var tot int64
-	for _, dg := range req.Digests {
-		tot += dg.SizeBytes
-	}
-	if tot > client.MaxBatchSz {
-		return nil, status.Errorf(codes.InvalidArgument, "test fake received batch read for more than the maximum of %d bytes: %d bytes", client.MaxBatchSz, tot)
+	reqBlob, _ := proto.Marshal(req)
+	size := len(reqBlob)
+	if size > f.BatchSize {
+		return nil, status.Errorf(codes.InvalidArgument, "test fake received batch read for more than the maximum of %d bytes: %d bytes", f.BatchSize, size)
 	}
 
 	var resps []*repb.BatchReadBlobsResponse_Response
