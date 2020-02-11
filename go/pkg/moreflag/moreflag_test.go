@@ -9,7 +9,8 @@ import (
 )
 
 func TestParseUnset(t *testing.T) {
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	cleanup := setCommandLine(t, []string{"cmd"})
+	defer cleanup()
 	f := flag.String("value", "", "Some value")
 
 	Parse()
@@ -19,7 +20,8 @@ func TestParseUnset(t *testing.T) {
 }
 
 func TestParseSet(t *testing.T) {
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	cleanup := setCommandLine(t, []string{"cmd"})
+	defer cleanup()
 	f := flag.String("value", "", "Some value")
 	os.Setenv("FLAG_value", "test")
 	defer os.Setenv("FLAG_value", "")
@@ -30,10 +32,8 @@ func TestParseSet(t *testing.T) {
 }
 
 func TestParseCommandLineWins(t *testing.T) {
-	oldArgs := os.Args
-	os.Args = []string{"cmd", "--value=cmd"}
-	defer func() { os.Args = oldArgs }()
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	cleanup := setCommandLine(t, []string{"cmd", "--value=cmd"})
+	defer cleanup()
 	f := flag.String("value", "", "Some value")
 	os.Setenv("FLAG_value", "test")
 	defer os.Setenv("FLAG_value", "")
@@ -41,6 +41,14 @@ func TestParseCommandLineWins(t *testing.T) {
 	if *f != "cmd" {
 		t.Errorf("Flag has wrong value, want 'cmd', got %q", *f)
 	}
+}
+
+func setCommandLine(t *testing.T, args []string) func() {
+	t.Helper()
+	oldArgs := os.Args
+	os.Args = args
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	return func() { os.Args = oldArgs }
 }
 
 func TestMapValueSet(t *testing.T) {
