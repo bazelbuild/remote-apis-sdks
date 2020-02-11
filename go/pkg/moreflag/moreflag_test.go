@@ -8,19 +8,38 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func TestParse(t *testing.T) {
+func TestParseUnset(t *testing.T) {
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	f := flag.String("value", "", "Some value")
 
 	Parse()
 	if *f != "" {
 		t.Errorf("Flag has wrong value, want '', got %q", *f)
 	}
+}
 
+func TestParseSet(t *testing.T) {
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	f := flag.String("value", "", "Some value")
 	os.Setenv("FLAG_value", "test")
 	defer os.Setenv("FLAG_value", "")
 	Parse()
 	if *f != "test" {
 		t.Errorf("Flag has wrong value, want 'test', got %q", *f)
+	}
+}
+
+func TestParseCommandLineWins(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"cmd", "--value=cmd"}
+	defer func() { os.Args = oldArgs }()
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	f := flag.String("value", "", "Some value")
+	os.Setenv("FLAG_value", "test")
+	defer os.Setenv("FLAG_value", "")
+	Parse()
+	if *f != "cmd" {
+		t.Errorf("Flag has wrong value, want 'cmd', got %q", *f)
 	}
 }
 
