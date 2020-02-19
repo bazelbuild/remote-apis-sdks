@@ -16,8 +16,8 @@ import (
 // It also calls flag.Parse() to parse flags sent directly as arguments, unless flag.Parse
 // has been previously called.
 func Parse() {
-	ParseFromEnv()
 	if !flag.Parsed() {
+		ParseFromEnv()
 		flag.Parse()
 	}
 }
