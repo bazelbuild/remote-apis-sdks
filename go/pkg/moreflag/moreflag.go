@@ -13,12 +13,12 @@ import (
 // Parse parses flags which are set in environment variables using the FLAG_ prefix. That is
 // for a flag named x, x=$FLAG_x if $FLAG_x is set. If the flag is set in the command line, the
 // command line value of the flag takes precedence over the environment variable value.
-// It also calls flag.Parse() to parse flags sent directly as arguments, unless flag.Parse
+// It also calls flag.CommandLine.Parse() to parse flags sent directly as arguments, unless flag.Parse
 // has been previously called.
 func Parse() {
 	if !flag.Parsed() {
 		ParseFromEnv()
-		flag.Parse()
+		flag.CommandLine.Parse(os.Args[1:])
 	}
 }
 
@@ -27,8 +27,8 @@ func Parse() {
 // command line value of the flag takes precedence over the environment variable value.
 func ParseFromEnv() {
 	flag.VisitAll(func(f *flag.Flag) {
-		v := os.Getenv("FLAG_" + f.Name)
-		if v != "" {
+		v, ok := os.LookupEnv("FLAG_" + f.Name)
+		if ok {
 			flag.Set(f.Name, v)
 		}
 	})
