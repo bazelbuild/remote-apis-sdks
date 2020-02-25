@@ -62,13 +62,27 @@ type Client struct {
 	Connection    *grpc.ClientConn
 	CASConnection *grpc.ClientConn // Can be different from Connection a separate CAS endpoint is provided.
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
-	ChunkMaxSize   ChunkMaxSize
+	ChunkMaxSize ChunkMaxSize
+	// MaxBatchDigests is maximum amount of digests to batch in batched operations.
+	MaxBatchDigests MaxBatchDigests
+	// MaxBatchSize is maximum size in bytes of a batch request for batch operations.
+	MaxBatchSize   MaxBatchSize
 	useBatchOps    UseBatchOps
 	casUploaders   chan bool
 	casDownloaders chan bool
 	rpcTimeout     time.Duration
 	creds          credentials.PerRPCCredentials
 }
+
+const (
+	// DefaultMaxBatchSize is the maximum size of a batch to upload with BatchWriteBlobs. We set it to slightly
+	// below 4 MB, because that is the limit of a message size in gRPC
+	DefaultMaxBatchSize = 4*1024*1024 - 1024
+
+	// DefaultMaxBatchDigests is a suggested approximate limit based on current RBE implementation.
+	// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
+	DefaultMaxBatchDigests = 4000
+)
 
 // Close closes the underlying gRPC connection(s).
 func (c *Client) Close() error {
@@ -93,6 +107,22 @@ type ChunkMaxSize int
 // Apply sets the client's maximal chunk size s.
 func (s ChunkMaxSize) Apply(c *Client) {
 	c.ChunkMaxSize = s
+}
+
+// MaxBatchDigests is maximum amount of digests to batch in batched operations.
+type MaxBatchDigests int
+
+// Apply sets the client's maximal batch digests to s.
+func (s MaxBatchDigests) Apply(c *Client) {
+	c.MaxBatchDigests = s
+}
+
+// MaxBatchSize is maximum size in bytes of a batch request for batch operations.
+type MaxBatchSize int64
+
+// Apply sets the client's maximum batch size to s.
+func (s MaxBatchSize) Apply(c *Client) {
+	c.MaxBatchSize = s
 }
 
 // UseBatchOps can be set to true to use batch CAS operations when uploading multiple blobs, or
@@ -288,20 +318,22 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		return nil, err
 	}
 	client := &Client{
-		InstanceName:   instanceName,
-		actionCache:    regrpc.NewActionCacheClient(casConn),
-		byteStream:     bsgrpc.NewByteStreamClient(casConn),
-		cas:            regrpc.NewContentAddressableStorageClient(casConn),
-		execution:      regrpc.NewExecutionClient(conn),
-		operations:     opgrpc.NewOperationsClient(conn),
-		rpcTimeout:     time.Minute,
-		Connection:     conn,
-		CASConnection:  casConn,
-		ChunkMaxSize:   chunker.DefaultChunkSize,
-		useBatchOps:    true,
-		casUploaders:   make(chan bool, DefaultCASConcurrency),
-		casDownloaders: make(chan bool, DefaultCASConcurrency),
-		Retrier:        RetryTransient(),
+		InstanceName:    instanceName,
+		actionCache:     regrpc.NewActionCacheClient(casConn),
+		byteStream:      bsgrpc.NewByteStreamClient(casConn),
+		cas:             regrpc.NewContentAddressableStorageClient(casConn),
+		execution:       regrpc.NewExecutionClient(conn),
+		operations:      opgrpc.NewOperationsClient(conn),
+		rpcTimeout:      time.Minute,
+		Connection:      conn,
+		CASConnection:   casConn,
+		ChunkMaxSize:    chunker.DefaultChunkSize,
+		MaxBatchDigests: DefaultMaxBatchDigests,
+		MaxBatchSize:    DefaultMaxBatchSize,
+		useBatchOps:     true,
+		casUploaders:    make(chan bool, DefaultCASConcurrency),
+		casDownloaders:  make(chan bool, DefaultCASConcurrency),
+		Retrier:         RetryTransient(),
 	}
 	for _, o := range opts {
 		o.Apply(client)
@@ -323,10 +355,12 @@ func (d RPCTimeout) Apply(c *Client) {
 //
 // This method is logically "protected" and is intended for use by extensions of Client.
 func (c *Client) RPCOpts() []grpc.CallOption {
+	// Set a high limit on receiving large messages from the server.
+	opts := []grpc.CallOption{grpc.MaxCallRecvMsgSize(100 * 1024 * 1024)}
 	if c.creds == nil {
-		return nil
+		return opts
 	}
-	return []grpc.CallOption{grpc.PerRPCCredentials(c.creds)}
+	return append(opts, grpc.PerRPCCredentials(c.creds))
 }
 
 // CallWithTimeout executes the given function f with a context that times out after an RPC timeout.
