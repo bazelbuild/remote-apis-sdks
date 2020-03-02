@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	instance     = "instance"
+	instance = "instance"
 )
 
 func TestSplitEndpoints(t *testing.T) {

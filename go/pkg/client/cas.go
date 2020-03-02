@@ -154,13 +154,14 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 	if len(blobs) > int(c.MaxBatchDigests) {
 		return fmt.Errorf("batch update of %d total blobs exceeds maximum of %d", len(blobs), c.MaxBatchDigests)
 	}
+	opts := c.RPCOpts()
 	closure := func() error {
 		var resp *repb.BatchUpdateBlobsResponse
 		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			resp, e = c.cas.BatchUpdateBlobs(ctx, &repb.BatchUpdateBlobsRequest{
 				InstanceName: c.InstanceName,
 				Requests:     reqs,
-			})
+			}, opts...)
 			return e
 		})
 		if err != nil {
@@ -227,10 +228,11 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 	if foundEmpty {
 		res[digest.Empty] = nil
 	}
+	opts := c.RPCOpts()
 	closure := func() error {
 		var resp *repb.BatchReadBlobsResponse
 		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
-			resp, e = c.cas.BatchReadBlobs(ctx, req)
+			resp, e = c.cas.BatchReadBlobs(ctx, req, opts...)
 			return e
 		})
 		if err != nil {
@@ -505,13 +507,14 @@ func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
 func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result []*repb.Directory, err error) {
 	pageTok := ""
 	result = []*repb.Directory{}
+	opts := c.RPCOpts()
 	closure := func() error {
 		// Use the low-level GetTree method to avoid retrying twice.
 		stream, err := c.cas.GetTree(ctx, &repb.GetTreeRequest{
 			InstanceName: c.InstanceName,
 			RootDigest:   d,
 			PageToken:    pageTok,
-		})
+		}, opts...)
 		if err != nil {
 			return err
 		}
