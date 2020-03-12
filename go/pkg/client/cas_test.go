@@ -26,8 +26,7 @@ import (
 )
 
 const (
-	instance     = "instance"
-	thirdBatchSz = client.MaxBatchSz / 3
+	instance = "instance"
 )
 
 func TestSplitEndpoints(t *testing.T) {
@@ -494,6 +493,10 @@ func TestWriteBlobsBatching(t *testing.T) {
 	defer cleanup()
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
+	c.MaxBatchSize = 500
+	c.MaxBatchDigests = 4
+	// Each batch request frame overhead is 13 bytes.
+	// A per-blob overhead is 74 bytes.
 
 	tests := []struct {
 		name      string
@@ -509,26 +512,26 @@ func TestWriteBlobsBatching(t *testing.T) {
 		},
 		{
 			name:      "large and small blobs hitting max exactly",
-			sizes:     []int{client.MaxBatchSz - 1, client.MaxBatchSz - 1, client.MaxBatchSz - 1, 1, 1, 1},
+			sizes:     []int{338, 338, 338, 1, 1, 1},
 			batchReqs: 3,
 			writeReqs: 0,
 		},
 		{
 			name:      "small batches of big blobs",
-			sizes:     []int{thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz},
+			sizes:     []int{88, 88, 88, 88, 88, 88, 88},
 			batchReqs: 2,
 			writeReqs: 1,
 		},
 		{
 			name:      "batch with blob that's too big",
-			sizes:     []int{client.MaxBatchSz + 1, thirdBatchSz, thirdBatchSz, thirdBatchSz},
+			sizes:     []int{400, 88, 88, 88},
 			batchReqs: 1,
 			writeReqs: 1,
 		},
 		{
-			name:      "many small blobs",
-			sizes:     []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-			batchReqs: 1,
+			name:      "many small blobs hitting max digests",
+			sizes:     []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+			batchReqs: 4,
 			writeReqs: 0,
 		},
 	}
@@ -836,6 +839,10 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 	defer cleanup()
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
+	c.MaxBatchSize = 500
+	c.MaxBatchDigests = 4
+	// Each batch request frame overhead is 13 bytes.
+	// A per-blob overhead is 74 bytes.
 
 	tests := []struct {
 		name      string
@@ -849,23 +856,23 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 		},
 		{
 			name:      "large and small blobs hitting max exactly",
-			sizes:     []int{client.MaxBatchSz - 1, client.MaxBatchSz - 1, client.MaxBatchSz - 1, 1, 1, 1},
+			sizes:     []int{338, 338, 338, 1, 1, 1},
 			batchReqs: 3,
 		},
 		{
 			name:      "small batches of big blobs",
-			sizes:     []int{thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz, thirdBatchSz},
+			sizes:     []int{88, 88, 88, 88, 88, 88, 88},
 			batchReqs: 2,
 		},
 		{
 			name:      "batch with blob that's too big",
-			sizes:     []int{client.MaxBatchSz + 1, thirdBatchSz, thirdBatchSz, thirdBatchSz},
+			sizes:     []int{400, 88, 88, 88},
 			batchReqs: 1,
 		},
 		{
-			name:      "many small blobs",
-			sizes:     []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-			batchReqs: 1,
+			name:      "many small blobs hitting max digests",
+			sizes:     []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+			batchReqs: 4,
 		},
 	}
 

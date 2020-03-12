@@ -51,7 +51,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	log.V(2).Infof("%d items to store", len(missing))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
-		batches = makeBatches(missing)
+		batches = c.makeBatches(missing)
 	} else {
 		log.V(2).Info("Uploading them individually")
 		for i := range missing {
@@ -134,43 +134,34 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 	return dg, c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
 }
 
-const (
-	// MaxBatchSz is the maximum size of a batch to upload with BatchWriteBlobs. We set it to slightly
-	// below 4 MB, because that is the limit of a message size in gRPC
-	MaxBatchSz = 4*1024*1024 - 1024
-
-	// MaxBatchDigests is a suggested approximate limit based on current RBE implementation.
-	// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
-	MaxBatchDigests = 4000
-)
-
 // BatchWriteBlobs uploads a number of blobs to the CAS. They must collectively be below the
-// maximum total size for a batch upload, which is about 4 MB (see MaxBatchSz). Digests must be
+// maximum total size for a batch upload, which is about 4 MB (see MaxBatchSize). Digests must be
 // computed in advance by the caller. In case multiple errors occur during the blob upload, the
 // last error will be returned.
 func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
 	var reqs []*repb.BatchUpdateBlobsRequest_Request
 	var sz int64
 	for k, b := range blobs {
-		sz += k.Size
+		sz += int64(k.Size)
 		reqs = append(reqs, &repb.BatchUpdateBlobsRequest_Request{
 			Digest: k.ToProto(),
 			Data:   b,
 		})
 	}
-	if sz > MaxBatchSz {
-		return fmt.Errorf("batch update of %d total bytes exceeds maximum of %d", sz, MaxBatchSz)
+	if sz > int64(c.MaxBatchSize) {
+		return fmt.Errorf("batch update of %d total bytes exceeds maximum of %d", sz, c.MaxBatchSize)
 	}
-	if len(blobs) > MaxBatchDigests {
-		return fmt.Errorf("batch update of %d total blobs exceeds maximum of %d", len(blobs), MaxBatchDigests)
+	if len(blobs) > int(c.MaxBatchDigests) {
+		return fmt.Errorf("batch update of %d total blobs exceeds maximum of %d", len(blobs), c.MaxBatchDigests)
 	}
+	opts := c.RPCOpts()
 	closure := func() error {
 		var resp *repb.BatchUpdateBlobsResponse
 		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
 			resp, e = c.cas.BatchUpdateBlobs(ctx, &repb.BatchUpdateBlobsRequest{
 				InstanceName: c.InstanceName,
 				Requests:     reqs,
-			})
+			}, opts...)
 			return e
 		})
 		if err != nil {
@@ -212,12 +203,12 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 }
 
 // BatchDownloadBlobs downloads a number of blobs from the CAS to memory. They must collectively be below the
-// maximum total size for a batch read, which is about 4 MB (see MaxBatchSz). Digests must be
+// maximum total size for a batch read, which is about 4 MB (see MaxBatchSize). Digests must be
 // computed in advance by the caller. In case multiple errors occur during the blob read, the
 // last error will be returned.
 func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (map[digest.Digest][]byte, error) {
-	if len(dgs) > MaxBatchDigests {
-		return nil, fmt.Errorf("batch read of %d total blobs exceeds maximum of %d", len(dgs), MaxBatchDigests)
+	if len(dgs) > int(c.MaxBatchDigests) {
+		return nil, fmt.Errorf("batch read of %d total blobs exceeds maximum of %d", len(dgs), c.MaxBatchDigests)
 	}
 	req := &repb.BatchReadBlobsRequest{InstanceName: c.InstanceName}
 	var sz int64
@@ -227,20 +218,21 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 			foundEmpty = true
 			continue
 		}
-		sz += dg.Size
+		sz += int64(dg.Size)
 		req.Digests = append(req.Digests, dg.ToProto())
 	}
-	if sz > MaxBatchSz {
-		return nil, fmt.Errorf("batch read of %d total bytes exceeds maximum of %d", sz, MaxBatchSz)
+	if sz > int64(c.MaxBatchSize) {
+		return nil, fmt.Errorf("batch read of %d total bytes exceeds maximum of %d", sz, c.MaxBatchSize)
 	}
 	res := make(map[digest.Digest][]byte)
 	if foundEmpty {
 		res[digest.Empty] = nil
 	}
+	opts := c.RPCOpts()
 	closure := func() error {
 		var resp *repb.BatchReadBlobsResponse
 		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
-			resp, e = c.cas.BatchReadBlobs(ctx, req)
+			resp, e = c.cas.BatchReadBlobs(ctx, req, opts...)
 			return e
 		})
 		if err != nil {
@@ -291,7 +283,7 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 // The input list is sorted in-place; additionally, any blob bigger than the maximum will be put in
 // a batch of its own and the caller will need to ensure that it is uploaded with Write, not batch
 // operations.
-func makeBatches(dgs []digest.Digest) [][]digest.Digest {
+func (c *Client) makeBatches(dgs []digest.Digest) [][]digest.Digest {
 	var batches [][]digest.Digest
 	log.V(2).Infof("Batching %d digests", len(dgs))
 	sort.Slice(dgs, func(i, j int) bool {
@@ -300,17 +292,48 @@ func makeBatches(dgs []digest.Digest) [][]digest.Digest {
 	for len(dgs) > 0 {
 		batch := []digest.Digest{dgs[len(dgs)-1]}
 		dgs = dgs[:len(dgs)-1]
-		sz := batch[0].Size
-		for len(dgs) > 0 && len(batch) < MaxBatchDigests && dgs[0].Size <= MaxBatchSz-sz { // dg.Size+sz possibly overflows so subtract instead.
-			sz += dgs[0].Size
+		requestOverhead := marshalledFieldSize(int64(len(c.InstanceName)))
+		sz := requestOverhead + marshalledRequestSize(batch[0])
+		var nextSize int64
+		if len(dgs) > 0 {
+			nextSize = marshalledRequestSize(dgs[0])
+		}
+		for len(dgs) > 0 && len(batch) < int(c.MaxBatchDigests) && nextSize <= int64(c.MaxBatchSize)-sz { // nextSize+sz possibly overflows so subtract instead.
+			sz += nextSize
 			batch = append(batch, dgs[0])
 			dgs = dgs[1:]
+			if len(dgs) > 0 {
+				nextSize = marshalledRequestSize(dgs[0])
+			}
 		}
 		log.V(3).Infof("Created batch of %d blobs with total size %d", len(batch), sz)
 		batches = append(batches, batch)
 	}
 	log.V(2).Infof("%d batches created", len(batches))
 	return batches
+}
+
+func marshalledFieldSize(size int64) int64 {
+	return 1 + int64(proto.SizeVarint(uint64(size))) + size
+}
+
+func marshalledRequestSize(d digest.Digest) int64 {
+	// An additional BatchUpdateBlobsRequest_Request includes the Digest and data fields,
+	// as well as the message itself. Every field has a 1-byte size tag, followed by
+	// the varint field size for variable-sized fields (digest hash and data).
+	// Note that the BatchReadBlobsResponse_Response field is similar, but includes
+	// and additional Status proto which can theoretically be unlimited in size.
+	// We do not account for it here, relying on the Client setting a large (100MB)
+	// limit for incoming messages.
+	digestSize := marshalledFieldSize(int64(len(d.Hash)))
+	if d.Size > 0 {
+		digestSize += 1 + int64(proto.SizeVarint(uint64(d.Size)))
+	}
+	reqSize := marshalledFieldSize(digestSize)
+	if d.Size > 0 {
+		reqSize += marshalledFieldSize(int64(d.Size))
+	}
+	return marshalledFieldSize(reqSize)
 }
 
 // ReadBlob fetches a blob from the CAS into a byte slice.
@@ -484,13 +507,14 @@ func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
 func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result []*repb.Directory, err error) {
 	pageTok := ""
 	result = []*repb.Directory{}
+	opts := c.RPCOpts()
 	closure := func() error {
 		// Use the low-level GetTree method to avoid retrying twice.
 		stream, err := c.cas.GetTree(ctx, &repb.GetTreeRequest{
 			InstanceName: c.InstanceName,
 			RootDigest:   d,
 			PageToken:    pageTok,
-		})
+		}, opts...)
 		if err != nil {
 			return err
 		}
@@ -649,7 +673,7 @@ func (c *Client) downloadFiles(ctx context.Context, execRoot string, outputs map
 	log.V(2).Infof("%d items to download", len(dgs))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
-		batches = makeBatches(dgs)
+		batches = c.makeBatches(dgs)
 	} else {
 		log.V(2).Info("Downloading them individually")
 		for i := range dgs {

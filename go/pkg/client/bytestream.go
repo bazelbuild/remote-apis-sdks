@@ -99,13 +99,14 @@ func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int
 func (c *Client) readStreamed(ctx context.Context, name string, offset, limit int64, w io.Writer) (n int64, e error) {
 	cancelCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	opts := c.RPCOpts()
 	closure := func() error {
 		// Use lower-level Read in order to not retry twice.
 		stream, err := c.byteStream.Read(cancelCtx, &bspb.ReadRequest{
 			ResourceName: name,
 			ReadOffset:   offset + n,
 			ReadLimit:    limit,
-		})
+		}, opts...)
 		if err != nil {
 			return err
 		}
