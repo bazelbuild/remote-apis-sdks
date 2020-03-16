@@ -225,6 +225,14 @@ func buildCommand(ac *Action) *repb.Command {
 // deadline-exceeded statuses, which we never give to the retrier (and hence will always propagate
 // directly to the caller).
 func (c *Client) ExecuteAndWait(ctx context.Context, req *repb.ExecuteRequest) (op *oppb.Operation, err error) {
+	return c.ExecuteAndWaitProgress(ctx, req, nil)
+}
+
+// ExecuteAndWaitProgress calls Execute on the underlying client and WaitExecution if necessary. It returns
+// the completed operation or an error.
+// The supplied callback function is called for each message received to update the state of
+// the remote action.
+func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRequest, progress func(metadata *repb.ExecuteOperationMetadata)) (op *oppb.Operation, err error) {
 	wait := false    // Should we retry by calling WaitExecution instead of Execute?
 	opError := false // Are we propagating an Operation status as an error for the retrier's benefit?
 	lastOp := &oppb.Operation{}
@@ -250,6 +258,12 @@ func (c *Client) ExecuteAndWait(ctx context.Context, req *repb.ExecuteRequest) (
 			}
 			wait = !op.Done
 			lastOp = op
+			if progress != nil {
+				metadata := &repb.ExecuteOperationMetadata{}
+				if err := ptypes.UnmarshalAny(op.Metadata, metadata); err == nil {
+					progress(metadata)
+				}
+			}
 		}
 		st := OperationStatus(lastOp)
 		if st != nil {
