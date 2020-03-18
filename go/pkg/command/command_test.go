@@ -1,7 +1,9 @@
 package command
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
@@ -373,5 +375,84 @@ func TestToREProto(t *testing.T) {
 				t.Errorf("%s: buildCommand gave result diff (-want +got):\n%s", tc.name, diff)
 			}
 		})
+	}
+}
+
+func TestToFromProto(t *testing.T) {
+	cmd := &Command{
+		Identifiers: &Identifiers{
+			CommandID:    "a",
+			InvocationID: "b",
+			ToolName:     "c",
+		},
+		Args:     []string{"a", "b", "c"},
+		ExecRoot: "/exec/root",
+		InputSpec: &InputSpec{
+			Inputs: []string{"foo.h", "bar.h"},
+			InputExclusions: []*InputExclusion{
+				&InputExclusion{
+					Regex: "*.bla",
+					Type:  DirectoryInputType,
+				},
+				&InputExclusion{
+					Regex: "*.blo",
+					Type:  FileInputType,
+				},
+			},
+			EnvironmentVariables: map[string]string{
+				"k":  "v",
+				"k1": "v1",
+			},
+		},
+		OutputFiles: []string{"a/b/out"},
+	}
+	gotCmd := FromProto(ToProto(cmd))
+	if diff := cmp.Diff(cmd, gotCmd); diff != "" {
+		t.Errorf("FromProto(ToProto()) returned diff in result: (-want +got)\n%s", diff)
+	}
+}
+
+func TestResultToFromProto(t *testing.T) {
+	res := &Result{
+		Status:   CacheHitResultStatus,
+		ExitCode: 42,
+		Err:      errors.New("message"),
+	}
+	gotRes := ResultFromProto(ResultToProto(res))
+	if diff := cmp.Diff(res, gotRes, cmpopts.IgnoreFields(Result{}, "Err")); diff != "" {
+		t.Errorf("ResultFromProto(ResultToProto()) returned diff in result: (-want +got)\n%s", diff)
+	}
+	if res.Err.Error() != gotRes.Err.Error() {
+		t.Errorf("ResultFromProto(ResultToProto()) returned diff in error: want %v, got %v", res.Err, gotRes.Err)
+	}
+}
+
+func TestTimeIntervalToFromProto(t *testing.T) {
+	ti := &TimeInterval{
+		From: time.Now(),
+		To:   time.Now(),
+	}
+	gotTi := TimeIntervalFromProto(TimeIntervalToProto(ti))
+	if diff := cmp.Diff(ti, gotTi); diff != "" {
+		t.Errorf("TimeIntervalFromProto(TimeIntervalToProto()) returned diff in result: (-want +got)\n%s", diff)
+	}
+	ti = &TimeInterval{From: time.Now()}
+	gotTi = TimeIntervalFromProto(TimeIntervalToProto(ti))
+	if diff := cmp.Diff(ti, gotTi); diff != "" {
+		t.Errorf("TimeIntervalFromProto(TimeIntervalToProto()) returned diff in result: (-want +got)\n%s", diff)
+	}
+	ti = &TimeInterval{To: time.Now()}
+	gotTi = TimeIntervalFromProto(TimeIntervalToProto(ti))
+	if diff := cmp.Diff(ti, gotTi); diff != "" {
+		t.Errorf("TimeIntervalFromProto(TimeIntervalToProto()) returned diff in result: (-want +got)\n%s", diff)
+	}
+	ti = &TimeInterval{}
+	gotTi = TimeIntervalFromProto(TimeIntervalToProto(ti))
+	if diff := cmp.Diff(ti, gotTi); diff != "" {
+		t.Errorf("TimeIntervalFromProto(TimeIntervalToProto()) returned diff in result: (-want +got)\n%s", diff)
+	}
+	gotTi = TimeIntervalFromProto(TimeIntervalToProto(nil))
+	if gotTi != nil {
+		t.Errorf("TimeIntervalFromProto(TimeIntervalToProto()) returned %v, wanted nil", gotTi)
 	}
 }
