@@ -18,11 +18,6 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
-// FileMetadataCache is a cache for file contents->Metadata.
-type FileMetadataCache interface {
-	Get(path string) *filemetadata.Metadata
-}
-
 // treeNode represents a file tree, which is an intermediate representation used to encode a Merkle
 // tree later. It corresponds roughly to a *repb.Directory, but with pointers, not digests, used to
 // refer to other nodes.
@@ -66,7 +61,7 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileNode, chunkSize int, cache FileMetadataCache) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileNode, chunkSize int, cache filemetadata.Cache) error {
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	meta := cache.Get(absPath)
 	t := command.FileInputType
@@ -105,7 +100,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 }
 
 // ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as Chunkers.
-func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache FileMetadataCache) (root digest.Digest, inputs []*chunker.Chunker, stats *Stats, err error) {
+func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache filemetadata.Cache) (root digest.Digest, inputs []*chunker.Chunker, stats *Stats, err error) {
 	stats = &Stats{}
 	fs := make(map[string]*fileNode)
 	for _, i := range is.Inputs {
@@ -337,7 +332,7 @@ func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, child
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
 // The paths have to be relative to execRoot.
 // It also populates the remote ActionResult, packaging output directories as trees where required.
-func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cache FileMetadataCache) (map[digest.Digest]*chunker.Chunker, *repb.ActionResult, error) {
+func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cache filemetadata.Cache) (map[digest.Digest]*chunker.Chunker, *repb.ActionResult, error) {
 	outs := make(map[digest.Digest]*chunker.Chunker)
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {

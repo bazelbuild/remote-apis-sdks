@@ -53,11 +53,20 @@ func Compute(filename string) *Metadata {
 	return md
 }
 
-// NoopFileMetadataCache is a non-caching metadata cache (always computes).
-type NoopFileMetadataCache struct{}
+// FileMetadataCache is a cache for file contents->Metadata.
+type Cache interface {
+	Get(path string) *Metadata
+}
+
+type noopCache struct{}
 
 // Get computes the metadata from the file contents.
 // If an error is returned, it will be in Metadata.Err of type *FileError.
-func (c *NoopFileMetadataCache) Get(path string) *Metadata {
+func (c *noopCache) Get(path string) *Metadata {
 	return Compute(path)
+}
+
+// NewNoopCache returns a cache that doesn't cache (evaluates on every Get).
+func NewNoopCache() Cache {
+	return &noopCache{}
 }

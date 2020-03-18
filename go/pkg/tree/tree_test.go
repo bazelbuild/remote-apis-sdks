@@ -88,7 +88,7 @@ func construct(dir string, ips []*inputPath) error {
 
 type callCountingMetadataCache struct {
 	calls    map[string]int
-	cache    *filemetadata.NoopFileMetadataCache
+	cache    filemetadata.Cache
 	execRoot string
 	t        *testing.T
 }
@@ -96,7 +96,7 @@ type callCountingMetadataCache struct {
 func newCallCountingMetadataCache(execRoot string, t *testing.T) *callCountingMetadataCache {
 	return &callCountingMetadataCache{
 		calls:    make(map[string]int),
-		cache:    &filemetadata.NoopFileMetadataCache{},
+		cache:    filemetadata.NewNoopCache(),
 		execRoot: execRoot,
 		t:        t,
 	}
@@ -882,7 +882,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
 		t.Run(tc.desc, func(t *testing.T) {
-			if _, _, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, &filemetadata.NoopFileMetadataCache{}); err == nil {
+			if _, _, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, filemetadata.NewNoopCache()); err == nil {
 				t.Errorf("ComputeMerkleTree(%v) succeeded, want error", tc.spec)
 			}
 		})

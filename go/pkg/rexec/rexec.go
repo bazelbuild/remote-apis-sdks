@@ -10,6 +10,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
@@ -25,7 +26,7 @@ import (
 
 // Client is a remote execution client.
 type Client struct {
-	FileMetadataCache tree.FileMetadataCache
+	FileMetadataCache filemetadata.Cache
 	GrpcClient        *rc.Client
 }
 
