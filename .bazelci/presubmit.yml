@@ -3,7 +3,6 @@ validate_config: 1
 tasks:
   ubuntu1804:
     shell_commands:
-      - "set -e"
       - "echo +++ Check go format"
       - "./check-gofmt.sh `find go -name '*.go'`"
       - "echo +++ Check go vet"
@@ -17,7 +16,6 @@ tasks:
     platform: ubuntu1804
     name: "go build / test"
     shell_commands:
-      - "set -e"
       - "echo +++ Running go build"
       - "go build ./..."
       - "echo +++ Running go test"
