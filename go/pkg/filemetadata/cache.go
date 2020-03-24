@@ -1,4 +1,3 @@
-// Package filemetadata contains types of metadata for files, to be used for caching.
 package filemetadata
 
 import (
