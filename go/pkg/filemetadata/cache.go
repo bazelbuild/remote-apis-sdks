@@ -81,6 +81,11 @@ func (c *fmCache) Delete(filename string) error {
 	return c.Backend.Delete(namespace, abs)
 }
 
+// Reset clears the cache.
+func (c *fmCache) Reset() {
+	c.Backend.Reset()
+}
+
 func (c *fmCache) check() error {
 	if c.Backend == nil {
 		return fmt.Errorf("no backend found for store")

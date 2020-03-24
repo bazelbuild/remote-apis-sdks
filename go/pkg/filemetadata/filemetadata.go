@@ -56,6 +56,8 @@ func Compute(filename string) *Metadata {
 // Cache is a cache for file contents->Metadata.
 type Cache interface {
 	Get(path string) *Metadata
+	Delete(filename string) error
+	Reset()
 }
 
 type noopCache struct{}
@@ -65,6 +67,14 @@ type noopCache struct{}
 func (c *noopCache) Get(path string) *Metadata {
 	return Compute(path)
 }
+
+// Delete removes an entry from the cache. It is a noop for the Noop cache.
+func (c *noopCache) Delete(string) error {
+	return nil
+}
+
+// Reset clears the cache. It is a noop for the Noop cache.
+func (c *noopCache) Reset() {}
 
 // NewNoopCache returns a cache that doesn't cache (evaluates on every Get).
 func NewNoopCache() Cache {
