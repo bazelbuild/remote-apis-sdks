@@ -53,7 +53,7 @@ func Compute(filename string) *Metadata {
 	return md
 }
 
-// FileMetadataCache is a cache for file contents->Metadata.
+// Cache is a cache for file contents->Metadata.
 type Cache interface {
 	Get(path string) *Metadata
 }
