@@ -463,6 +463,32 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "File invalid symlink",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "foo", isSymlink: true, symlinkTarget: "fooDir/foo"},
+				{path: "bar", isSymlink: true, symlinkTarget: "fooDir/bar"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir", "foo"},
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDgPb}},
+				Files:       []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true}},
+			},
+			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"foo":        1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 2,
+				InputFiles:       2,
+				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size,
+			},
+		},
+		{
 			desc: "Directory absolute symlink",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},

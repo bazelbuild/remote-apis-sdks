@@ -19,14 +19,23 @@ type Metadata struct {
 
 // FileError is the error returned by the Compute function.
 type FileError struct {
-	IsDirectory bool
-	IsNotFound  bool
-	Err         error
+	IsDirectory      bool
+	IsNotFound       bool
+	IsInvalidSymlink bool
+	Err              error
 }
 
 // Error returns the error message.
 func (e *FileError) Error() string {
 	return e.Err.Error()
+}
+
+func isSymlink(filename string) (bool, error) {
+	file, err := os.Lstat(filename)
+	if err != nil {
+		return false, err
+	}
+	return file.Mode()&os.ModeSymlink != 0, nil
 }
 
 // Compute computes a Metadata from a given file path.
@@ -36,6 +45,9 @@ func Compute(filename string) *Metadata {
 	file, err := os.Stat(filename)
 	if err != nil {
 		fe := &FileError{Err: err}
+		if s, err := isSymlink(filename); err == nil && s {
+			fe.IsInvalidSymlink = true
+		}
 		if os.IsNotExist(err) {
 			fe.IsNotFound = true
 		}
