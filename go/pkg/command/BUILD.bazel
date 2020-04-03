@@ -6,9 +6,13 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/command",
     visibility = ["//visibility:public"],
     deps = [
+        "//go/api/command:go_default_library",
         "//go/pkg/digest:go_default_library",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
+        "@com_github_golang_glog//:go_default_library",
+        "@com_github_golang_protobuf//ptypes:go_default_library_gen",
         "@com_github_pborman_uuid//:go_default_library",
+        "@io_bazel_rules_go//proto/wkt:timestamp_go_proto",
     ],
 )
 

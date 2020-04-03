@@ -10,9 +10,13 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/golang/protobuf/ptypes"
 	"github.com/pborman/uuid"
 
+	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	log "github.com/golang/glog"
+	tspb "github.com/golang/protobuf/ptypes/timestamp"
 )
 
 // InputType can be specified to narrow down the matching for a given input path.
@@ -466,4 +470,223 @@ func (c *Command) ToREProto() *repb.Command {
 		sort.Slice(cmdPb.Platform.Properties, func(i, j int) bool { return cmdPb.Platform.Properties[i].Name < cmdPb.Platform.Properties[j].Name })
 	}
 	return cmdPb
+}
+
+// FromProto parses a Command struct from a proto message.
+func FromProto(p *cpb.Command) *Command {
+	ids := &Identifiers{
+		CommandID:              p.GetIdentifiers().GetCommandId(),
+		InvocationID:           p.GetIdentifiers().GetInvocationId(),
+		CorrelatedInvocationID: p.GetIdentifiers().GetCorrelatedInvocationsId(),
+		ToolName:               p.GetIdentifiers().GetToolName(),
+		ToolVersion:            p.GetIdentifiers().GetToolVersion(),
+	}
+	is := inputSpecFromProto(p.GetInput())
+	return &Command{
+		Identifiers: ids,
+		ExecRoot:    p.ExecRoot,
+		Args:        p.Args,
+		WorkingDir:  p.WorkingDirectory,
+		InputSpec:   is,
+		OutputFiles: p.GetOutput().GetOutputFiles(),
+		OutputDirs:  p.GetOutput().GetOutputDirectories(),
+		Timeout:     time.Duration(p.ExecutionTimeout) * time.Second,
+		Platform:    p.Platform,
+	}
+}
+
+func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
+	var excl []*InputExclusion
+	for _, ex := range is.GetExcludeInputs() {
+		excl = append(excl, &InputExclusion{
+			Regex: ex.Regex,
+			Type:  inputTypeFromProto(ex.Type),
+		})
+	}
+	return &InputSpec{
+		Inputs:               is.GetInputs(),
+		InputExclusions:      excl,
+		EnvironmentVariables: is.GetEnvironmentVariables(),
+	}
+}
+
+func inputSpecToProto(is *InputSpec) *cpb.InputSpec {
+	var excl []*cpb.ExcludeInput
+	for _, ex := range is.InputExclusions {
+		excl = append(excl, &cpb.ExcludeInput{
+			Regex: ex.Regex,
+			Type:  inputTypeToProto(ex.Type),
+		})
+	}
+	return &cpb.InputSpec{
+		Inputs:               is.Inputs,
+		ExcludeInputs:        excl,
+		EnvironmentVariables: is.EnvironmentVariables,
+	}
+}
+
+func inputTypeFromProto(t cpb.InputType_Value) InputType {
+	switch t {
+	case cpb.InputType_DIRECTORY:
+		return DirectoryInputType
+	case cpb.InputType_FILE:
+		return FileInputType
+	default:
+		return UnspecifiedInputType
+	}
+}
+
+func inputTypeToProto(t InputType) cpb.InputType_Value {
+	switch t {
+	case DirectoryInputType:
+		return cpb.InputType_DIRECTORY
+	case FileInputType:
+		return cpb.InputType_FILE
+	default:
+		return cpb.InputType_UNSPECIFIED
+	}
+}
+
+func protoStatusFromResultStatus(s ResultStatus) cpb.CommandResultStatus_Value {
+	switch s {
+	case SuccessResultStatus:
+		return cpb.CommandResultStatus_SUCCESS
+	case CacheHitResultStatus:
+		return cpb.CommandResultStatus_CACHE_HIT
+	case NonZeroExitResultStatus:
+		return cpb.CommandResultStatus_NON_ZERO_EXIT
+	case TimeoutResultStatus:
+		return cpb.CommandResultStatus_TIMEOUT
+	case InterruptedResultStatus:
+		return cpb.CommandResultStatus_INTERRUPTED
+	case RemoteErrorResultStatus:
+		return cpb.CommandResultStatus_REMOTE_ERROR
+	case LocalErrorResultStatus:
+		return cpb.CommandResultStatus_LOCAL_ERROR
+	default:
+		return cpb.CommandResultStatus_UNKNOWN
+	}
+}
+
+func protoStatusToResultStatus(s cpb.CommandResultStatus_Value) ResultStatus {
+	switch s {
+	case cpb.CommandResultStatus_SUCCESS:
+		return SuccessResultStatus
+	case cpb.CommandResultStatus_CACHE_HIT:
+		return CacheHitResultStatus
+	case cpb.CommandResultStatus_NON_ZERO_EXIT:
+		return NonZeroExitResultStatus
+	case cpb.CommandResultStatus_TIMEOUT:
+		return TimeoutResultStatus
+	case cpb.CommandResultStatus_INTERRUPTED:
+		return InterruptedResultStatus
+	case cpb.CommandResultStatus_REMOTE_ERROR:
+		return RemoteErrorResultStatus
+	case cpb.CommandResultStatus_LOCAL_ERROR:
+		return LocalErrorResultStatus
+	default:
+		return UnspecifiedResultStatus
+	}
+}
+
+// ToProto serializes a Command struct into a proto message.
+func ToProto(cmd *Command) *cpb.Command {
+	if cmd == nil {
+		return nil
+	}
+	cPb := &cpb.Command{
+		ExecRoot:         cmd.ExecRoot,
+		Input:            inputSpecToProto(cmd.InputSpec),
+		Output:           &cpb.OutputSpec{OutputFiles: cmd.OutputFiles, OutputDirectories: cmd.OutputDirs},
+		Args:             cmd.Args,
+		ExecutionTimeout: int32(cmd.Timeout.Seconds()),
+		WorkingDirectory: cmd.WorkingDir,
+		Platform:         cmd.Platform,
+	}
+	if cmd.Identifiers != nil {
+		cPb.Identifiers = &cpb.Identifiers{
+			CommandId:    cmd.Identifiers.CommandID,
+			InvocationId: cmd.Identifiers.InvocationID,
+			ToolName:     cmd.Identifiers.ToolName,
+		}
+	}
+	return cPb
+}
+
+// ResultToProto serializes a command.Result struct into a proto message.
+func ResultToProto(res *Result) *cpb.CommandResult {
+	if res == nil {
+		return nil
+	}
+	resPb := &cpb.CommandResult{
+		Status:   protoStatusFromResultStatus(res.Status),
+		ExitCode: int32(res.ExitCode),
+	}
+	if res.Err != nil {
+		resPb.Msg = res.Err.Error()
+	}
+	return resPb
+}
+
+// ResultFromProto parses a command.Result struct from a proto message.
+func ResultFromProto(res *cpb.CommandResult) *Result {
+	if res == nil {
+		return nil
+	}
+	var err error
+	if res.Msg != "" {
+		err = errors.New(res.Msg)
+	}
+	return &Result{
+		Status:   protoStatusToResultStatus(res.Status),
+		ExitCode: int(res.ExitCode),
+		Err:      err,
+	}
+}
+
+// TimeToProto converts a valid time.Time into a proto Timestamp.
+func TimeToProto(t time.Time) *tspb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	ts, err := ptypes.TimestampProto(t)
+	if err != nil {
+		log.Warningf("Unable to convert time to Timestamp: %v", err)
+		return nil
+	}
+	return ts
+}
+
+// TimeFromProto converts a valid Timestamp proto into a time.Time.
+func TimeFromProto(tPb *tspb.Timestamp) time.Time {
+	if tPb == nil {
+		return time.Time{}
+	}
+	t, err := ptypes.Timestamp(tPb)
+	if err != nil {
+		log.Errorf("Failed to parse RBE timestamp: %+v - > %v", tPb, err)
+	}
+	return t
+}
+
+// TimeIntervalToProto serializes the SDK TimeInterval into a proto.
+func TimeIntervalToProto(t *TimeInterval) *cpb.TimeInterval {
+	if t == nil {
+		return nil
+	}
+	return &cpb.TimeInterval{
+		From: TimeToProto(t.From),
+		To:   TimeToProto(t.To),
+	}
+}
+
+// TimeIntervalFromProto parses the SDK TimeInterval from a proto.
+func TimeIntervalFromProto(t *cpb.TimeInterval) *TimeInterval {
+	if t == nil {
+		return nil
+	}
+	return &TimeInterval{
+		From: TimeFromProto(t.From),
+		To:   TimeFromProto(t.To),
+	}
 }

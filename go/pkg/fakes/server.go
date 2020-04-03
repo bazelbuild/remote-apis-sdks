@@ -105,7 +105,7 @@ func NewTestEnv(t *testing.T) (*TestEnv, func()) {
 	}
 	return &TestEnv{
 			Client: &rexec.Client{
-				FileMetadataCache: &filemetadata.NoopFileMetadataCache{},
+				FileMetadataCache: filemetadata.NewNoopCache(),
 				GrpcClient:        grpcClient,
 			},
 			Server:   s,

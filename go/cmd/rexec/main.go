@@ -72,7 +72,7 @@ func main() {
 	}
 	defer grpcClient.Close()
 	c := &rexec.Client{
-		FileMetadataCache: &filemetadata.NoopFileMetadataCache{},
+		FileMetadataCache: filemetadata.NewNoopCache(),
 		GrpcClient:        grpcClient,
 	}
 	res, _ := c.Run(ctx, cmd, opt, outerr.SystemOutErr)
