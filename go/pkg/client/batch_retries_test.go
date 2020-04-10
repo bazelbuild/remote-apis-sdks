@@ -40,7 +40,7 @@ func (f *flakyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchRe
 			Responses: []*repb.BatchReadBlobsResponse_Response{
 				{Digest: digest.TestNew("a", 1).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}, Data: []byte{1}},
 				// all retriable errors.
-				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.ResourceExhausted)}},
 				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Canceled)}},
 				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Aborted)}},
 			},
@@ -53,7 +53,7 @@ func (f *flakyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchRe
 			Responses: []*repb.BatchReadBlobsResponse_Response{
 				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}, Data: []byte{2}},
 				// all retriable errors.
-				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.ResourceExhausted)}},
 				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Canceled)}},
 			},
 		}
@@ -64,7 +64,7 @@ func (f *flakyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchRe
 		resp := &repb.BatchReadBlobsResponse{
 			Responses: []*repb.BatchReadBlobsResponse_Response{
 				// One non-retriable error.
-				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.ResourceExhausted)}},
 				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.PermissionDenied)}},
 			},
 		}
@@ -86,7 +86,7 @@ func (f *flakyBatchServer) BatchUpdateBlobs(ctx context.Context, req *repb.Batch
 			Responses: []*repb.BatchUpdateBlobsResponse_Response{
 				{Digest: digest.TestNew("a", 1).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}},
 				// all retriable errors.
-				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.ResourceExhausted)}},
 				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Canceled)}},
 				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Aborted)}},
 			},
@@ -99,7 +99,7 @@ func (f *flakyBatchServer) BatchUpdateBlobs(ctx context.Context, req *repb.Batch
 			Responses: []*repb.BatchUpdateBlobsResponse_Response{
 				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}},
 				// all retriable errors.
-				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.ResourceExhausted)}},
 				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Canceled)}},
 			},
 		}
@@ -110,7 +110,7 @@ func (f *flakyBatchServer) BatchUpdateBlobs(ctx context.Context, req *repb.Batch
 		resp := &repb.BatchUpdateBlobsResponse{
 			Responses: []*repb.BatchUpdateBlobsResponse_Response{
 				// One non-retriable error.
-				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.ResourceExhausted)}},
 				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.PermissionDenied)}},
 			},
 		}

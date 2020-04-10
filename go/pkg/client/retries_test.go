@@ -57,7 +57,7 @@ func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 		return status.Error(codes.FailedPrecondition, fmt.Sprintf("expected first chunk, got %v", req))
 	}
 	if numCalls < 5 {
-		return status.Error(codes.Internal, "another transient error!")
+		return status.Error(codes.ResourceExhausted, "another transient error!")
 	}
 	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: 4})
 }
@@ -72,7 +72,7 @@ func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadS
 		if err := stream.Send(&bspb.ReadResponse{Data: []byte("bl")}); err != nil {
 			return err
 		}
-		return status.Error(codes.Internal, "another transient error!")
+		return status.Error(codes.ResourceExhausted, "another transient error!")
 	}
 	// Client now will only ask for the remaining two bytes.
 	if numCalls < 5 {
@@ -133,7 +133,7 @@ func (f *flakyServer) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAdd
 		if err := stream.Send(resp); err != nil {
 			return err
 		}
-		return status.Error(codes.Internal, "another transient error!")
+		return status.Error(codes.ResourceExhausted, "another transient error!")
 	}
 	// Client now will only ask for the remaining directories.
 	if numCalls < 5 {
@@ -152,7 +152,7 @@ func (f *flakyServer) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_
 	}
 	stream.Send(&oppb.Operation{Done: false, Name: "dummy"})
 	// After this error, retries should to go the WaitExecution method.
-	return status.Error(codes.Internal, "another transient error!")
+	return status.Error(codes.ResourceExhausted, "another transient error!")
 }
 
 func (f *flakyServer) WaitExecution(req *repb.WaitExecutionRequest, stream regrpc.Execution_WaitExecutionServer) error {
@@ -162,7 +162,7 @@ func (f *flakyServer) WaitExecution(req *repb.WaitExecutionRequest, stream regrp
 	}
 	if numCalls < 4 {
 		stream.Send(&oppb.Operation{Done: false, Name: "dummy"})
-		return status.Error(codes.Internal, "another transient error!")
+		return status.Error(codes.ResourceExhausted, "another transient error!")
 	}
 	// Execute (above) will fail twice (and be retried twice) before ExecuteAndWait() switches to
 	// WaitExecution. WaitExecution will fail 4 more times more before succeeding, for a total of 6 retries.
