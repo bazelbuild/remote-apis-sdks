@@ -413,7 +413,7 @@ func RetryTransient() *Retrier {
 			}
 			switch s.Code() {
 			case codes.Canceled, codes.Unknown, codes.DeadlineExceeded, codes.Aborted,
-				codes.Internal, codes.Unavailable, codes.Unauthenticated, codes.ResourceExhausted:
+				codes.Unavailable, codes.Unauthenticated, codes.ResourceExhausted:
 				return true
 			default:
 				return false
