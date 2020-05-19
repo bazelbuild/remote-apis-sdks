@@ -12,6 +12,8 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
+var _ balancer.V2Balancer = &gcpBalancer{} // Ensure gcpBalancer implements V2Balancer
+
 const (
 	// Name is the name of grpc_gcp balancer.
 	Name = "grpc_gcp"
@@ -134,10 +136,11 @@ func (ref *subConnRef) streamsDecr() {
 }
 
 type gcpBalancer struct {
-	addrs   []resolver.Address
-	cc      balancer.ClientConn
-	csEvltr *connectivityStateEvaluator
-	state   connectivity.State
+	balancer.Balancer // Embed V1 Balancer so it compiles with Builder
+	addrs             []resolver.Address
+	cc                balancer.ClientConn
+	csEvltr           *connectivityStateEvaluator
+	state             connectivity.State
 
 	mu          sync.Mutex
 	affinityMap map[string]balancer.SubConn
@@ -147,27 +150,29 @@ type gcpBalancer struct {
 	picker balancer.V2Picker
 }
 
-func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
-	if err != nil {
-		grpclog.Infof(
-			"grpcgcp.gcpBalancer: HandleResolvedAddrs called with error %v",
-			err,
-		)
-		return
-	}
+func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
+	addrs := ccs.ResolverState.Addresses
 	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs)
 	gb.addrs = addrs
 
 	if len(gb.scRefs) == 0 {
 		gb.newSubConn()
-		return
+		return nil
 	}
 
 	for _, scRef := range gb.scRefs {
-		// TODO(weiranf): update streams count when new addrs resolved?
 		scRef.subConn.UpdateAddresses(addrs)
 		scRef.subConn.Connect()
 	}
+
+	return nil
+}
+
+func (gb *gcpBalancer) ResolverError(err error) {
+	grpclog.Warningf(
+		"grpcgcp.gcpBalancer: ResolverError: %v",
+		err,
+	)
 }
 
 // check current connection pool size
@@ -267,7 +272,8 @@ func (gb *gcpBalancer) regeneratePicker() {
 	gb.picker = newGCPPicker(readyRefs, gb)
 }
 
-func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
+func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubConnState) {
+	s := scs.ConnectivityState
 	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
 
 	gb.mu.Lock()
