@@ -4,7 +4,6 @@ package filemetadata
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 )
@@ -13,7 +12,6 @@ import (
 type Metadata struct {
 	Digest       digest.Digest
 	IsExecutable bool
-	MTime        time.Time
 	Err          error
 }
 
@@ -54,7 +52,6 @@ func Compute(filename string) *Metadata {
 		md.Err = fe
 		return md
 	}
-	md.MTime = file.ModTime()
 	mode := file.Mode()
 	md.IsExecutable = (mode & 0100) != 0
 	if mode.IsDir() {
