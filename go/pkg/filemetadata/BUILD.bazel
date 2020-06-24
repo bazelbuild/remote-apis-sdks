@@ -1,5 +1,8 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
+# gazelle:ignore
+# gazelle removes select and put them in srcs.
+
 go_library(
     name = "go_default_library",
     srcs = [
@@ -19,7 +22,10 @@ go_test(
     srcs = [
         "cache_test.go",
         "filemetadata_test.go",
-    ],
+    ] + select({
+        "windows": [],
+        "//conditions:default": ["cache_posix_test.go"],
+    }),
     embed = [":go_default_library"],
     deps = [
         "//go/pkg/cache:go_default_library",
@@ -27,4 +33,9 @@ go_test(
         "@com_github_google_go_cmp//cmp:go_default_library",
         "@com_github_google_go_cmp//cmp/cmpopts:go_default_library",
     ],
+)
+
+config_setting(
+   name = "windows",
+   constraint_values = ["@platforms//os:windows"],
 )
