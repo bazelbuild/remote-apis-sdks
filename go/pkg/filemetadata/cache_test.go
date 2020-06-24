@@ -18,7 +18,7 @@ var (
 )
 
 func TestSimpleCacheLoad(t *testing.T) {
-	c := &fmCache{Backend: cache.GetInstance()}
+	c := NewSingleFlightCache()
 	filename, err := createFile(t, false, "")
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
@@ -37,16 +37,16 @@ func TestSimpleCacheLoad(t *testing.T) {
 	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 		t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 	}
-	if c.CacheHits != 0 {
-		t.Errorf("Cache has wrong num of CacheHits, want 0, got %v", c.CacheHits)
+	if c.GetCacheHits() != 0 {
+		t.Errorf("Cache has wrong num of CacheHits, want 0, got %v", c.GetCacheHits())
 	}
-	if c.CacheMisses != 1 {
-		t.Errorf("Cache has wrong num of CacheMisses, want 1, got %v", c.CacheMisses)
+	if c.GetCacheMisses() != 1 {
+		t.Errorf("Cache has wrong num of CacheMisses, want 1, got %v", c.GetCacheMisses())
 	}
 }
 
 func TestCacheOnceLoadMultiple(t *testing.T) {
-	c := &fmCache{Backend: cache.GetInstance()}
+	c := NewSingleFlightCache()
 	filename, err := createFile(t, false, "")
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
@@ -67,16 +67,16 @@ func TestCacheOnceLoadMultiple(t *testing.T) {
 			t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 		}
 	}
-	if c.CacheHits != 1 {
-		t.Errorf("Cache has wrong num of CacheHits, want 1, got %v", c.CacheHits)
+	if c.GetCacheHits() != 1 {
+		t.Errorf("Cache has wrong num of CacheHits, want 1, got %v", c.GetCacheHits())
 	}
-	if c.CacheMisses != 1 {
-		t.Errorf("Cache has wrong num of CacheMisses, want 1, got %v", c.CacheMisses)
+	if c.GetCacheMisses() != 1 {
+		t.Errorf("Cache has wrong num of CacheMisses, want 1, got %v", c.GetCacheMisses())
 	}
 }
 
 func TestLoadAfterChangeWithoutValidation(t *testing.T) {
-	c := &fmCache{Backend: cache.GetInstance()}
+	c := NewSingleFlightCache()
 	filename, err := createFile(t, false, "")
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
@@ -110,11 +110,11 @@ func TestLoadAfterChangeWithoutValidation(t *testing.T) {
 	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 		t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 	}
-	if c.CacheHits != 1 {
-		t.Errorf("Cache has wrong num of CacheHits, want 1, got %v", c.CacheHits)
+	if c.GetCacheHits() != 1 {
+		t.Errorf("Cache has wrong num of CacheHits, want 1, got %v", c.GetCacheHits())
 	}
-	if c.CacheMisses != 1 {
-		t.Errorf("Cache has wrong num of CacheMisses, want 1, got %v", c.CacheMisses)
+	if c.GetCacheMisses() != 1 {
+		t.Errorf("Cache has wrong num of CacheMisses, want 1, got %v", c.GetCacheMisses())
 	}
 }
 
@@ -155,10 +155,10 @@ func TestLoadAfterChange(t *testing.T) {
 	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 		t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 	}
-	if c.CacheHits != 0 {
-		t.Errorf("Cache has wrong num of CacheHits, want 0, got %v", c.CacheHits)
+	if c.GetCacheHits() != 0 {
+		t.Errorf("Cache has wrong num of CacheHits, want 0, got %v", c.GetCacheHits())
 	}
-	if c.CacheMisses != 2 {
-		t.Errorf("Cache has wrong num of CacheMisses, want 2, got %v", c.CacheMisses)
+	if c.GetCacheMisses() != 2 {
+		t.Errorf("Cache has wrong num of CacheMisses, want 2, got %v", c.GetCacheMisses())
 	}
 }
