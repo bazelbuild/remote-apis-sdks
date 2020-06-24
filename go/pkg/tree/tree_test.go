@@ -127,6 +127,14 @@ func (c *callCountingMetadataCache) Reset() {
 	c.cache.Reset()
 }
 
+func (c *callCountingMetadataCache) GetCacheHits() uint64 {
+	return 0
+}
+
+func (c *callCountingMetadataCache) GetCacheMisses() uint64 {
+	return 0
+}
+
 func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 	fileBlob := []byte("bla")
 	fileDg := digest.NewFromBlob(fileBlob)

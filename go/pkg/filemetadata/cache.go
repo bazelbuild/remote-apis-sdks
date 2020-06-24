@@ -17,8 +17,8 @@ const (
 // Cache is a store for file digests that supports invalidation.
 type fmCache struct {
 	Backend     *cache.Cache
-	CacheHits   uint64
-	CacheMisses uint64
+	cacheHits   uint64
+	cacheMisses uint64
 	Validate    bool
 }
 
@@ -86,6 +86,16 @@ func (c *fmCache) Reset() {
 	c.Backend.Reset()
 }
 
+// GetCacheHits returns the number of cache hits.
+func (c *fmCache) GetCacheHits() uint64 {
+	return c.cacheHits
+}
+
+// GetCacheMisses returns the number of cache misses.
+func (c *fmCache) GetCacheMisses() uint64 {
+	return c.cacheMisses
+}
+
 func (c *fmCache) check() error {
 	if c.Backend == nil {
 		return fmt.Errorf("no backend found for store")
@@ -119,8 +129,8 @@ func (c *fmCache) loadMetadata(filename string) (*Metadata, bool, error) {
 
 func (c *fmCache) updateMetrics(cacheHit bool) {
 	if cacheHit {
-		atomic.AddUint64(&c.CacheHits, 1)
+		atomic.AddUint64(&c.cacheHits, 1)
 	} else {
-		atomic.AddUint64(&c.CacheMisses, 1)
+		atomic.AddUint64(&c.cacheMisses, 1)
 	}
 }
