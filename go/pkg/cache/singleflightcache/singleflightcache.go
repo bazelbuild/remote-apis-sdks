@@ -60,6 +60,25 @@ func (c *Cache) LoadOrStore(key interface{}, valFn func() (interface{}, error)) 
 	return val, nil
 }
 
+// Store forcefully updates the given cache key with val. Note that unlike LoadOrStore,
+// Store accepts a value instead of a valFn since it is intended to be only used in
+// cases where updates are lightweight and do not involve computing the cache value.
+func (c *Cache) Store(key interface{}, val interface{}) error {
+	// Lock the cache for reading to avoid a race condition with Delete.
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	l, _ := c.locks.LoadOrStore(key, &sync.RWMutex{})
+	lock, ok := l.(*sync.RWMutex)
+	if !ok {
+		return fmt.Errorf("unexpected type found in lock map")
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	c.store.Store(key, val)
+	return nil
+}
+
 // Delete removes a key from the cache.
 func (c *Cache) Delete(key interface{}) {
 	if _, exists := c.locks.Load(key); exists {

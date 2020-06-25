@@ -15,6 +15,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
@@ -671,6 +672,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	defer cleanup()
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
+	cache := filemetadata.NewSingleFlightCache()
 
 	fooDigest := fake.Put([]byte("foo"))
 	barDigest := fake.Put([]byte("bar"))
@@ -732,7 +734,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 		t.Fatalf("failed to make temp dir: %v", err)
 	}
 	defer os.RemoveAll(execRoot)
-	err = c.DownloadActionOutputs(ctx, ar, execRoot)
+	err = c.DownloadActionOutputs(ctx, ar, execRoot, cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
@@ -742,6 +744,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 		contents         []byte
 		symlinkTarget    string
 		isEmptyDirectory bool
+		fileDigest       *digest.Digest
 	}{
 		{
 			path:             "dir/e1",
@@ -755,6 +758,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 			path:         "dir/a/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
 		},
 		{
 			path:     "dir/a/bar",
@@ -764,6 +768,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 			path:         "dir/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
 		},
 		{
 			path:             "dir2/e2",
@@ -773,14 +778,16 @@ func TestDownloadActionOutputs(t *testing.T) {
 			path:         "dir2/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
 		},
 		{
 			path:     "dir2/bar",
 			contents: []byte("bar"),
 		},
 		{
-			path:     "foo",
-			contents: []byte("foo"),
+			path:       "foo",
+			contents:   []byte("foo"),
+			fileDigest: &fooDigest,
 		},
 		{
 			path:          "x/a",
@@ -796,6 +803,16 @@ func TestDownloadActionOutputs(t *testing.T) {
 		fi, err := os.Lstat(path)
 		if err != nil {
 			t.Errorf("expected output %s is missing", path)
+		}
+		if out.fileDigest != nil {
+			fmd := cache.Get(path)
+			if fmd == nil {
+				t.Errorf("cache does not contain metadata for path: %v", path)
+			} else {
+				if diff := cmp.Diff(*out.fileDigest, fmd.Digest); diff != "" {
+					t.Errorf("invalid digeset in cache for path %v, (-want +got): %v", path, diff)
+				}
+			}
 		}
 		if out.symlinkTarget != "" {
 			if fi.Mode()&os.ModeSymlink == 0 {
@@ -902,7 +919,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 				t.Fatalf("failed to make temp dir: %v", err)
 			}
 			defer os.RemoveAll(execRoot)
-			err = c.DownloadActionOutputs(ctx, ar, execRoot)
+			err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if err != nil {
 				t.Errorf("error in DownloadActionOutputs: %s", err)
 			}
@@ -954,7 +971,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 				t.Fatalf("failed to make temp dir: %v", err)
 			}
 			defer os.RemoveAll(execRoot)
-			err = c.DownloadActionOutputs(ctx, ar, execRoot)
+			err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if err != nil {
 				t.Errorf("error in DownloadActionOutputs: %s", err)
 			}
