@@ -1251,6 +1251,8 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 				t.Fatalf("ComputeOutputsToUpload(...) tree proto with digest %+v not uploaded", dg)
 			}
 			wantBlobs[dg] = treeBlob
+			rootBlob := mustMarshal(tc.wantTreeRoot)
+			wantBlobs[digest.NewFromBlob(rootBlob)] = rootBlob
 			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
 			}
