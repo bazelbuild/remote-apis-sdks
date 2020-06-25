@@ -13,6 +13,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
@@ -578,7 +579,7 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 }
 
 // DownloadActionOutputs downloads the output files and directories in the given action result.
-func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string) error {
+func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string, cache filemetadata.Cache) error {
 	outs, err := c.FlattenActionOutputs(ctx, resPb)
 	if err != nil {
 		return err
@@ -616,6 +617,16 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	}
 	if err := c.downloadFiles(ctx, execRoot, downloads); err != nil {
 		return err
+	}
+	for _, output := range downloads {
+		path := output.Path
+		md := &filemetadata.Metadata{
+			Digest:       output.Digest,
+			IsExecutable: output.IsExecutable,
+		}
+		if err := cache.Update(path, md); err != nil {
+			return err
+		}
 	}
 	for _, out := range copies {
 		if err := copyFile(execRoot, downloads[out.Digest].Path, out.Path); err != nil {

@@ -122,6 +122,16 @@ func (c *callCountingMetadataCache) Delete(path string) error {
 	return c.cache.Delete(path)
 }
 
+func (c *callCountingMetadataCache) Update(path string, ce *filemetadata.Metadata) error {
+	c.t.Helper()
+	p, err := filepath.Rel(c.execRoot, path)
+	if err != nil {
+		c.t.Errorf("expected %v to be under %v", path, c.execRoot)
+	}
+	c.calls[p]++
+	return c.cache.Update(path, ce)
+}
+
 func (c *callCountingMetadataCache) Reset() {
 	c.t.Helper()
 	c.cache.Reset()

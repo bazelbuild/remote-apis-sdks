@@ -54,6 +54,22 @@ func (c *Cache) LoadOrStore(ns string, key interface{}, fn func() (interface{}, 
 	return cache.LoadOrStore(key, fn)
 }
 
+// Store is similar to LoadOrStore, except it does not check if a cache entry
+// already exists for the given key and simply overwrites the value of the key
+// in the cache with the given value.
+func (c *Cache) Store(ns string, key interface{}, val interface{}) error {
+	// Load first to avoid instantiating a new cache for LoadOrStore.
+	nsCache, ok := c.caches.Load(ns)
+	if !ok {
+		nsCache, _ = c.caches.LoadOrStore(ns, &singleflightcache.Cache{})
+	}
+	cache, ok := nsCache.(*singleflightcache.Cache)
+	if !ok {
+		return fmt.Errorf("unexpected type in namespace cache map")
+	}
+	return cache.Store(key, val)
+}
+
 // Delete deletes a value corresponding to the given namespace and key.
 func (c *Cache) Delete(ns string, key interface{}) error {
 	// Load first to avoid instantiating a new cache for LoadOrStore.

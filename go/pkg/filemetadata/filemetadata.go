@@ -66,6 +66,7 @@ func Compute(filename string) *Metadata {
 type Cache interface {
 	Get(path string) *Metadata
 	Delete(filename string) error
+	Update(path string, cacheEntry *Metadata) error
 	Reset()
 	GetCacheHits() uint64
 	GetCacheMisses() uint64
@@ -81,6 +82,11 @@ func (c *noopCache) Get(path string) *Metadata {
 
 // Delete removes an entry from the cache. It is a noop for the Noop cache.
 func (c *noopCache) Delete(string) error {
+	return nil
+}
+
+// Update updates a cache entry with the given value. It is a noop for Noop cache.
+func (c *noopCache) Update(string, *Metadata) error {
 	return nil
 }
 

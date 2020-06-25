@@ -120,7 +120,7 @@ func (ec *Context) downloadResults() *command.Result {
 		return command.NewRemoteErrorResult(err)
 	}
 	if ec.opt.DownloadOutputs {
-		if err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, ec.cmd.ExecRoot); err != nil {
+		if err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, ec.cmd.ExecRoot, ec.client.FileMetadataCache); err != nil {
 			return command.NewRemoteErrorResult(err)
 		}
 	}

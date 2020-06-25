@@ -54,6 +54,15 @@ func (c *fmCache) Delete(filename string) error {
 	return c.Backend.Delete(namespace, abs)
 }
 
+// Update updates the cache entry for the filename with the given value.
+func (c *fmCache) Update(filename string, cacheEntry *Metadata) error {
+	absFilename, err := filepath.Abs(filename)
+	if err != nil {
+		return err
+	}
+	return c.Backend.Store(namespace, absFilename, cacheEntry)
+}
+
 // Reset clears the cache.
 func (c *fmCache) Reset() {
 	c.Backend.Reset()
