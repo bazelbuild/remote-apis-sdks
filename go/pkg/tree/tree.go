@@ -378,11 +378,16 @@ func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cach
 		if err != nil {
 			return nil, nil, err
 		}
+		ch, err := chunker.NewFromProto(rootDir, chunkSize)
+		if err != nil {
+			return nil, nil, err
+		}
+		outs[ch.Digest()] = ch
 		treePb.Root = rootDir
 		for _, c := range childDirs {
 			treePb.Children = append(treePb.Children, c)
 		}
-		ch, err := chunker.NewFromProto(treePb, chunkSize)
+		ch, err = chunker.NewFromProto(treePb, chunkSize)
 		if err != nil {
 			return nil, nil, err
 		}
