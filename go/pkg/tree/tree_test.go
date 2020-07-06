@@ -751,6 +751,36 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "Physical inputs supercede virtual inputs",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "barDir/bar", fileContents: barBlob},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir", "barDir"},
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "fooDir/foo", Contents: barBlob, IsExecutable: true},
+					&command.VirtualInput{Path: "barDir/bar", IsEmptyDirectory: true},
+				},
+			},
+			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
+				{Name: "barDir", Digest: barDirDgPb},
+				{Name: "fooDir", Digest: fooDirDgPb},
+			}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"barDir":     1,
+				"barDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
+			},
+		},
+		{
 			desc: "Normalizing virtual inputs paths",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
