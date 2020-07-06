@@ -71,6 +71,19 @@ message ExcludeInput {
   InputType.Value type = 2;
 }
 
+// VirtualInput represents an input that does not actually exist on disk, but we
+// want to stage it on disk for the command execution.
+message VirtualInput {
+  // The path for the input file to be staged at, relative to the ExecRoot.
+  string path = 1;
+  // The byte contents of the file to be staged.
+  bytes contents = 2;
+  // Whether the file should be staged as executable.
+  bool is_executable = 3;
+  // Whether the input is an empty directory.
+  bool is_empty_directory = 4;
+}
+
 message InputSpec {
   // Input paths (files or directories) that need to be uploaded to the remote
   // server for the command execution.
@@ -79,6 +92,9 @@ message InputSpec {
   // and then cached throughout the proxy lifetime. Any subsequent changes to the
   // directory will therefore not be captured.
   repeated string inputs = 2;
+
+  // Virtual inputs that need to be staged as if they were present on disk.
+  repeated VirtualInput virtual_inputs = 5;
 
   // Inputs matching these patterns will be excluded (not uploaded remotely).
   repeated ExcludeInput exclude_inputs = 3;
