@@ -12,7 +12,7 @@ import (
 
 func TestExecutableCacheLoad(t *testing.T) {
 	c := NewSingleFlightCache()
-	filename, err := createFile(t, true, "")
+	filename, err := createFile(t, &testFileParams{executable: true})
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}

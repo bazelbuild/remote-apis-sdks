@@ -16,7 +16,7 @@ var (
 
 func TestSimpleCacheLoad(t *testing.T) {
 	c := NewSingleFlightCache()
-	filename, err := createFile(t, false, "")
+	filename, err := createFile(t, &testFileParams{})
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestSimpleCacheLoad(t *testing.T) {
 
 func TestCacheOnceLoadMultiple(t *testing.T) {
 	c := NewSingleFlightCache()
-	filename, err := createFile(t, false, "")
+	filename, err := createFile(t, &testFileParams{})
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestCacheOnceLoadMultiple(t *testing.T) {
 
 func TestLoadAfterChangeWithoutValidation(t *testing.T) {
 	c := NewSingleFlightCache()
-	filename, err := createFile(t, false, "")
+	filename, err := createFile(t, &testFileParams{})
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}

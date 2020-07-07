@@ -8,19 +8,25 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 )
 
+// SymlinkMetadata contains details if the given path is a symlink.
+type SymlinkMetadata struct {
+	Target    string
+	IsInvalid bool
+}
+
 // Metadata contains details for a particular file.
 type Metadata struct {
 	Digest       digest.Digest
 	IsExecutable bool
 	Err          error
+	Symlink      SymlinkMetadata
 }
 
 // FileError is the error returned by the Compute function.
 type FileError struct {
-	IsDirectory      bool
-	IsNotFound       bool
-	IsInvalidSymlink bool
-	Err              error
+	IsDirectory bool
+	IsNotFound  bool
+	Err         error
 }
 
 // Error returns the error message.
@@ -41,11 +47,24 @@ func isSymlink(filename string) (bool, error) {
 func Compute(filename string) *Metadata {
 	md := &Metadata{Digest: digest.Empty}
 	file, err := os.Stat(filename)
+	if isSym, _ := isSymlink(filename); isSym {
+		if err != nil {
+			md.Err = &FileError{Err: err}
+			md.Symlink.IsInvalid = true
+			return md
+		}
+		dest, err := os.Readlink(filename)
+		if err != nil {
+			// This should never happen given that we have verified |filename| is a symlink.
+			md.Err = &FileError{Err: err}
+			md.Symlink.IsInvalid = true
+			return md
+		}
+		md.Symlink.Target = dest
+	}
+
 	if err != nil {
 		fe := &FileError{Err: err}
-		if s, err := isSymlink(filename); err == nil && s {
-			fe.IsInvalidSymlink = true
-		}
 		if os.IsNotExist(err) {
 			fe.IsNotFound = true
 		}
