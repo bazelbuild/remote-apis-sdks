@@ -19,7 +19,7 @@ type Metadata struct {
 	Digest       digest.Digest
 	IsExecutable bool
 	Err          error
-	Symlink      SymlinkMetadata
+	Symlink      *SymlinkMetadata
 }
 
 // FileError is the error returned by the Compute function.
@@ -48,6 +48,7 @@ func Compute(filename string) *Metadata {
 	md := &Metadata{Digest: digest.Empty}
 	file, err := os.Stat(filename)
 	if isSym, _ := isSymlink(filename); isSym {
+		md.Symlink = &SymlinkMetadata{}
 		if err != nil {
 			md.Err = &FileError{Err: err}
 			md.Symlink.IsInvalid = true
