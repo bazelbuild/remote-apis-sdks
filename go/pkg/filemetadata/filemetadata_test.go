@@ -97,9 +97,8 @@ func (sc *testSymlinkCreationResult) cleanup() {
 
 func TestComputeSymlinks(t *testing.T) {
 	tests := []struct {
-		name         string
-		removeTarget bool
-		target       interface{}
+		name   string
+		target interface{} // If unspecified, this is an invalid symlink
 	}{
 		{
 			name: "valid",
@@ -115,8 +114,7 @@ func TestComputeSymlinks(t *testing.T) {
 			},
 		},
 		{
-			name:         "invalid-file",
-			removeTarget: true,
+			name: "invalid-file",
 		},
 		{
 			name:   "symlink-dir",
@@ -125,7 +123,7 @@ func TestComputeSymlinks(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			symlinkResult, err := createSymlink(t, tc.target, tc.removeTarget)
+			symlinkResult, err := createSymlink(t, tc.target)
 			if err != nil {
 				t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 			}
@@ -135,7 +133,7 @@ func TestComputeSymlinks(t *testing.T) {
 			got := Compute(symlinkPath)
 			fmt.Printf("symlinkPath=%s got=%+v\n", symlinkPath, got)
 
-			if tc.removeTarget {
+			if tc.target == nil {
 				if got.Err == nil || !got.Symlink.IsInvalid {
 					t.Errorf("Compute(%v) should fail because the symlink is invalid", symlinkPath)
 				}
@@ -158,7 +156,7 @@ func TestComputeSymlinks(t *testing.T) {
 
 			fileParams := tc.target.(*testFileParams)
 			want := &Metadata{
-				Symlink: SymlinkMetadata{
+				Symlink: &SymlinkMetadata{
 					Target:    symlinkResult.target,
 					IsInvalid: false,
 				},
@@ -196,10 +194,11 @@ func createFile(t *testing.T, fp *testFileParams) (string, error) {
 	return filename, nil
 }
 
-func createSymlink(t *testing.T, target interface{}, removeTarget bool) (*testSymlinkCreationResult, error) {
+func createSymlink(t *testing.T, target interface{}) (*testSymlinkCreationResult, error) {
 	t.Helper()
 
-	if target == nil {
+	invalidTarget := target == nil
+	if invalidTarget {
 		// Create a temporary fake target so that os.Symlink() can work.
 		target = &testFileParams{
 			contents: "transient",
@@ -228,7 +227,7 @@ func createSymlink(t *testing.T, target interface{}, removeTarget bool) (*testSy
 	result := &testSymlinkCreationResult{
 		symlink: symlinkPath,
 	}
-	if removeTarget {
+	if invalidTarget {
 		os.RemoveAll(targetPath)
 	}
 	result.target = targetPath
