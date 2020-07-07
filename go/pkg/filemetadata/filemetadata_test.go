@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -131,7 +130,6 @@ func TestComputeSymlinks(t *testing.T) {
 
 			symlinkPath := symlinkResult.symlink
 			got := Compute(symlinkPath)
-			fmt.Printf("symlinkPath=%s got=%+v\n", symlinkPath, got)
 
 			if tc.target == nil {
 				if got.Err == nil || !got.Symlink.IsInvalid {
