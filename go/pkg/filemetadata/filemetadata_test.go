@@ -132,7 +132,7 @@ func TestComputeSymlinks(t *testing.T) {
 			got := Compute(symlinkPath)
 
 			if tc.target == nil {
-				if got.Err == nil || !got.Symlink.IsInvalid {
+				if got.Err == nil || !got.Symlink.IsDangling {
 					t.Errorf("Compute(%v) should fail because the symlink is invalid", symlinkPath)
 				}
 				if got.Symlink.Target != "" {
@@ -156,7 +156,7 @@ func TestComputeSymlinks(t *testing.T) {
 			want := &Metadata{
 				Symlink: &SymlinkMetadata{
 					Target:    symlinkResult.target,
-					IsInvalid: false,
+					IsDangling: false,
 				},
 				Digest:       digest.NewFromBlob([]byte(fileParams.contents)),
 				IsExecutable: fileParams.executable,

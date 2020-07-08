@@ -11,7 +11,7 @@ import (
 // SymlinkMetadata contains details if the given path is a symlink.
 type SymlinkMetadata struct {
 	Target    string
-	IsInvalid bool
+	IsDangling bool
 }
 
 // Metadata contains details for a particular file.
@@ -51,14 +51,14 @@ func Compute(filename string) *Metadata {
 		md.Symlink = &SymlinkMetadata{}
 		if err != nil {
 			md.Err = &FileError{Err: err}
-			md.Symlink.IsInvalid = true
+			md.Symlink.IsDangling = true
 			return md
 		}
 		dest, err := os.Readlink(filename)
 		if err != nil {
 			// This should never happen given that we have verified |filename| is a symlink.
 			md.Err = &FileError{Err: err}
-			md.Symlink.IsInvalid = true
+			md.Symlink.IsDangling = true
 			return md
 		}
 		md.Symlink.Target = dest

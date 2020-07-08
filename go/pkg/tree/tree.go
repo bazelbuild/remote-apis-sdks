@@ -65,7 +65,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	meta := cache.Get(absPath)
 	t := command.FileInputType
-	if smd := meta.Symlink; smd != nil && smd.IsInvalid {
+	if smd := meta.Symlink; smd != nil && smd.IsDangling {
 		return nil
 	}
 	if meta.Err != nil {
