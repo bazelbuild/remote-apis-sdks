@@ -10,7 +10,7 @@ import (
 
 // SymlinkMetadata contains details if the given path is a symlink.
 type SymlinkMetadata struct {
-	Target    string
+	Target     string
 	IsDangling bool
 }
 
