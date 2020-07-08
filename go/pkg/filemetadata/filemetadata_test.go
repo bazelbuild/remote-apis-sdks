@@ -17,10 +17,6 @@ type testFileParams struct {
 	executable bool
 }
 
-// Used as a type enum
-type testDirParams struct {
-}
-
 func TestComputeFiles(t *testing.T) {
 	tests := []struct {
 		name string
@@ -158,17 +154,17 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 	symlinkPath := symlinkResult.symlink
 	got := Compute(symlinkPath)
 	if got.Err == nil || !got.Symlink.IsDangling {
-		t.Errorf("Compute(%v) should fail because the symlink is invalid", symlinkPath)
+		t.Errorf("Compute(%v) should fail because the symlink is dangling", symlinkPath)
 	}
 	if got.Symlink.Target != "" {
-		t.Errorf("Compute(%v) should fail because the symlink is invalid, got target: %s", symlinkPath, got.Symlink.Target)
+		t.Errorf("Compute(%v) should fail because the symlink is dangling, got target: %s", symlinkPath, got.Symlink.Target)
 	}
 }
 
 func TestComputeSymlinksToDirectory(t *testing.T) {
 	targetPath, err := ioutil.TempDir(os.TempDir(), "")
 	if err != nil {
-		t.Fatalf("Failed to create testing directory: %v", err)
+		t.Fatalf("Failed to create tmp directory: %v", err)
 	}
 	symlinkResult, err := createSymlinkToTarget(t, targetPath)
 
