@@ -175,7 +175,6 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 	}
-	// Make the symlink dangling
 	defer symlinkResult.cleanup()
 
 	symlinkPath := symlinkResult.symlink
