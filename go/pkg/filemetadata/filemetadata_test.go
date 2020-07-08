@@ -156,8 +156,8 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 	if got.Err == nil || !got.Symlink.IsDangling {
 		t.Errorf("Compute(%v) should fail because the symlink is dangling", symlinkPath)
 	}
-	if got.Symlink.Target != "" {
-		t.Errorf("Compute(%v) should fail because the symlink is dangling, got target: %s", symlinkPath, got.Symlink.Target)
+	if got.Symlink.Target != symlinkResult.target {
+		t.Errorf("Compute(%v) should still set Target for the dangling symlink, want=%v got=%v", symlinkPath, symlinkResult.target, got.Symlink.Target)
 	}
 }
 

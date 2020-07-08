@@ -49,19 +49,19 @@ func Compute(filename string) *Metadata {
 	file, err := os.Stat(filename)
 	if isSym, _ := isSymlink(filename); isSym {
 		md.Symlink = &SymlinkMetadata{}
+		if dest, rlErr := os.Readlink(filename); rlErr != nil {
+			md.Err = &FileError{Err: rlErr}
+			return md
+		} else {
+			// If Readlink was OK, we set Target, even if this could be a dangling symlink.
+			md.Symlink.Target = dest
+		}
+
 		if err != nil {
 			md.Err = &FileError{Err: err}
 			md.Symlink.IsDangling = true
 			return md
 		}
-		dest, err := os.Readlink(filename)
-		if err != nil {
-			// This should never happen given that we have verified |filename| is a symlink.
-			md.Err = &FileError{Err: err}
-			md.Symlink.IsDangling = true
-			return md
-		}
-		md.Symlink.Target = dest
 	}
 
 	if err != nil {
