@@ -101,7 +101,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 			fileParams := tc.target
 			symlinkPath := filepath.Join(os.TempDir(), tc.name)
 			defer os.RemoveAll(symlinkPath)
-			targetPath, err := createSymlinkTofile(t, symlinkPath, fileParams)
+			targetPath, err := createSymlinkToFile(t, symlinkPath, fileParams)
 			if err != nil {
 				t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 			}
@@ -130,7 +130,7 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 	// Create a temporary fake target so that os.Symlink() can work.
 	symlinkPath := filepath.Join(os.TempDir(), "dangling")
 	defer os.RemoveAll(symlinkPath)
-	targetPath, err := createSymlinkTofile(t, symlinkPath, &testFileParams{
+	targetPath, err := createSymlinkToFile(t, symlinkPath, &testFileParams{
 		contents: "transient",
 	})
 	if err != nil {
@@ -190,7 +190,7 @@ func createFile(t *testing.T, fp *testFileParams) (string, error) {
 	return filename, nil
 }
 
-func createSymlinkTofile(t *testing.T, symlinkPath string, target *testFileParams) (string, error) {
+func createSymlinkToFile(t *testing.T, symlinkPath string, target *testFileParams) (string, error) {
 	t.Helper()
 	targetPath, err := createFile(t, target)
 	if err != nil {
