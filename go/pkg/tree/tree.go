@@ -268,6 +268,7 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 		if len(dir.Files)+len(dir.Directories)+len(dir.Symlinks) == 0 {
 			flatFiles[flatDir.p] = &Output{
 				Path:             flatDir.p,
+				Digest:           digest.Empty,
 				IsEmptyDirectory: true,
 			}
 			continue
