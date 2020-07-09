@@ -1,8 +1,6 @@
 package filemetadata
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -79,16 +77,6 @@ func TestComputeDirectory(t *testing.T) {
 	}
 }
 
-type testSymlinkCreationResult struct {
-	symlink string
-	target  string
-}
-
-func (sc *testSymlinkCreationResult) cleanup() {
-	os.RemoveAll(sc.symlink)
-	os.RemoveAll(sc.target)
-}
-
 func TestComputeSymlinksToFile(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -111,13 +99,12 @@ func TestComputeSymlinksToFile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fileParams := tc.target
-			symlinkResult, err := createSymlinkTofile(t, fileParams)
+			symlinkPath := filepath.Join(os.TempDir(), tc.name)
+			defer os.RemoveAll(symlinkPath)
+			targetPath, err := createSymlinkTofile(t, symlinkPath, fileParams)
 			if err != nil {
 				t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 			}
-			defer symlinkResult.cleanup()
-
-			symlinkPath := symlinkResult.symlink
 			got := Compute(symlinkPath)
 
 			if got.Err != nil {
@@ -125,7 +112,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 			}
 			want := &Metadata{
 				Symlink: &SymlinkMetadata{
-					Target:     symlinkResult.target,
+					Target:     targetPath,
 					IsDangling: false,
 				},
 				Digest:       digest.NewFromBlob([]byte(fileParams.contents)),
@@ -141,39 +128,39 @@ func TestComputeSymlinksToFile(t *testing.T) {
 
 func TestComputeDanglingSymlinks(t *testing.T) {
 	// Create a temporary fake target so that os.Symlink() can work.
-	symlinkResult, err := createSymlinkTofile(t, &testFileParams{
+	symlinkPath := filepath.Join(os.TempDir(), "dangling")
+	defer os.RemoveAll(symlinkPath)
+	targetPath, err := createSymlinkTofile(t, symlinkPath, &testFileParams{
 		contents: "transient",
 	})
 	if err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 	}
 	// Make the symlink dangling
-	os.RemoveAll(symlinkResult.target)
-	defer symlinkResult.cleanup()
+	os.RemoveAll(targetPath)
 
-	symlinkPath := symlinkResult.symlink
 	got := Compute(symlinkPath)
 	if got.Err == nil || !got.Symlink.IsDangling {
 		t.Errorf("Compute(%v) should fail because the symlink is dangling", symlinkPath)
 	}
-	if got.Symlink.Target != symlinkResult.target {
-		t.Errorf("Compute(%v) should still set Target for the dangling symlink, want=%v got=%v", symlinkPath, symlinkResult.target, got.Symlink.Target)
+	if got.Symlink.Target != targetPath {
+		t.Errorf("Compute(%v) should still set Target for the dangling symlink, want=%v got=%v", symlinkPath, targetPath, got.Symlink.Target)
 	}
 }
 
 func TestComputeSymlinksToDirectory(t *testing.T) {
+	symlinkPath := filepath.Join(os.TempDir(), "dir-symlink")
+	defer os.RemoveAll(symlinkPath)
 	targetPath, err := ioutil.TempDir(os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Failed to create tmp directory: %v", err)
 	}
-	symlinkResult, err := createSymlinkToTarget(t, targetPath)
+	err = createSymlinkToTarget(t, symlinkPath, targetPath)
 
 	if err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 	}
-	defer symlinkResult.cleanup()
 
-	symlinkPath := symlinkResult.symlink
 	got := Compute(symlinkPath)
 	if fe, ok := got.Err.(*FileError); !ok || !fe.IsDirectory {
 		t.Errorf("Compute(%v).Err = %v, want FileError{IsDirectory:true}", symlinkPath, got.Err)
@@ -203,26 +190,19 @@ func createFile(t *testing.T, fp *testFileParams) (string, error) {
 	return filename, nil
 }
 
-func createSymlinkTofile(t *testing.T, target *testFileParams) (*testSymlinkCreationResult, error) {
+func createSymlinkTofile(t *testing.T, symlinkPath string, target *testFileParams) (string, error) {
+	t.Helper()
 	targetPath, err := createFile(t, target)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return createSymlinkToTarget(t, targetPath)
+	if err := createSymlinkToTarget(t, symlinkPath, targetPath); err != nil {
+		return "", err
+	}
+	return targetPath, nil
 }
 
-func createSymlinkToTarget(t *testing.T, targetPath string) (*testSymlinkCreationResult, error) {
+func createSymlinkToTarget(t *testing.T, symlinkPath string, targetPath string) error {
 	t.Helper()
-
-	randBytes := make([]byte, 16)
-	rand.Read(randBytes)
-	symlinkPath := filepath.Join(os.TempDir(), hex.EncodeToString(randBytes))
-	if err := os.Symlink(targetPath, symlinkPath); err != nil {
-		return nil, err
-	}
-
-	return &testSymlinkCreationResult{
-		symlink: symlinkPath,
-		target:  targetPath,
-	}, nil
+	return os.Symlink(targetPath, symlinkPath)
 }
