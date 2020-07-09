@@ -1032,13 +1032,13 @@ func TestFlattenTreeRepeated(t *testing.T) {
 	}
 	wantOutputs := map[string]*Output{
 		"x/baz":     &Output{Digest: bazDigest},
-		"x/a/b/c":   &Output{IsEmptyDirectory: true},
+		"x/a/b/c":   &Output{IsEmptyDirectory: true, Digest: digest.Empty},
 		"x/a/b/foo": &Output{Digest: fooDigest},
 		"x/a/b/bar": &Output{Digest: barDigest, IsExecutable: true},
-		"x/b/c":     &Output{IsEmptyDirectory: true},
+		"x/b/c":     &Output{IsEmptyDirectory: true, Digest: digest.Empty},
 		"x/b/foo":   &Output{Digest: fooDigest},
 		"x/b/bar":   &Output{Digest: barDigest, IsExecutable: true},
-		"x/c":       &Output{IsEmptyDirectory: true},
+		"x/c":       &Output{IsEmptyDirectory: true, Digest: digest.Empty},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenTree gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))
