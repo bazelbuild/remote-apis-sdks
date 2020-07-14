@@ -10,39 +10,29 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-type testFileParams struct {
-	contents   string
-	executable bool
-}
-
 func TestComputeFiles(t *testing.T) {
 	tests := []struct {
-		name string
-		*testFileParams
+		name       string
+		contents   string
+		executable bool
 	}{
 		{
-			name: "empty",
-			testFileParams: &testFileParams{
-				contents: "",
-			},
+			name:     "empty",
+			contents: "",
 		},
 		{
-			name: "non-executable",
-			testFileParams: &testFileParams{
-				contents: "bla",
-			},
+			name:     "non-executable",
+			contents: "bla",
 		},
 		{
-			name: "executable",
-			testFileParams: &testFileParams{
-				contents:   "foo",
-				executable: true,
-			},
+			name:       "executable",
+			contents:   "foo",
+			executable: true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			filename, err := createFile(t, tc.testFileParams)
+			filename, err := createFile(t, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
@@ -79,29 +69,25 @@ func TestComputeDirectory(t *testing.T) {
 
 func TestComputeSymlinksToFile(t *testing.T) {
 	tests := []struct {
-		name   string
-		target *testFileParams
+		name       string
+		contents   string
+		executable bool
 	}{
 		{
-			name: "valid",
-			target: &testFileParams{
-				contents: "bla",
-			},
+			name:     "valid",
+			contents: "bla",
 		},
 		{
-			name: "valid-executable",
-			target: &testFileParams{
-				contents:   "executable",
-				executable: true,
-			},
+			name:       "valid-executable",
+			contents:   "executable",
+			executable: true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fileParams := tc.target
 			symlinkPath := filepath.Join(os.TempDir(), tc.name)
 			defer os.RemoveAll(symlinkPath)
-			targetPath, err := createSymlinkToFile(t, symlinkPath, fileParams)
+			targetPath, err := createSymlinkToFile(t, symlinkPath, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 			}
@@ -115,8 +101,8 @@ func TestComputeSymlinksToFile(t *testing.T) {
 					Target:     targetPath,
 					IsDangling: false,
 				},
-				Digest:       digest.NewFromBlob([]byte(fileParams.contents)),
-				IsExecutable: fileParams.executable,
+				Digest:       digest.NewFromBlob([]byte(tc.contents)),
+				IsExecutable: tc.executable,
 			}
 
 			if diff := cmp.Diff(want, got); diff != "" {
@@ -130,9 +116,7 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 	// Create a temporary fake target so that os.Symlink() can work.
 	symlinkPath := filepath.Join(os.TempDir(), "dangling")
 	defer os.RemoveAll(symlinkPath)
-	targetPath, err := createSymlinkToFile(t, symlinkPath, &testFileParams{
-		contents: "transient",
-	})
+	targetPath, err := createSymlinkToFile(t, symlinkPath, false, "transient")
 	if err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 	}
@@ -167,10 +151,10 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 	}
 }
 
-func createFile(t *testing.T, fp *testFileParams) (string, error) {
+func createFile(t *testing.T, executable bool, contents string) (string, error) {
 	t.Helper()
 	perm := os.FileMode(0666)
-	if fp.executable {
+	if executable {
 		perm = os.FileMode(0766)
 	}
 	tmpFile, err := ioutil.TempFile(os.TempDir(), "")
@@ -184,15 +168,15 @@ func createFile(t *testing.T, fp *testFileParams) (string, error) {
 		return "", err
 	}
 	filename := tmpFile.Name()
-	if err = ioutil.WriteFile(filename, []byte(fp.contents), os.ModeTemporary); err != nil {
+	if err = ioutil.WriteFile(filename, []byte(contents), os.ModeTemporary); err != nil {
 		return "", err
 	}
 	return filename, nil
 }
 
-func createSymlinkToFile(t *testing.T, symlinkPath string, target *testFileParams) (string, error) {
+func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, contents string) (string, error) {
 	t.Helper()
-	targetPath, err := createFile(t, target)
+	targetPath, err := createFile(t, executable, contents)
 	if err != nil {
 		return "", err
 	}
