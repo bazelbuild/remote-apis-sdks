@@ -12,8 +12,6 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
-var _ balancer.V2Balancer = &gcpBalancer{} // Ensure gcpBalancer implements V2Balancer
-
 const (
 	// Name is the name of grpc_gcp balancer.
 	Name = "grpc_gcp"
@@ -147,7 +145,7 @@ type gcpBalancer struct {
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
 
-	picker balancer.V2Picker
+	picker balancer.Picker
 }
 
 func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
