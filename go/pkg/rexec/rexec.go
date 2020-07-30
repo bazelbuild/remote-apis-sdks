@@ -234,7 +234,7 @@ func (ec *Context) UpdateCachedResult() {
 		toUpload = append(toUpload, ch)
 	}
 	log.V(1).Infof("%s> Uploading local outputs...", cmdID)
-	if err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, toUpload...); err != nil {
+	if _, err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, toUpload...); err != nil {
 		ec.Result = command.NewRemoteErrorResult(err)
 		return
 	}
@@ -261,7 +261,7 @@ func (ec *Context) ExecuteRemotely() {
 	log.V(1).Infof("%s> Checking inputs to upload...", cmdID)
 	// TODO(olaola): compute input cache hit stats.
 	ec.Metadata.EventTimes[command.EventUploadInputs] = &command.TimeInterval{From: time.Now()}
-	err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, ec.inputBlobs...)
+	_, err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, ec.inputBlobs...)
 	ec.Metadata.EventTimes[command.EventUploadInputs].To = time.Now()
 	if err != nil {
 		ec.Result = command.NewRemoteErrorResult(err)

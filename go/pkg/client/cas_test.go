@@ -456,7 +456,7 @@ func TestUpload(t *testing.T) {
 						input = append(input, chunker.NewFromBlob(blob, chunkSize))
 					}
 
-					err := c.UploadIfMissing(ctx, input...)
+					stats, err := c.UploadIfMissing(ctx, input...)
 					if err != nil {
 						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
@@ -471,12 +471,18 @@ func TestUpload(t *testing.T) {
 							if fake.BlobWrites(dg) > 0 {
 								t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
 							}
+							if _, ok := stats.Hits[dg]; !ok {
+								t.Errorf("blob %v with digest %s was not in stats.Hits", blob, dg)
+							}
 							continue
 						}
 						if gotBlob, ok := fake.Get(dg); !ok {
 							t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
 						} else if !bytes.Equal(blob, gotBlob) {
 							t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
+						}
+						if _, ok := stats.Misses[dg]; !ok {
+							t.Errorf("blob %v with digest %s was not in stats.Misses", blob, dg)
 						}
 					}
 					if fake.MaxConcurrency() > client.DefaultCASConcurrency {

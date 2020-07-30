@@ -25,11 +25,17 @@ import (
 	log "github.com/golang/glog"
 )
 
+// UploadIfMissingStats reports the CAS hits/misses.
+type UploadIfMissingStats struct {
+	Hits   map[digest.Digest]struct{}
+	Misses map[digest.Digest]struct{}
+}
+
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
-func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) error {
+func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) (*UploadIfMissingStats, error) {
 	if cap(c.casUploaders) <= 0 {
-		return fmt.Errorf("CASConcurrency should be at least 1")
+		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
 	const (
 		logInterval = 25
@@ -47,7 +53,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 
 	missing, err := c.MissingBlobs(ctx, dgs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	log.V(2).Infof("%d items to store", len(missing))
 	var batches [][]digest.Digest
@@ -101,7 +107,20 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	log.V(2).Info("Waiting for remaining jobs")
 	err = eg.Wait()
 	log.V(2).Info("Done")
-	return err
+
+	result := &UploadIfMissingStats{
+		Hits:   make(map[digest.Digest]struct{}),
+		Misses: make(map[digest.Digest]struct{}),
+	}
+	for _, dg := range missing {
+		result.Misses[dg] = struct{}{}
+	}
+	for _, dg := range dgs {
+		if _, ok := result.Misses[dg]; !ok {
+			result.Hits[dg] = struct{}{}
+		}
+	}
+	return result, err
 }
 
 // WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
@@ -116,7 +135,8 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	for _, blob := range blobs {
 		chunkers = append(chunkers, chunker.NewFromBlob(blob, int(c.ChunkMaxSize)))
 	}
-	return c.UploadIfMissing(ctx, chunkers...)
+	_, err := c.UploadIfMissing(ctx, chunkers...)
+	return err
 }
 
 // WriteProto marshals and writes a proto.
