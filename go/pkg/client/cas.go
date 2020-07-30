@@ -27,8 +27,7 @@ import (
 
 // UploadIfMissingStats reports the CAS hits/misses.
 type UploadIfMissingStats struct {
-	Hits   map[digest.Digest]struct{}
-	Misses map[digest.Digest]struct{}
+	Misses []digest.Digest
 }
 
 // UploadIfMissing stores a number of uploadable items.
@@ -109,16 +108,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	log.V(2).Info("Done")
 
 	result := &UploadIfMissingStats{
-		Hits:   make(map[digest.Digest]struct{}),
-		Misses: make(map[digest.Digest]struct{}),
-	}
-	for _, dg := range missing {
-		result.Misses[dg] = struct{}{}
-	}
-	for _, dg := range dgs {
-		if _, ok := result.Misses[dg]; !ok {
-			result.Hits[dg] = struct{}{}
-		}
+		Misses: missing,
 	}
 	return result, err
 }
