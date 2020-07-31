@@ -456,13 +456,13 @@ func TestUpload(t *testing.T) {
 						input = append(input, chunker.NewFromBlob(blob, chunkSize))
 					}
 
-					stats, err := c.UploadIfMissing(ctx, input...)
+					missing, err := c.UploadIfMissing(ctx, input...)
 					if err != nil {
 						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
 
 					missingSet := make(map[digest.Digest]struct{})
-					for _, dg := range stats.Misses {
+					for _, dg := range missing {
 						missingSet[dg] = struct{}{}
 					}
 					for _, ch := range input {

@@ -25,14 +25,10 @@ import (
 	log "github.com/golang/glog"
 )
 
-// UploadIfMissingStats reports the CAS hits/misses.
-type UploadIfMissingStats struct {
-	Misses []digest.Digest
-}
-
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
-func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) (*UploadIfMissingStats, error) {
+// Returns a slice of the missing digests.
+func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) ([]digest.Digest, error) {
 	if cap(c.casUploaders) <= 0 {
 		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
@@ -107,10 +103,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	err = eg.Wait()
 	log.V(2).Info("Done")
 
-	result := &UploadIfMissingStats{
-		Misses: missing,
-	}
-	return result, err
+	return missing, err
 }
 
 // WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
