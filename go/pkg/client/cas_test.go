@@ -1018,3 +1018,39 @@ func TestWriteAndReadProto(t *testing.T) {
 		t.Errorf("Protos not equal: %s / %s", dirA, dirB)
 	}
 }
+
+func TestDownloadFiles(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+
+	fooDigest := fake.Put([]byte("foo"))
+	barDigest := fake.Put([]byte("bar"))
+
+	execRoot, err := ioutil.TempDir("", "DownloadOuts")
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(execRoot)
+
+	if err := c.DownloadFiles(ctx, execRoot, map[digest.Digest]*tree.Output{
+		fooDigest: {Digest: fooDigest, Path: "foo", IsExecutable: true},
+		barDigest: {Digest: barDigest, Path: "bar"},
+	}); err != nil {
+		t.Errorf("Failed to run DownloadFiles: %v", err)
+	}
+
+	if b, err := ioutil.ReadFile(filepath.Join(execRoot, "foo")); err != nil {
+		t.Errorf("failed to read file: %v", err)
+	} else if diff := cmp.Diff(b, []byte("foo")); diff != "" {
+		t.Errorf("foo mismatch (-want +got):\n%s", diff)
+	}
+
+	if b, err := ioutil.ReadFile(filepath.Join(execRoot, "bar")); err != nil {
+		t.Errorf("failed to read file: %v", err)
+	} else if diff := cmp.Diff(b, []byte("bar")); diff != "" {
+		t.Errorf("foo mismatch (-want +got):\n%s", diff)
+	}
+}
