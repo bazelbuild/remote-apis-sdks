@@ -668,6 +668,7 @@ func copyFile(execRoot, from, to string) error {
 	return err
 }
 
+// DownloadFiles downloads the output files under |execRoot|.
 func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
 	if cap(c.casDownloaders) <= 0 {
 		return fmt.Errorf("CASConcurrency should be at least 1")
