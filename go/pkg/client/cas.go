@@ -615,7 +615,7 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 			downloads[out.Digest] = out
 		}
 	}
-	if err := c.downloadFiles(ctx, execRoot, downloads); err != nil {
+	if err := c.DownloadFiles(ctx, execRoot, downloads); err != nil {
 		return err
 	}
 	for _, output := range downloads {
@@ -668,7 +668,8 @@ func copyFile(execRoot, from, to string) error {
 	return err
 }
 
-func (c *Client) downloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
+// DownloadFiles downloads the output files under |execRoot|.
+func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
 	if cap(c.casDownloaders) <= 0 {
 		return fmt.Errorf("CASConcurrency should be at least 1")
 	}
