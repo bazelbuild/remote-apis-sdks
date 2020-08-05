@@ -123,7 +123,7 @@ func TestExecNotAcceptCached(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(wantMeta, meta, cmpopts.EquateEmpty(), cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes")); diff != "" {
+	if diff := cmp.Diff(wantMeta, meta, cmpopts.EquateEmpty(), cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes", "MissingDigests")); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
 	var eventNames []string

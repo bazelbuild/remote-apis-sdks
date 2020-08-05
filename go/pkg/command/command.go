@@ -443,6 +443,8 @@ type Metadata struct {
 	TotalOutputBytes int64
 	// Output digests.
 	OutputDigests map[string]digest.Digest
+	// Missing digests that are uploaded to CAS.
+	MissingDigests []digest.Digest
 	// TODO(olaola): Add a lot of other fields.
 }
 
