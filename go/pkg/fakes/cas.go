@@ -3,6 +3,7 @@ package fakes
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -386,8 +387,60 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 }
 
 // GetTree implements the corresponding RE API function.
-func (f *CAS) GetTree(*repb.GetTreeRequest, regrpc.ContentAddressableStorage_GetTreeServer) error {
-	return status.Error(codes.Unimplemented, "test fake does not implement method")
+func (f *CAS) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
+	rootDigest, err := digest.NewFromProto(req.RootDigest)
+	if err != nil {
+		return fmt.Errorf("unable to parsse root digest %v", req.RootDigest)
+	}
+	blob, ok := f.Get(rootDigest)
+	if !ok {
+		return fmt.Errorf("root digest %v not found", rootDigest)
+	}
+	rootDir := &regrpc.Directory{}
+	proto.Unmarshal(blob, rootDir)
+
+	res := []*regrpc.Directory{rootDir}
+	queue := []*regrpc.Directory{rootDir}
+	for len(queue) > 0 {
+		ele := queue[0]
+		res = append(res, ele)
+		queue = queue[1:]
+
+		for _, inpFile := range ele.GetFiles() {
+			fd, err := digest.NewFromProto(inpFile.GetDigest())
+			if err != nil {
+				return fmt.Errorf("unable to parse file digest %v", inpFile.GetDigest())
+			}
+			blob, ok := f.Get(fd)
+			if !ok {
+				return fmt.Errorf("file digest %v not found", fd)
+			}
+			dir := &regrpc.Directory{}
+			proto.Unmarshal(blob, dir)
+			queue = append(queue, dir)
+			res = append(res, dir)
+		}
+
+		for _, dir := range ele.GetDirectories() {
+			fd, err := digest.NewFromProto(dir.GetDigest())
+			if err != nil {
+				return fmt.Errorf("unable to parse directory digest %v", dir.GetDigest())
+			}
+			blob, ok := f.Get(fd)
+			if !ok {
+				return fmt.Errorf("directory digest %v not found", fd)
+			}
+			directory := &regrpc.Directory{}
+			proto.Unmarshal(blob, directory)
+			queue = append(queue, directory)
+			res = append(res, directory)
+		}
+	}
+
+	resp := &repb.GetTreeResponse{
+		Directories: res,
+	}
+	return stream.Send(resp)
 }
 
 // Write implements the corresponding RE API function.

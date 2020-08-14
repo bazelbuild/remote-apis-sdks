@@ -2,6 +2,7 @@ package fakes
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
+	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -135,22 +137,7 @@ func timeToProto(t time.Time) *tspb.Timestamp {
 func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...option) (cmdDg, acDg digest.Digest) {
 	e.t.Helper()
 	cmd.FillDefaultFieldValues()
-	root, _, _, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, int(e.Client.GrpcClient.ChunkMaxSize), e.Client.FileMetadataCache)
-	if err != nil {
-		e.t.Fatalf("error building input tree in fake setup: %v", err)
-		return digest.Empty, digest.Empty
-	}
 
-	cmdPb := cmd.ToREProto()
-	cmdDg = digest.TestNewFromMessage(cmdPb)
-	ac := &repb.Action{
-		CommandDigest:   cmdDg.ToProto(),
-		InputRootDigest: root.ToProto(),
-		DoNotCache:      opt.DoNotCache,
-	}
-	if cmd.Timeout > 0 {
-		ac.Timeout = ptypes.DurationProto(cmd.Timeout)
-	}
 	t, _ := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
 	ar := &repb.ActionResult{
 		ExitCode: int32(res.ExitCode),
@@ -166,10 +153,49 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 			OutputUploadCompletedTimestamp: timeToProto(t.Add(9 * time.Millisecond)),
 		},
 	}
-	acDg = digest.TestNewFromMessage(ac)
 	for _, o := range opts {
-		o.Apply(ar, e.Server)
+		if err := o.Apply(ar, e.Server, e.ExecRoot); err != nil {
+			e.t.Fatalf("error applying option %+v: %v", o, err)
+		}
 	}
+
+	root, inputs, _, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, int(e.Client.GrpcClient.ChunkMaxSize), e.Client.FileMetadataCache)
+	if err != nil {
+		e.t.Fatalf("error building input tree in fake setup: %v", err)
+		return digest.Empty, digest.Empty
+	}
+	for _, inp := range inputs {
+		bytes, err := inp.FullData()
+		if err != nil {
+			e.t.Fatalf("error getting data from input chunker: %v", err)
+		}
+		e.Server.CAS.Put(bytes)
+	}
+
+	cmdPb := cmd.ToREProto()
+	bytes, err := proto.Marshal(cmdPb)
+	if err != nil {
+		e.t.Fatalf("error inserting command digest blob into CAS %v", err)
+	}
+	e.Server.CAS.Put(bytes)
+
+	cmdDg = digest.TestNewFromMessage(cmdPb)
+	ac := &repb.Action{
+		CommandDigest:   cmdDg.ToProto(),
+		InputRootDigest: root.ToProto(),
+		DoNotCache:      opt.DoNotCache,
+	}
+	if cmd.Timeout > 0 {
+		ac.Timeout = ptypes.DurationProto(cmd.Timeout)
+	}
+	acDg = digest.TestNewFromMessage(ac)
+
+	bytes, err = proto.Marshal(ac)
+	if err != nil {
+		e.t.Fatalf("error inserting action digest blob into CAS %v", err)
+	}
+	e.Server.CAS.Put(bytes)
+
 	e.Server.Exec.adg = acDg
 	e.Server.Exec.ActionResult = ar
 	switch res.Status {
@@ -190,7 +216,28 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 }
 
 type option interface {
-	Apply(*repb.ActionResult, *Server)
+	Apply(*repb.ActionResult, *Server, string) error
+}
+
+// InputFile to be made available to the fake action.
+type InputFile struct {
+	Path     string
+	Contents string
+}
+
+// Apply creates a file in the execroot with the given content
+// and also inserts the file blob into CAS.
+func (f *InputFile) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+	bytes := []byte(f.Contents)
+	if err := os.MkdirAll(filepath.Join(execRoot, filepath.Dir(f.Path)), os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create input dir %v: %v", filepath.Dir(f.Path), err)
+	}
+	err := ioutil.WriteFile(filepath.Join(execRoot, f.Path), nil, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to setup file %v under temp exec root %v: %v", f.Path, execRoot, err)
+	}
+	s.CAS.Put(bytes)
+	return nil
 }
 
 // OutputFile is to be added as an output of the fake action.
@@ -200,49 +247,54 @@ type OutputFile struct {
 }
 
 // Apply puts the file in the fake CAS and the given ActionResult.
-func (f *OutputFile) Apply(ac *repb.ActionResult, s *Server) {
+func (f *OutputFile) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	bytes := []byte(f.Contents)
 	s.Exec.OutputBlobs = append(s.Exec.OutputBlobs, bytes)
 	dg := s.CAS.Put(bytes)
 	ac.OutputFiles = append(ac.OutputFiles, &repb.OutputFile{Path: f.Path, Digest: dg.ToProto()})
+	return nil
 }
 
 // StdOut is to be added as an output of the fake action.
 type StdOut string
 
 // Apply puts the action stdout in the fake CAS and the given ActionResult.
-func (o StdOut) Apply(ac *repb.ActionResult, s *Server) {
+func (o StdOut) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	bytes := []byte(o)
 	s.Exec.OutputBlobs = append(s.Exec.OutputBlobs, bytes)
 	dg := s.CAS.Put(bytes)
 	ac.StdoutDigest = dg.ToProto()
+	return nil
 }
 
 // StdOutRaw is to be added as a raw output of the fake action.
 type StdOutRaw string
 
 // Apply puts the action stdout as raw bytes in the given ActionResult.
-func (o StdOutRaw) Apply(ac *repb.ActionResult, s *Server) {
+func (o StdOutRaw) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	ac.StdoutRaw = []byte(o)
+	return nil
 }
 
 // StdErr is to be added as an output of the fake action.
 type StdErr string
 
 // Apply puts the action stderr in the fake CAS and the given ActionResult.
-func (o StdErr) Apply(ac *repb.ActionResult, s *Server) {
+func (o StdErr) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	bytes := []byte(o)
 	s.Exec.OutputBlobs = append(s.Exec.OutputBlobs, bytes)
 	dg := s.CAS.Put(bytes)
 	ac.StderrDigest = dg.ToProto()
+	return nil
 }
 
 // StdErrRaw is to be added as a raw output of the fake action.
 type StdErrRaw string
 
 // Apply puts the action stderr as raw bytes in the given ActionResult.
-func (o StdErrRaw) Apply(ac *repb.ActionResult, s *Server) {
+func (o StdErrRaw) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	ac.StderrRaw = []byte(o)
+	return nil
 }
 
 // ExecutionCacheHit of true will cause the ActionResult to be returned as a cache hit during
@@ -250,6 +302,7 @@ func (o StdErrRaw) Apply(ac *repb.ActionResult, s *Server) {
 type ExecutionCacheHit bool
 
 // Apply on true will cause the ActionResult to be returned as a cache hit during fake execution.
-func (c ExecutionCacheHit) Apply(ac *repb.ActionResult, s *Server) {
+func (c ExecutionCacheHit) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	s.Exec.Cached = bool(c)
+	return nil
 }

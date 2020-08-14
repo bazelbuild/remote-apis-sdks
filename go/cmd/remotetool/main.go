@@ -28,6 +28,7 @@ type OpType string
 
 const (
 	downloadActionResult OpType = "download_action_result"
+	showAction           OpType = "show_action"
 )
 
 var (
@@ -42,7 +43,7 @@ func validate() {
 	}
 
 	switch OpType(*operation) {
-	case downloadActionResult:
+	case downloadActionResult, showAction:
 		return
 
 	default:
@@ -71,6 +72,13 @@ func main() {
 		if err := c.DownloadActionResult(ctx, *digest, *pathPrefix); err != nil {
 			log.Exitf("error downloading action result for digest %v: %v", *digest, err)
 		}
+
+	case showAction:
+		res, err := c.ShowAction(ctx, *digest)
+		if err != nil {
+			log.Exitf("error fetching action %v: %v", *digest, err)
+		}
+		fmt.Fprintf(os.Stdout, res)
 
 	default:
 		log.Exitf("unsupported operation %v.", *operation)
