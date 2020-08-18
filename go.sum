@@ -33,6 +33,7 @@ github.com/bazelbuild/remote-apis v0.0.0-20190507145712-5556e9c6153f/go.mod h1:9
 github.com/bazelbuild/remote-apis v0.0.0-20191104140458-e77c4eb2ca48 h1:bgj+Oufa8F4rCHe/8omhml7cBlg3VmNhF66ed1vT2Bw=
 github.com/bazelbuild/remote-apis v0.0.0-20191104140458-e77c4eb2ca48/go.mod h1:9Y+1FnaNUGVV6wKE0Jdh+mguqDUsyd9uUqokalrC7DQ=
 github.com/bazelbuild/remote-apis v0.0.0-20200624085034-0afc3700d177 h1:JeDdP1ZsFOMctOzhcwYfLkGaLT8Nzxc1AXkXKUrWbAw=
+github.com/bazelbuild/remote-apis v0.0.0-20200812111343-5a7b1a472165 h1:2Wwz88RKomXNpY/Sqh0irk+lrQYhjJVR5lQvQc9PStQ=
 github.com/boombuler/barcode v1.0.0 h1:s1TvRnXwL2xJRaccrdcBQMZxq6X7DvsMogtmJeHDdrc=
 github.com/boombuler/barcode v1.0.0/go.mod h1:paBWMcWSl3LHKBqUq+rly7CNSldXjb2rDl3JlRe0mD8=
 github.com/bradfitz/go-smtpd v0.0.0-20170404230938-deb6d6237625 h1:ckJgFhFWywOx+YLEMIJsTb+NV6NexWICk5+AMSuz3ss=

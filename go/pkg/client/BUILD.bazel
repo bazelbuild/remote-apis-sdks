@@ -53,6 +53,7 @@ go_test(
         "//go/pkg/chunker:go_default_library",
         "//go/pkg/digest:go_default_library",
         "//go/pkg/fakes:go_default_library",
+        "//go/pkg/filemetadata:go_default_library",
         "//go/pkg/portpicker:go_default_library",
         "//go/pkg/retry:go_default_library",
         "//go/pkg/tree:go_default_library",
