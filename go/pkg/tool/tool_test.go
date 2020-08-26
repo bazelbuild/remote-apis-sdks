@@ -9,6 +9,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestTool_DownloadActionResult(t *testing.T) {
@@ -44,5 +45,50 @@ func TestTool_DownloadActionResult(t *testing.T) {
 		if got != want {
 			t.Fatalf("Incorrect content in downloaded file %v, want %v, got %v", fp, want, got)
 		}
+	}
+}
+
+func TestTool_ShowAction(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	cmd := &command.Command{
+		Args:     []string{"tool"},
+		ExecRoot: e.ExecRoot,
+		InputSpec: &command.InputSpec{
+			Inputs: []string{
+				"a/b/input.txt",
+			},
+		},
+		OutputFiles: []string{"a/b/out"},
+	}
+
+	opt := command.DefaultExecutionOptions()
+	_, acDg := e.Set(cmd, opt, &command.Result{Status: command.CacheHitResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: "output"},
+		fakes.StdOut("stdout"), fakes.StdErr("stderr"), &fakes.InputFile{Path: "a/b/input.txt", Contents: "input"})
+
+	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
+	got, err := toolClient.ShowAction(context.Background(), acDg.String())
+	if err != nil {
+		t.Fatalf("ShowAction(%v) failed: %v", acDg.String(), err)
+	}
+	want := `Command
+========
+Command Digest: 76a608e419da9ed3673f59b8b903f21dbf7cc3178281029151a090cac02d9e4d
+	tool
+
+Inputs
+======
+a: [Directory digest: b2fcb5f1407e2324dd81c4685724cac9228c7142cb34d665dfd3f37a8a18342c]
+a/b/input.txt: [File digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/0]
+
+
+Output Files:
+=============
+a/b/out, digest: e0ee8bb50685e05fa0f47ed04203ae953fdfd055f5bd2892ea186504254f8c3a
+
+Output Files From Directories:
+=================`
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("ShowAction(%v) returned diff (-want +got): %v\n\ngot: %v\n\nwant: %v\n", acDg.String(), diff, got, want)
 	}
 }
