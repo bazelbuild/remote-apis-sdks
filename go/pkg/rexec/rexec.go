@@ -109,7 +109,7 @@ func (ec *Context) setOutputMetadata() {
 	}
 }
 
-func (ec *Context) downloadResults() *command.Result {
+func (ec *Context) downloadResults(execRoot string, downloadOutputs bool) *command.Result {
 	ec.setOutputMetadata()
 	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
@@ -119,8 +119,8 @@ func (ec *Context) downloadResults() *command.Result {
 	if err := ec.downloadStream(ec.resPb.StderrRaw, ec.resPb.StderrDigest, ec.oe.WriteErr); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
-	if ec.opt.DownloadOutputs {
-		if err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, ec.cmd.ExecRoot, ec.client.FileMetadataCache); err != nil {
+	if downloadOutputs {
+		if err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, execRoot, ec.client.FileMetadataCache); err != nil {
 			return command.NewRemoteErrorResult(err)
 		}
 	}
@@ -196,7 +196,7 @@ func (ec *Context) GetCachedResult() {
 	}
 	if ec.resPb != nil {
 		log.V(1).Infof("%s> Found cached result, downloading outputs...", ec.cmd.Identifiers.CommandID)
-		ec.Result = ec.downloadResults()
+		ec.Result = ec.downloadResults(ec.cmd.ExecRoot, ec.opt.DownloadOutputs)
 		if ec.Result.Err == nil {
 			ec.Result.Status = command.CacheHitResultStatus
 		}
@@ -303,7 +303,7 @@ func (ec *Context) ExecuteRemotely() {
 
 	if ec.resPb != nil {
 		log.V(1).Infof("%s> Downloading outputs...", cmdID)
-		ec.Result = ec.downloadResults()
+		ec.Result = ec.downloadResults(ec.cmd.ExecRoot, ec.opt.DownloadOutputs)
 		if resp.CachedResult && ec.Result.Err == nil {
 			ec.Result.Status = command.CacheHitResultStatus
 		}
@@ -319,6 +319,11 @@ func (ec *Context) ExecuteRemotely() {
 	if ec.resPb == nil {
 		ec.Result = command.NewRemoteErrorResult(fmt.Errorf("execute did not return action result"))
 	}
+}
+
+// DownloadResults downloads the result of the command in the context to the specified directory.
+func (ec *Context) DownloadResults(execRoot string) {
+	ec.Result = ec.downloadResults(execRoot, true)
 }
 
 func timeFromProto(tPb *tspb.Timestamp) time.Time {
