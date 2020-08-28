@@ -234,6 +234,9 @@ func (c *Command) FillDefaultFieldValues() {
 	if c.Identifiers.InvocationID == "" {
 		c.Identifiers.InvocationID = uuid.New()
 	}
+	if c.Identifiers.ExecutionID == "" {
+		c.Identifiers.ExecutionID = uuid.New()
+	}
 	if c.InputSpec == nil {
 		c.InputSpec = &InputSpec{}
 	}
@@ -482,6 +485,7 @@ func FromProto(p *cpb.Command) *Command {
 		CorrelatedInvocationID: p.GetIdentifiers().GetCorrelatedInvocationsId(),
 		ToolName:               p.GetIdentifiers().GetToolName(),
 		ToolVersion:            p.GetIdentifiers().GetToolVersion(),
+		ExecutionID:            p.GetIdentifiers().GetExecutionId(),
 	}
 	is := inputSpecFromProto(p.GetInput())
 	return &Command{
@@ -634,6 +638,7 @@ func ToProto(cmd *Command) *cpb.Command {
 			CommandId:    cmd.Identifiers.CommandID,
 			InvocationId: cmd.Identifiers.InvocationID,
 			ToolName:     cmd.Identifiers.ToolName,
+			ExecutionId:  cmd.Identifiers.ExecutionID,
 		}
 	}
 	return cPb
