@@ -290,12 +290,9 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 func (c *Client) makeBatches(dgs []digest.Digest) [][]digest.Digest {
 	var batches [][]digest.Digest
 	log.V(2).Infof("Batching %d digests", len(dgs))
-	sort.Slice(dgs, func(i, j int) bool {
-		return dgs[i].Size < dgs[j].Size
-	})
 	for len(dgs) > 0 {
-		batch := []digest.Digest{dgs[len(dgs)-1]}
-		dgs = dgs[:len(dgs)-1]
+		batch := []digest.Digest{dgs[0]}
+		dgs = dgs[1:]
 		requestOverhead := marshalledFieldSize(int64(len(c.InstanceName)))
 		sz := requestOverhead + marshalledRequestSize(batch[0])
 		var nextSize int64
@@ -680,9 +677,19 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 		logInterval = 25
 	)
 
+	paths := make([]*tree.Output, 0, len(outputs))
+	for _, output := range outputs {
+		paths = append(paths, output)
+	}
+
+	// This is to utilize locality in disk when writing files.
+	sort.Slice(paths, func(i, j int) bool {
+		return paths[i].Path < paths[j].Path
+	})
+
 	var dgs []digest.Digest
-	for dg := range outputs {
-		dgs = append(dgs, dg)
+	for _, path := range paths {
+		dgs = append(dgs, path.Digest)
 	}
 
 	log.V(2).Infof("%d items to download", len(dgs))

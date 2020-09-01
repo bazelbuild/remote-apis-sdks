@@ -524,8 +524,8 @@ func TestWriteBlobsBatching(t *testing.T) {
 		{
 			name:      "large and small blobs hitting max exactly",
 			sizes:     []int{338, 338, 338, 1, 1, 1},
-			batchReqs: 3,
-			writeReqs: 0,
+			batchReqs: 2,
+			writeReqs: 2,
 		},
 		{
 			name:      "small batches of big blobs",
@@ -884,7 +884,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 		{
 			name:      "large and small blobs hitting max exactly",
 			sizes:     []int{338, 338, 338, 1, 1, 1},
-			batchReqs: 3,
+			batchReqs: 2,
 		},
 		{
 			name:      "small batches of big blobs",
