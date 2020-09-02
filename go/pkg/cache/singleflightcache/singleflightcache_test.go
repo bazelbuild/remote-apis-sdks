@@ -167,7 +167,9 @@ func TestLoadDelete(t *testing.T) {
 func TestStore(t *testing.T) {
 	c := &Cache{}
 	wg := &sync.WaitGroup{}
+	var mu sync.Mutex
 	load := func() {
+		mu.Lock()
 		if err := c.Store(key3, val3); err != nil {
 			t.Errorf("Store(%v) failed: %v", key3, err)
 		}
@@ -177,13 +179,16 @@ func TestStore(t *testing.T) {
 		if err != nil {
 			t.Errorf("LoadOrStore(%v) failed: %v", key3, err)
 		}
+		mu.Unlock()
 		if val != val3 {
 			t.Errorf("LoadOrStore(%v) = %v, want %v", key3, val, val3)
 		}
 		wg.Done()
 	}
 	del := func() {
+		mu.Lock()
 		c.Delete(key3)
+		mu.Unlock()
 		wg.Done()
 	}
 	wg.Add(100)
