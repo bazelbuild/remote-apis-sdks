@@ -2,8 +2,11 @@
 package rexec
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"strings"
 	"time"
 
@@ -173,6 +176,46 @@ func (ec *Context) computeInputs() error {
 	ec.Metadata.ActionDigest = acDg
 	ec.Metadata.TotalInputBytes += cmdDg.Size + acDg.Size
 	return nil
+}
+
+// GetInputDigest returns a string of the computed action digest
+// without size bytes.
+func (ec *Context) GetInputDigest() (string, error) {
+	if err := ec.computeInputs(); err != nil {
+		return "", err
+	}
+	return ec.Metadata.ActionDigest.Hash, nil
+}
+
+// GetZippedOutputs returns a byte array containing the zipped
+// output files.
+func (ec *Context) GetZippedOutputs() (*bytes.Buffer, error) {
+	if err := ec.computeInputs(); err != nil {
+		ec.Result = command.NewLocalErrorResult(err)
+		return nil, err
+	}
+
+	buf := new(bytes.Buffer)
+	res := zip.NewWriter(buf)
+	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
+	log.Infof("Output paths: %v", outPaths)
+	for _, path := range outPaths {
+		f, err := res.Create(path)
+		if err != nil {
+			return nil, err
+		}
+		contents, err := ioutil.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := f.Write(contents); err != nil {
+			return nil, err
+		}
+	}
+	if err := res.Close(); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
 // GetCachedResult tries to get the command result from the cache. The Result will be nil on a
