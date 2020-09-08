@@ -50,6 +50,8 @@ type Client struct {
 	// InstanceName is the instance name for the targeted remote execution instance; e.g. for Google
 	// RBE: "projects/<foo>/instances/default_instance".
 	InstanceName string
+	dialParams   DialParams
+	opts         []Opt
 	actionCache  regrpc.ActionCacheClient
 	byteStream   bsgrpc.ByteStreamClient
 	cas          regrpc.ContentAddressableStorageClient
@@ -275,10 +277,10 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		tlsCreds := credentials.NewClientTLSFromCert(nil, "")
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
-	grpcInt := createGRPCInterceptor()
-	opts = append(opts, grpc.WithBalancerName(balancer.Name))
-	opts = append(opts, grpc.WithUnaryInterceptor(grpcInt.GCPUnaryClientInterceptor))
-	opts = append(opts, grpc.WithStreamInterceptor(grpcInt.GCPStreamClientInterceptor))
+	// grpcInt := createGRPCInterceptor()
+	// opts = append(opts, grpc.WithBalancerName(balancer.Name))
+	// opts = append(opts, grpc.WithUnaryInterceptor(grpcInt.GCPUnaryClientInterceptor))
+	// opts = append(opts, grpc.WithStreamInterceptor(grpcInt.GCPStreamClientInterceptor))
 
 	conn, err := grpc.Dial(endpoint, opts...)
 	if err != nil {
@@ -334,6 +336,8 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		casUploaders:    make(chan bool, DefaultCASConcurrency),
 		casDownloaders:  make(chan bool, DefaultCASConcurrency),
 		Retrier:         RetryTransient(),
+		dialParams:      params,
+		opts:            opts,
 	}
 	for _, o := range opts {
 		o.Apply(client)

@@ -100,9 +100,13 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 	cancelCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	opts := c.RPCOpts()
+	newClient, err := NewClient(ctx, c.InstanceName, c.dialParams, c.opts...)
+	if err != nil {
+		return n, err
+	}
 	closure := func() error {
 		// Use lower-level Read in order to not retry twice.
-		stream, err := c.byteStream.Read(cancelCtx, &bspb.ReadRequest{
+		stream, err := newClient.byteStream.Read(cancelCtx, &bspb.ReadRequest{
 			ResourceName: name,
 			ReadOffset:   offset + n,
 			ReadLimit:    limit,
