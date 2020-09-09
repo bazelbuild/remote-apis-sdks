@@ -138,17 +138,6 @@ func (u UseBatchOps) Apply(c *Client) {
 // download operations.
 type CASConcurrency int
 
-// DefaultCASConcurrency is the default maximum number of concurrent upload and download operations.
-const DefaultCASConcurrency = 50
-
-// MaxConcurrentRequests specifies the maximum number of concurrent requests on a single connection
-// that the GRPC balancer can perform.
-const MaxConcurrentRequests = 1000
-
-// ConcurrentStreamsThreshold specifies the threshold value at which the GRPC balancer should create
-// new sub-connections.
-const ConcurrentStreamsThreshold = 90
-
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casUploaders = make(chan bool, cy)
@@ -221,13 +210,22 @@ type DialParams struct {
 
 	// DialOpts defines the set of gRPC DialOptions to apply, in addition to any used internally.
 	DialOpts []grpc.DialOption
+
+	// MaxCASConcurrency specifies the maximum number of concurrent upload & download RPCs that can be in flight.
+	MaxCASConcurrency CASConcurrency
+
+	// MaxConcurrentRequests specifies the maximum number of concurrent RPCs on a single connection.
+	MaxConcurrentRequests uint32
+
+	// MaxConcurrentStreams specifies the maximum number of concurrent stream RPCs on a single connection.
+	MaxConcurrentStreams uint32
 }
 
-func createGRPCInterceptor() *balancer.GCPInterceptor {
+func createGRPCInterceptor(p DialParams) *balancer.GCPInterceptor {
 	apiConfig := &configpb.ApiConfig{
 		ChannelPool: &configpb.ChannelPoolConfig{
-			MaxSize:                          MaxConcurrentRequests,
-			MaxConcurrentStreamsLowWatermark: ConcurrentStreamsThreshold,
+			MaxSize:                          p.MaxConcurrentRequests,
+			MaxConcurrentStreamsLowWatermark: p.MaxConcurrentStreams,
 		},
 		Method: []*configpb.MethodConfig{
 			&configpb.MethodConfig{
@@ -275,7 +273,7 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		tlsCreds := credentials.NewClientTLSFromCert(nil, "")
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
-	grpcInt := createGRPCInterceptor()
+	grpcInt := createGRPCInterceptor(params)
 	opts = append(opts, grpc.WithBalancerName(balancer.Name))
 	opts = append(opts, grpc.WithUnaryInterceptor(grpcInt.GCPUnaryClientInterceptor))
 	opts = append(opts, grpc.WithStreamInterceptor(grpcInt.GCPStreamClientInterceptor))
@@ -331,8 +329,8 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		MaxBatchDigests: DefaultMaxBatchDigests,
 		MaxBatchSize:    DefaultMaxBatchSize,
 		useBatchOps:     true,
-		casUploaders:    make(chan bool, DefaultCASConcurrency),
-		casDownloaders:  make(chan bool, DefaultCASConcurrency),
+		casUploaders:    make(chan bool, params.MaxCASConcurrency),
+		casDownloaders:  make(chan bool, params.MaxCASConcurrency),
 		Retrier:         RetryTransient(),
 	}
 	for _, o := range opts {

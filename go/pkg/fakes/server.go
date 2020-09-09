@@ -73,8 +73,11 @@ func (s *Server) Stop() {
 // NewTestClient returns a new in-process Client connected to this server.
 func (s *Server) NewTestClient(ctx context.Context) (*rc.Client, error) {
 	return rc.NewClient(ctx, "instance", rc.DialParams{
-		Service:    s.listener.Addr().String(),
-		NoSecurity: true,
+		Service:               s.listener.Addr().String(),
+		NoSecurity:            true,
+		MaxCASConcurrency:     50,
+		MaxConcurrentRequests: 500,
+		MaxConcurrentStreams:  100,
 	})
 }
 
