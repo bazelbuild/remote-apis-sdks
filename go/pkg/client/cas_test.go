@@ -27,7 +27,8 @@ import (
 )
 
 const (
-	instance = "instance"
+	instance              = "instance"
+	defaultCASConcurrency = 500
 )
 
 func TestSplitEndpoints(t *testing.T) {
@@ -405,7 +406,7 @@ func TestUpload(t *testing.T) {
 		// and the test verifies no attempt was made to upload them.
 		present [][]byte
 		// concurrency is the CAS concurrency with which we should be uploading the blobs. If not
-		// specified, it uses client.DefaultCASConcurrency.
+		// specified, it uses defaultCASConcurrency.
 		concurrency client.CASConcurrency
 	}{
 		{
@@ -489,8 +490,8 @@ func TestUpload(t *testing.T) {
 							t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
 						}
 					}
-					if fake.MaxConcurrency() > client.DefaultCASConcurrency {
-						t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), client.DefaultCASConcurrency)
+					if fake.MaxConcurrency() > defaultCASConcurrency {
+						t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
 					}
 				})
 			}
@@ -995,8 +996,8 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 					t.Errorf("expected %s to contain %v, got %v", path, contents, data)
 				}
 			}
-			if fake.MaxConcurrency() > client.DefaultCASConcurrency {
-				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), client.DefaultCASConcurrency)
+			if fake.MaxConcurrency() > defaultCASConcurrency {
+				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
 			}
 		})
 	}

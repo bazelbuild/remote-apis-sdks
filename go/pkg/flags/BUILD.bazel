@@ -5,5 +5,8 @@ go_library(
     srcs = ["flags.go"],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/flags",
     visibility = ["//visibility:public"],
-    deps = ["//go/pkg/client:go_default_library"],
+    deps = [
+        "//go/pkg/balancer:go_default_library",
+        "//go/pkg/client:go_default_library",
+    ],
 )

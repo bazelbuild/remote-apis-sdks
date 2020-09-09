@@ -19,6 +19,11 @@ const (
 	healthCheckEnabled = true
 )
 
+// MinConnections is the minimum number of gRPC sub-connections the gRPC balancer
+// should create during SDK initialization.
+// It is initialized in flags package.
+var MinConnections int
+
 func init() {
 	balancer.Register(newBuilder())
 }
@@ -150,11 +155,14 @@ type gcpBalancer struct {
 
 func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
 	addrs := ccs.ResolverState.Addresses
-	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs)
 	gb.addrs = addrs
 
-	if len(gb.scRefs) == 0 {
+	createdSubCons := false
+	for len(gb.scRefs) < MinConnections {
 		gb.newSubConn()
+		createdSubCons = true
+	}
+	if createdSubCons {
 		return nil
 	}
 
