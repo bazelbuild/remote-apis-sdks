@@ -28,7 +28,7 @@ import (
 
 const (
 	instance              = "instance"
-	defaultCASConcurrency = 500
+	defaultCASConcurrency = 50
 )
 
 func TestSplitEndpoints(t *testing.T) {

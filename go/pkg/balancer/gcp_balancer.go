@@ -19,10 +19,12 @@ const (
 	healthCheckEnabled = true
 )
 
-// MinConnections is the minimum number of gRPC sub-connections the gRPC balancer
-// should create during SDK initialization.
-// It is initialized in flags package.
-var MinConnections int
+var (
+	// MinConnections is the minimum number of gRPC sub-connections the gRPC balancer
+	// should create during SDK initialization.
+	// It is initialized in flags package.
+	MinConnections = 1
+)
 
 func init() {
 	balancer.Register(newBuilder())
