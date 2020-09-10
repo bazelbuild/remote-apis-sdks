@@ -381,6 +381,7 @@ func TestUpload(t *testing.T) {
 	defer cleanup()
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
+	client.CASConcurrency(defaultCASConcurrency).Apply(c)
 
 	chunkSize := 5
 	var twoThousandBlobs [][]byte
@@ -957,6 +958,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 	defer cleanup()
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
+	client.CASConcurrency(defaultCASConcurrency).Apply(c)
 
 	blobs := make(map[digest.Digest][]byte)
 	for i := 0; i < 1000; i++ {

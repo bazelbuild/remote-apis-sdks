@@ -20,10 +20,14 @@ const (
 )
 
 var (
+	// DefaultMinConnections is the default number of gRPC sub-connections the
+	// gRPC balancer should create during SDK initialization.
+	DefaultMinConnections = 5
+
 	// MinConnections is the minimum number of gRPC sub-connections the gRPC balancer
 	// should create during SDK initialization.
 	// It is initialized in flags package.
-	MinConnections = 1
+	MinConnections = DefaultMinConnections
 )
 
 func init() {
