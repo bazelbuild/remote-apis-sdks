@@ -138,6 +138,17 @@ func (u UseBatchOps) Apply(c *Client) {
 // download operations.
 type CASConcurrency int
 
+// DefaultCASConcurrency is the default maximum number of concurrent upload and download operations.
+const DefaultCASConcurrency = 500
+
+// DefaultMaxConcurrentRequests specifies the default maximum number of concurrent requests on a single connection
+// that the GRPC balancer can perform.
+const DefaultMaxConcurrentRequests = 25
+
+// DefaultMaxConcurrentStreams specifies the default threshold value at which the GRPC balancer should create
+// new sub-connections.
+const DefaultMaxConcurrentStreams = 25
+
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casUploaders = make(chan bool, cy)
@@ -211,9 +222,6 @@ type DialParams struct {
 	// DialOpts defines the set of gRPC DialOptions to apply, in addition to any used internally.
 	DialOpts []grpc.DialOption
 
-	// MaxCASConcurrency specifies the maximum number of concurrent upload & download RPCs that can be in flight.
-	MaxCASConcurrency CASConcurrency
-
 	// MaxConcurrentRequests specifies the maximum number of concurrent RPCs on a single connection.
 	MaxConcurrentRequests uint32
 
@@ -245,6 +253,12 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 	var opts []grpc.DialOption
 	opts = append(opts, params.DialOpts...)
 
+	if params.MaxConcurrentRequests == 0 {
+		params.MaxConcurrentRequests = DefaultMaxConcurrentRequests
+	}
+	if params.MaxConcurrentStreams == 0 {
+		params.MaxConcurrentStreams = DefaultMaxConcurrentStreams
+	}
 	if params.NoSecurity {
 		opts = append(opts, grpc.WithInsecure())
 	} else {
@@ -329,8 +343,8 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		MaxBatchDigests: DefaultMaxBatchDigests,
 		MaxBatchSize:    DefaultMaxBatchSize,
 		useBatchOps:     true,
-		casUploaders:    make(chan bool, params.MaxCASConcurrency),
-		casDownloaders:  make(chan bool, params.MaxCASConcurrency),
+		casUploaders:    make(chan bool, DefaultCASConcurrency),
+		casDownloaders:  make(chan bool, DefaultCASConcurrency),
 		Retrier:         RetryTransient(),
 	}
 	for _, o := range opts {
