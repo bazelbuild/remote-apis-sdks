@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"os/user"
 	"strings"
 	"time"
@@ -66,7 +67,13 @@ type Client struct {
 	// MaxBatchDigests is maximum amount of digests to batch in batched operations.
 	MaxBatchDigests MaxBatchDigests
 	// MaxBatchSize is maximum size in bytes of a batch request for batch operations.
-	MaxBatchSize   MaxBatchSize
+	MaxBatchSize MaxBatchSize
+	// DirMode is mode used to create directories.
+	DirMode os.FileMode
+	// ExecutableMode is mode used to create executable files.
+	ExecutableMode os.FileMode
+	// RegularMode is mode used to create non-executable files.
+	RegularMode    os.FileMode
 	useBatchOps    UseBatchOps
 	casUploaders   chan bool
 	casDownloaders chan bool
@@ -82,6 +89,15 @@ const (
 	// DefaultMaxBatchDigests is a suggested approximate limit based on current RBE implementation.
 	// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
 	DefaultMaxBatchDigests = 4000
+
+	// DefaultDirMode is mode used to create directories.
+	DefaultDirMode = 0700
+
+	// DefaultExecutableMode is mode used to create executable files.
+	DefaultExecutableMode = 0700
+
+	// DefaultRegularMode is mode used to create non-executable files.
+	DefaultRegularMode = 0600
 )
 
 // Close closes the underlying gRPC connection(s).
@@ -342,6 +358,9 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		ChunkMaxSize:    chunker.DefaultChunkSize,
 		MaxBatchDigests: DefaultMaxBatchDigests,
 		MaxBatchSize:    DefaultMaxBatchSize,
+		DirMode:         DefaultDirMode,
+		ExecutableMode:  DefaultExecutableMode,
+		RegularMode:     DefaultRegularMode,
 		useBatchOps:     true,
 		casUploaders:    make(chan bool, DefaultCASConcurrency),
 		casDownloaders:  make(chan bool, DefaultCASConcurrency),
