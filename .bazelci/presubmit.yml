@@ -3,6 +3,7 @@ validate_config: 1
 tasks:
   ubuntu1804:
     shell_commands:
+      - "sudo snap install --classic --channel=1.15.2/stable go"
       - "echo +++ Check go format"
       - "./check-gofmt.sh `find go -name '*.go'`"
       - "echo +++ Check go vet"
@@ -16,6 +17,7 @@ tasks:
     platform: ubuntu1804
     name: "go build / test"
     shell_commands:
+      - "sudo snap install --classic --channel=1.15.2/stable go"
       - "echo +++ Running go build"
       - "go build ./..."
       - "echo +++ Running go test"
