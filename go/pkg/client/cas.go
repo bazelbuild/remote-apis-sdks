@@ -649,6 +649,7 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 }
 
 func copyFile(execRoot, from, to string, mode os.FileMode) error {
+	src := filepath.Join(execRoot, from)
 	s, err := os.Open(src)
 	if err != nil {
 		return err
