@@ -636,7 +636,11 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 		if out.IsExecutable {
 			perm = c.ExecutableMode
 		}
-		if err := copyFile(execRoot, downloads[out.Digest].Path, out.Path, perm); err != nil {
+		src := downloads[out.Digest]
+		if src.IsEmptyDirectory {
+			return fmt.Errorf("unexpected empty directory :%s", src.Path)
+		}
+		if err := copyFile(execRoot, src.Path, out.Path, perm); err != nil {
 			return err
 		}
 	}
