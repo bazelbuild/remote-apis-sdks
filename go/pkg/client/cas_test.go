@@ -883,7 +883,12 @@ func TestDownloadDirectory(t *testing.T) {
 	fake.Put(dirBlob)
 
 	d := digest.TestNewFromMessage(dir)
-	execRoot := t.TempDir()
+	execRoot, err := ioutil.TempDir("", "DownloadDirectory")
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(execRoot)
+
 	err = c.DownloadDirectory(ctx, d, execRoot, cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
