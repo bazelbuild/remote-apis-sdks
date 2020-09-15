@@ -862,6 +862,47 @@ func TestDownloadActionOutputs(t *testing.T) {
 	}
 }
 
+func TestDownloadDirectory(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+	cache := filemetadata.NewSingleFlightCache()
+
+	fooDigest := fake.Put([]byte("foo"))
+	dir := &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
+		},
+	}
+	dirBlob, err := proto.Marshal(dir)
+	if err != nil {
+		t.Fatalf("failed marshalling Tree: %s", err)
+	}
+	fake.Put(dirBlob)
+
+	d := digest.TestNewFromMessage(dir)
+	execRoot, err := ioutil.TempDir("", "DownloadDirectory")
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(execRoot)
+
+	err = c.DownloadDirectory(ctx, d, execRoot, cache)
+	if err != nil {
+		t.Errorf("error in DownloadActionOutputs: %s", err)
+	}
+
+	b, err := ioutil.ReadFile(filepath.Join(execRoot, "foo"))
+	if err != nil {
+		t.Fatalf("failed to read foo: %s", err)
+	}
+	if want, got := []byte("foo"), b; !bytes.Equal(want, got) {
+		t.Errorf("want %s, got %s", want, got)
+	}
+}
+
 func TestDownloadActionOutputsBatching(t *testing.T) {
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
