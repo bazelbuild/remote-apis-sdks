@@ -91,13 +91,13 @@ const (
 	DefaultMaxBatchDigests = 4000
 
 	// DefaultDirMode is mode used to create directories.
-	DefaultDirMode = 0700
+	DefaultDirMode = 0777
 
 	// DefaultExecutableMode is mode used to create executable files.
-	DefaultExecutableMode = 0700
+	DefaultExecutableMode = 0777
 
 	// DefaultRegularMode is mode used to create non-executable files.
-	DefaultRegularMode = 0600
+	DefaultRegularMode = 0644
 )
 
 // Close closes the underlying gRPC connection(s).
