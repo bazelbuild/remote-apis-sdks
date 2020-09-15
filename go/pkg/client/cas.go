@@ -638,7 +638,7 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 		}
 		src := downloads[out.Digest]
 		if src.IsEmptyDirectory {
-			return fmt.Errorf("unexpected empty directory :%s", src.Path)
+			return fmt.Errorf("unexpected empty directory: %s", src.Path)
 		}
 		if err := copyFile(execRoot, src.Path, out.Path, perm); err != nil {
 			return err
