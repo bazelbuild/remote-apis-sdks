@@ -581,6 +581,29 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 	return outs, nil
 }
 
+// DownloadDirectory downloads the entire directory of given digest.
+func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) error {
+	dir := &repb.Directory{}
+	if err := c.ReadProto(ctx, d, dir); err != nil {
+		return fmt.Errorf("digest %v cannot be mapped to a directory proto: %v", d, err)
+	}
+
+	dirs, err := c.GetDirectoryTree(ctx, d.ToProto())
+	if err != nil {
+		return err
+	}
+
+	outputs, err := tree.FlattenTree(&repb.Tree{
+		Root:     dir,
+		Children: dirs,
+	}, "")
+	if err != nil {
+		return err
+	}
+
+	return c.downloadOutputs(ctx, outputs, execRoot, cache)
+}
+
 // DownloadActionOutputs downloads the output files and directories in the given action result.
 func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string, cache filemetadata.Cache) error {
 	outs, err := c.FlattenActionOutputs(ctx, resPb)
@@ -593,6 +616,10 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 			return err
 		}
 	}
+	return c.downloadOutputs(ctx, outs, execRoot, cache)
+}
+
+func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*tree.Output, execRoot string, cache filemetadata.Cache) error {
 	var symlinks, copies []*tree.Output
 	downloads := make(map[digest.Digest]*tree.Output)
 	for _, out := range outs {
