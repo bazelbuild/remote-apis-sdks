@@ -83,7 +83,7 @@ func (c *Client) ReadResourceToFile(ctx context.Context, name, fpath string) (in
 }
 
 func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int64, error) {
-	f, err := os.Create(fpath)
+	f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, c.RegularMode)
 	if err != nil {
 		return 0, err
 	}

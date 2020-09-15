@@ -598,12 +598,12 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	for _, out := range outs {
 		path := filepath.Join(execRoot, out.Path)
 		if out.IsEmptyDirectory {
-			if err := os.MkdirAll(path, os.FileMode(0777)); err != nil {
+			if err := os.MkdirAll(path, c.DirMode); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(path), os.FileMode(0777)); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), c.DirMode); err != nil {
 			return err
 		}
 		// We create the symbolic links after all regular downloads are finished, because dangling
@@ -632,7 +632,15 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 		}
 	}
 	for _, out := range copies {
-		if err := copyFile(execRoot, downloads[out.Digest].Path, out.Path); err != nil {
+		perm := c.RegularMode
+		if out.IsExecutable {
+			perm = c.ExecutableMode
+		}
+		src := downloads[out.Digest]
+		if src.IsEmptyDirectory {
+			return fmt.Errorf("unexpected empty directory: %s", src.Path)
+		}
+		if err := copyFile(execRoot, src.Path, out.Path, perm); err != nil {
 			return err
 		}
 	}
@@ -644,17 +652,8 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	return nil
 }
 
-func copyFile(execRoot, from, to string) error {
+func copyFile(execRoot, from, to string, mode os.FileMode) error {
 	src := filepath.Join(execRoot, from)
-	st, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	if !st.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a regular file", src)
-	}
-
 	s, err := os.Open(src)
 	if err != nil {
 		return err
@@ -662,7 +661,7 @@ func copyFile(execRoot, from, to string) error {
 	defer s.Close()
 
 	dst := filepath.Join(execRoot, to)
-	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, st.Mode())
+	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
 		return err
 	}
@@ -714,9 +713,9 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 				}
 				for dg, data := range bchMap {
 					out := outputs[dg]
-					perm := os.FileMode(0644)
+					perm := c.RegularMode
 					if out.IsExecutable {
-						perm = os.FileMode(0777)
+						perm = c.ExecutableMode
 					}
 					if err := ioutil.WriteFile(filepath.Join(execRoot, out.Path), data, perm); err != nil {
 						return err
@@ -730,7 +729,7 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 					return err
 				}
 				if out.IsExecutable {
-					if err := os.Chmod(path, os.FileMode(0777)); err != nil {
+					if err := os.Chmod(path, c.ExecutableMode); err != nil {
 						return err
 					}
 				}
