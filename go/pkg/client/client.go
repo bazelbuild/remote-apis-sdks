@@ -97,7 +97,7 @@ const (
 	DefaultExecutableMode = 0777
 
 	// DefaultRegularMode is mode used to create non-executable files.
-	DefaultRegularMode = 0666
+	DefaultRegularMode = 0644
 )
 
 // Close closes the underlying gRPC connection(s).
