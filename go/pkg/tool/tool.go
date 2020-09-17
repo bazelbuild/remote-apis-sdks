@@ -102,18 +102,18 @@ func (c *Client) DownloadBlob(ctx context.Context, blobDigest, path string) (str
 	if _, err := c.GrpcClient.ReadBlobToFile(ctx, dg, path); err != nil {
 		return "", err
 	}
-	if outputToStdout {
-		contents, err := ioutil.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
-		return string(contents), nil
+	if !outputToStdout {
+		return "", nil
 	}
-	return "", nil
+	contents, err := ioutil.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(contents), nil
 }
 
 // DownloadMerkleTree downloads a an input root from the remote cache into the specified path.
-func (c *Client) DownloadMerkleTree(ctx context.Context, rootDigest, path string) error {
+func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string) error {
 	log.Infof("Cleaning contents of %v.", path)
 	os.RemoveAll(path)
 	os.Mkdir(path, 0755)

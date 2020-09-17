@@ -37,11 +37,18 @@ const (
 	downloadActionResult OpType = "download_action_result"
 	showAction           OpType = "show_action"
 	downloadBlob         OpType = "download_blob"
-	downloadMerkleTree   OpType = "download_merkle_tree"
+	downloadDir          OpType = "download_dir"
 )
 
+var supportedOps = []OpType{
+	downloadActionResult,
+	showAction,
+	downloadBlob,
+	downloadDir,
+}
+
 var (
-	operation  = flag.String("operation", "", "Specifies the operation to perform. Currently only download_action_result is supported.")
+	operation  = flag.String("operation", "", fmt.Sprintf("Specifies the operation to perform. Supported values: %v", supportedOps))
 	digest     = flag.String("digest", "", "Digest in <digest/size_bytes> format.")
 	pathPrefix = flag.String("path", "", "Path to which outputs should be downloaded to.")
 )
@@ -83,12 +90,12 @@ func main() {
 		}
 		fmt.Fprintf(os.Stdout, res)
 
-	case downloadMerkleTree:
+	case downloadDir:
 		if *pathPrefix == "" {
 			log.Exitf("--path must be specified.")
 		}
-		if err := c.DownloadMerkleTree(ctx, *digest, *pathPrefix); err != nil {
-			log.Exitf("error downloading Merkle tree for digest %v: %v", *digest, err)
+		if err := c.DownloadDirectory(ctx, *digest, *pathPrefix); err != nil {
+			log.Exitf("error downloading directory for digest %v: %v", *digest, err)
 		}
 
 	case showAction:
@@ -99,6 +106,6 @@ func main() {
 		fmt.Fprintf(os.Stdout, res)
 
 	default:
-		log.Exitf("unsupported operation %v.", *operation)
+		log.Exitf("unsupported operation %v. Supported operations:\n%v", *operation, supportedOps)
 	}
 }
