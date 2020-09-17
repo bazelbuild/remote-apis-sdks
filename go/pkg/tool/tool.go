@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -30,12 +32,16 @@ type Client struct {
 }
 
 // DownloadActionResult downloads the action result of the given action digest
-// if it exists in the RBE cache.
+// if it exists in the remote cache.
 func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPrefix string) error {
 	resPb, err := c.getActionResult(ctx, actionDigest)
 	if err != nil {
 		return err
 	}
+
+	log.Infof("Cleaning contents of %v.", pathPrefix)
+	os.RemoveAll(pathPrefix)
+	os.Mkdir(pathPrefix, 0755)
 
 	log.Infof("Downloading action results of %v to %v.", actionDigest, pathPrefix)
 	// We don't really need an in-memory filemetadata cache for debugging operations.
@@ -71,6 +77,55 @@ func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPre
 	return nil
 }
 
+// DownloadBlob downloads a blob from the remote cache into the specified path.
+// If the path is empty, it writes the contents to stdout instead.
+func (c *Client) DownloadBlob(ctx context.Context, blobDigest, path string) (string, error) {
+	outputToStdout := false
+	if path == "" {
+		outputToStdout = true
+		// Create a temp file.
+		tmpFile, err := ioutil.TempFile(os.TempDir(), "")
+		if err != nil {
+			return "", err
+		}
+		if err := tmpFile.Close(); err != nil {
+			return "", err
+		}
+		path = tmpFile.Name()
+		defer os.Remove(path)
+	}
+	dg, err := digest.NewFromString(blobDigest)
+	if err != nil {
+		return "", err
+	}
+	log.Infof("Downloading blob of %v to %v.", dg, path)
+	if _, err := c.GrpcClient.ReadBlobToFile(ctx, dg, path); err != nil {
+		return "", err
+	}
+	if outputToStdout {
+		contents, err := ioutil.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		return string(contents), nil
+	}
+	return "", nil
+}
+
+// DownloadMerkleTree downloads a an input root from the remote cache into the specified path.
+func (c *Client) DownloadMerkleTree(ctx context.Context, rootDigest, path string) error {
+	log.Infof("Cleaning contents of %v.", path)
+	os.RemoveAll(path)
+	os.Mkdir(path, 0755)
+
+	dg, err := digest.NewFromString(rootDigest)
+	if err != nil {
+		return err
+	}
+	log.Infof("Downloading input root %v to %v.", dg, path)
+	return c.GrpcClient.DownloadDirectory(ctx, dg, path, filemetadata.NewNoopCache())
+}
+
 // ShowAction parses and displays an action with its corresponding command.
 func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, error) {
 	var showActionRes bytes.Buffer
@@ -87,15 +142,16 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 	if err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
 		return "", err
 	}
-	showActionRes.WriteString("Command\n========\n")
-	showActionRes.WriteString(fmt.Sprintf("Command Digest: %v\n", actionProto.GetCommandDigest().Hash))
 
-	log.Infof("Reading command from action digest..")
 	commandProto := &repb.Command{}
 	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
 	if err != nil {
 		return "", err
 	}
+	showActionRes.WriteString("Command\n========\n")
+	showActionRes.WriteString(fmt.Sprintf("Command Digest: %v\n", cmdDg))
+
+	log.Infof("Reading command from action digest..")
 	if err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
 		return "", err
 	}
@@ -115,19 +171,23 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 	if err != nil {
 		return "", err
 	}
-	showActionRes.WriteString("\n\n")
+	showActionRes.WriteString("\n")
 	showActionRes.WriteString(outs)
 	return showActionRes.String(), nil
 }
 
 func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (string, error) {
 	var res bytes.Buffer
-	res.WriteString("Output Files:\n=============")
+	res.WriteString("Output Files:\n=============\n")
 	for _, of := range actionRes.GetOutputFiles() {
-		res.WriteString(fmt.Sprintf("\n%v, digest: %v", of.GetPath(), of.GetDigest().Hash))
+		dg, err := digest.NewFromProto(of.GetDigest())
+		if err != nil {
+			return "", err
+		}
+		res.WriteString(fmt.Sprintf("%v, digest: %v\n", of.GetPath(), dg))
 	}
 
-	res.WriteString("\n\nOutput Files From Directories:\n=================")
+	res.WriteString("\nOutput Files From Directories:\n=================\n")
 	for _, od := range actionRes.GetOutputDirectories() {
 		treeDigest := od.GetTreeDigest()
 		dg, err := digest.NewFromProto(treeDigest)
@@ -165,7 +225,11 @@ func (c *Client) getInputTree(ctx context.Context, root *repb.Digest) (string, e
 		return "", nil
 	}
 	rootDirNode := rootDir.GetDirectories()[0]
-	res.WriteString(fmt.Sprintf("%v: [Directory digest: %v]", rootDirNode.GetName(), rootDirNode.GetDigest().Hash))
+	rootDirDg, err := digest.NewFromProto(rootDirNode.GetDigest())
+	if err != nil {
+		return "", err
+	}
+	res.WriteString(fmt.Sprintf("%v: [Directory digest: %v]", rootDirNode.GetName(), rootDirDg))
 
 	dirs, err := c.GrpcClient.GetDirectoryTree(ctx, rootDirNode.GetDigest())
 	if err != nil {
@@ -191,7 +255,14 @@ func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	for path, output := range outputs {
+	// Sort the values by path.
+	paths := make([]string, 0, len(outputs))
+	for path := range outputs {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		output := outputs[path]
 		if output.IsEmptyDirectory {
 			res.WriteString(fmt.Sprintf("%v: [Directory digest: %v]\n", path, output.Digest))
 		} else if output.SymlinkTarget != "" {
