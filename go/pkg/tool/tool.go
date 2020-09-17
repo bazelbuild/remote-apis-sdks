@@ -112,7 +112,7 @@ func (c *Client) DownloadBlob(ctx context.Context, blobDigest, path string) (str
 	return string(contents), nil
 }
 
-// DownloadMerkleTree downloads a an input root from the remote cache into the specified path.
+// DownloadDirectory downloads a an input root from the remote cache into the specified path.
 func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string) error {
 	log.Infof("Cleaning contents of %v.", path)
 	os.RemoveAll(path)
@@ -123,7 +123,8 @@ func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string)
 		return err
 	}
 	log.Infof("Downloading input root %v to %v.", dg, path)
-	return c.GrpcClient.DownloadDirectory(ctx, dg, path, filemetadata.NewNoopCache())
+	_, err = c.GrpcClient.DownloadDirectory(ctx, dg, path, filemetadata.NewNoopCache())
+	return err
 }
 
 // ShowAction parses and displays an action with its corresponding command.
