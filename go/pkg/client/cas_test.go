@@ -883,15 +883,19 @@ func TestDownloadDirectory(t *testing.T) {
 	fake.Put(dirBlob)
 
 	d := digest.TestNewFromMessage(dir)
-	execRoot, err := ioutil.TempDir("", "DownloadDirectory")
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
+	execRoot := t.TempDir()
 
-	err = c.DownloadDirectory(ctx, d, execRoot, cache)
+	outputs, err := c.DownloadDirectory(ctx, d, execRoot, cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
+	}
+
+	if diff := cmp.Diff(outputs, map[string]*tree.Output{"foo": {
+		Digest:       fooDigest,
+		Path:         "foo",
+		IsExecutable: true,
+	}}); diff != "" {
+		t.Fatalf("DownloadDirectory() mismatch (-want +got):\n%s", diff)
 	}
 
 	b, err := ioutil.ReadFile(filepath.Join(execRoot, "foo"))

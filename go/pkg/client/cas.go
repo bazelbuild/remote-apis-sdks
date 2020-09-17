@@ -582,15 +582,15 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 }
 
 // DownloadDirectory downloads the entire directory of given digest.
-func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) error {
+func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) (map[string]*tree.Output, error) {
 	dir := &repb.Directory{}
 	if err := c.ReadProto(ctx, d, dir); err != nil {
-		return fmt.Errorf("digest %v cannot be mapped to a directory proto: %v", d, err)
+		return nil, fmt.Errorf("digest %v cannot be mapped to a directory proto: %v", d, err)
 	}
 
 	dirs, err := c.GetDirectoryTree(ctx, d.ToProto())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	outputs, err := tree.FlattenTree(&repb.Tree{
@@ -598,10 +598,10 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoo
 		Children: dirs,
 	}, "")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return c.downloadOutputs(ctx, outputs, execRoot, cache)
+	return outputs, c.downloadOutputs(ctx, outputs, execRoot, cache)
 }
 
 // DownloadActionOutputs downloads the output files and directories in the given action result.
