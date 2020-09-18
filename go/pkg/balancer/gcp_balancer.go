@@ -151,7 +151,7 @@ type gcpBalancer struct {
 	csEvltr           *connectivityStateEvaluator
 	state             connectivity.State
 
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	affinityMap map[string]balancer.SubConn
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
@@ -226,8 +226,8 @@ func (gb *gcpBalancer) newSubConn() {
 // the boundKey exists in the affinityMap. If returned subConnRef is a nil, it
 // means the underlying subconn is not READY yet.
 func (gb *gcpBalancer) getReadySubConnRef(boundKey string) (*subConnRef, bool) {
-	gb.mu.Lock()
-	defer gb.mu.Unlock()
+	gb.mu.RLock()
+	defer gb.mu.RUnlock()
 
 	if sc, ok := gb.affinityMap[boundKey]; ok {
 		if gb.scStates[sc] != connectivity.Ready {
@@ -269,6 +269,9 @@ func (gb *gcpBalancer) unbindSubConn(boundKey string) {
 //  - errPicker with ErrTransientFailure if the balancer is in TransientFailure,
 //  - built by the pickerBuilder with all READY SubConns otherwise.
 func (gb *gcpBalancer) regeneratePicker() {
+	gb.mu.RLock()
+	defer gb.mu.RUnlock()
+
 	if gb.state == connectivity.TransientFailure {
 		gb.picker = newErrPicker(balancer.ErrTransientFailure)
 		return
