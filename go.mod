@@ -36,7 +36,7 @@ require (
 	github.com/gonum/lapack v0.0.0-20181123203213-e4cdc5a0bff9 // indirect
 	github.com/gonum/matrix v0.0.0-20181209220409-c518dec07be9 // indirect
 	github.com/google/go-cmp v0.5.1
-	github.com/google/uuid v1.1.2 // indirect
+	github.com/google/uuid v1.1.2
 	github.com/googleapis/gax-go v2.0.2+incompatible // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6 // indirect
 	github.com/jung-kurt/gofpdf v1.13.0 // indirect
