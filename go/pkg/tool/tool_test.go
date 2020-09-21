@@ -3,7 +3,6 @@ package tool
 import (
 	"context"
 	"io/ioutil"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -27,7 +26,7 @@ func TestTool_DownloadActionResult(t *testing.T) {
 		fakes.StdOut("stdout"), fakes.StdErr("stderr"))
 
 	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
-	tmpDir := os.TempDir()
+	tmpDir := t.TempDir()
 	if err := toolClient.DownloadActionResult(context.Background(), acDg.String(), tmpDir); err != nil {
 		t.Fatalf("DownloadActionResult(%v,%v) failed: %v", acDg.String(), tmpDir, err)
 	}
@@ -109,7 +108,7 @@ func TestTool_DownloadBlob(t *testing.T) {
 		t.Fatalf("DownloadBlob(%v) returned diff (-want +got): %v\n\ngot: %v\n\nwant: %v\n", dg.String(), diff, got, want)
 	}
 	// Now download into a specified location.
-	tmpFile, err := ioutil.TempFile(os.TempDir(), "")
+	tmpFile, err := ioutil.TempFile(t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("TempFile failed: %v", err)
 	}
