@@ -80,10 +80,11 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	var dgs []digest.Digest
 	chunkers := make(map[digest.Digest]*chunker.Chunker)
 	for _, c := range data {
-		dg := c.Digest()
-		if _, ok := chunkers[dg]; !ok {
-			dgs = append(dgs, dg)
-			chunkers[dg] = c
+		if dg := c.Digest(); dg != digest.Empty {
+			if _, ok := chunkers[dg]; !ok {
+				dgs = append(dgs, dg)
+				chunkers[dg] = c
+			}
 		}
 	}
 
@@ -221,6 +222,9 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 
 // WriteBlob uploads a blob to the CAS.
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
+	if len(blob) == 0 {
+		return digest.Empty, nil // The empty blob does not need to be uploaded
+	}
 	ch := chunker.NewFromBlob(blob, int(c.ChunkMaxSize))
 	dg := ch.Digest()
 	return dg, c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
