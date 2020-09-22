@@ -601,6 +601,9 @@ func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
 // GetDirectoryTree returns the entire directory tree rooted at the given digest (which must target
 // a Directory stored in the CAS).
 func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result []*repb.Directory, err error) {
+	if d.SizeBytes == 0 && d.Hash == digest.Empty.Hash {
+		return nil, nil
+	}
 	pageTok := ""
 	result = []*repb.Directory{}
 	closure := func(ctx context.Context) error {
