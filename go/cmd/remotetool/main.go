@@ -5,6 +5,7 @@
 // 1. Download a file or directory from remote cache by its digest.
 // 2. Display details of a remotely executed action.
 // 3. Download action results by the action digest.
+// 4. Re-execute remote action (with optional inputs override).
 //
 // Example (download an action result from remote action cache):
 // bazelisk run //go/cmd/remotetool -- \
@@ -24,6 +25,7 @@ import (
 	"os"
 	"path"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tool"
 
 	rflags "github.com/bazelbuild/remote-apis-sdks/go/pkg/flags"
@@ -38,6 +40,7 @@ const (
 	showAction           OpType = "show_action"
 	downloadBlob         OpType = "download_blob"
 	downloadDir          OpType = "download_dir"
+	reexecuteAction      OpType = "reexecute_action"
 )
 
 var supportedOps = []OpType{
@@ -45,12 +48,14 @@ var supportedOps = []OpType{
 	showAction,
 	downloadBlob,
 	downloadDir,
+	reexecuteAction,
 }
 
 var (
 	operation  = flag.String("operation", "", fmt.Sprintf("Specifies the operation to perform. Supported values: %v", supportedOps))
 	digest     = flag.String("digest", "", "Digest in <digest/size_bytes> format.")
 	pathPrefix = flag.String("path", "", "Path to which outputs should be downloaded to.")
+	inputRoot  = flag.String("input_root", "", "For reexecute_action: if specified, override the action inputs with the specified input root.")
 )
 
 func main() {
@@ -104,6 +109,11 @@ func main() {
 			log.Exitf("error fetching action %v: %v", *digest, err)
 		}
 		fmt.Fprintf(os.Stdout, res)
+
+	case reexecuteAction:
+		if err := c.ReexecuteAction(ctx, *digest, *inputRoot, outerr.SystemOutErr); err != nil {
+			log.Exitf("error reexecuting action %v: %v", *digest, err)
+		}
 
 	default:
 		log.Exitf("unsupported operation %v. Supported operations:\n%v", *operation, supportedOps)

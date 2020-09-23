@@ -11,10 +11,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
+	"github.com/golang/protobuf/ptypes"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -29,6 +34,102 @@ const (
 // Client is a remote execution client.
 type Client struct {
 	GrpcClient *rc.Client
+}
+
+// ReexecuteAction reexecutes the action remotely, optionally overriding the
+// inputs with the ones provided at the inputRoot path.
+func (c *Client) ReexecuteAction(ctx context.Context, actionDigest, inputRoot string, oe outerr.OutErr) error {
+	acDg, err := digest.NewFromString(actionDigest)
+	if err != nil {
+		return err
+	}
+	actionProto := &repb.Action{}
+	if err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
+		return err
+	}
+
+	commandProto := &repb.Command{}
+	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
+	if err != nil {
+		return err
+	}
+
+	log.Infof("Reading command from action digest..")
+	if err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
+		return err
+	}
+
+	fmc := filemetadata.NewNoopCache()
+	client := &rexec.Client{
+		FileMetadataCache: fmc,
+		GrpcClient:        c.GrpcClient,
+	}
+	_, inputPaths, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
+	if err != nil {
+		return err
+	}
+	if inputRoot == "" {
+		curTime := time.Now().Format(time.RFC3339)
+		inputRoot = filepath.Join(os.TempDir(), acDg.Hash+"_"+curTime)
+		dg, err := digest.NewFromProto(actionProto.GetInputRootDigest())
+		if err != nil {
+			return err
+		}
+		log.Infof("Fetching input tree from input root digest %s into %s", dg, inputRoot)
+		_, err = c.GrpcClient.DownloadDirectory(ctx, dg, inputRoot, fmc)
+		if err != nil {
+			return err
+		}
+	}
+	// Construct Command object.
+	cmd := commandFromREProto(commandProto)
+	cmd.InputSpec.Inputs = inputPaths
+	cmd.ExecRoot = inputRoot
+	if actionProto.Timeout != nil {
+		tm, err := ptypes.Duration(actionProto.Timeout)
+		if err != nil {
+			return err
+		}
+		cmd.Timeout = tm
+	}
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true}
+	res, _ := client.Run(ctx, cmd, opt, oe)
+	switch res.Status {
+	case command.NonZeroExitResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Remote action FAILED with exit code %d.\n", res.ExitCode)))
+	case command.TimeoutResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Remote action TIMED OUT after %0f seconds.\n", cmd.Timeout.Seconds())))
+	case command.InterruptedResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Remote execution was interrupted.\n")))
+	case command.RemoteErrorResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Remote execution error: %v.\n", res.Err)))
+	case command.LocalErrorResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Local error: %v.\n", res.Err)))
+	}
+
+	return res.Err
+}
+
+func commandFromREProto(cmdPb *repb.Command) *command.Command {
+	cmd := &command.Command{
+		InputSpec: &command.InputSpec{
+			EnvironmentVariables: make(map[string]string),
+		},
+		Identifiers: &command.Identifiers{},
+		WorkingDir:  cmdPb.WorkingDirectory,
+		OutputFiles: cmdPb.OutputFiles,
+		OutputDirs:  cmdPb.OutputDirectories,
+		Platform:    make(map[string]string),
+		Args:        cmdPb.Arguments,
+	}
+
+	for _, ev := range cmdPb.EnvironmentVariables {
+		cmd.InputSpec.EnvironmentVariables[ev.Name] = ev.Value
+	}
+	for _, pt := range cmdPb.GetPlatform().GetProperties() {
+		cmd.Platform[pt.Name] = pt.Value
+	}
+	return cmd
 }
 
 // DownloadActionResult downloads the action result of the given action digest
@@ -160,7 +261,7 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 	showActionRes.WriteString(fmt.Sprintf("\t%v\n", cmdStr))
 
 	log.Infof("Fetching input tree from input root digest..")
-	inpTree, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
+	inpTree, _, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
 	if err != nil {
 		return "", err
 	}
@@ -200,7 +301,7 @@ func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (
 			return "", err
 		}
 
-		outputs, err := c.flattenTree(ctx, outDirTree)
+		outputs, _, err := c.flattenTree(ctx, outDirTree)
 		if err != nil {
 			return "", err
 		}
@@ -210,51 +311,41 @@ func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (
 	return res.String(), nil
 }
 
-func (c *Client) getInputTree(ctx context.Context, root *repb.Digest) (string, error) {
+func (c *Client) getInputTree(ctx context.Context, root *repb.Digest) (string, []string, error) {
 	var res bytes.Buffer
 
 	dg, err := digest.NewFromProto(root)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	rootDir := &repb.Directory{}
-	if err := c.GrpcClient.ReadProto(ctx, dg, rootDir); err != nil {
-		return "", fmt.Errorf("error fetching root dir proto for digest %v: %v", dg, err)
-	}
+	res.WriteString(fmt.Sprintf("[Root directory digest: %v]", dg))
 
-	if len(rootDir.GetDirectories()) < 1 {
-		return "", nil
-	}
-	rootDirNode := rootDir.GetDirectories()[0]
-	rootDirDg, err := digest.NewFromProto(rootDirNode.GetDigest())
+	dirs, err := c.GrpcClient.GetDirectoryTree(ctx, root)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	res.WriteString(fmt.Sprintf("%v: [Directory digest: %v]", rootDirNode.GetName(), rootDirDg))
-
-	dirs, err := c.GrpcClient.GetDirectoryTree(ctx, rootDirNode.GetDigest())
-	if err != nil {
-		return "", err
+	if len(dirs) == 0 {
+		return "", nil, fmt.Errorf("Empty directories returned by GetTree for %v", dg)
 	}
 	t := &repb.Tree{
-		Root:     rootDir,
+		Root:     dirs[0],
 		Children: dirs,
 	}
-	inputs, err := c.flattenTree(ctx, t)
+	inputs, paths, err := c.flattenTree(ctx, t)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	res.WriteString("\n")
 	res.WriteString(inputs)
 
-	return res.String(), nil
+	return res.String(), paths, nil
 }
 
-func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, error) {
+func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, []string, error) {
 	var res bytes.Buffer
 	outputs, err := tree.FlattenTree(t, "")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	// Sort the values by path.
 	paths := make([]string, 0, len(outputs))
@@ -272,7 +363,7 @@ func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, error) 
 			res.WriteString(fmt.Sprintf("%v: [File digest: %v]\n", path, output.Digest))
 		}
 	}
-	return res.String(), nil
+	return res.String(), paths, nil
 }
 
 func (c *Client) getActionResult(ctx context.Context, actionDigest string) (*repb.ActionResult, error) {

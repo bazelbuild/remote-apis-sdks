@@ -7,6 +7,7 @@ go_library(
     visibility = ["//visibility:private"],
     deps = [
         "//go/pkg/flags:go_default_library",
+        "//go/pkg/outerr:go_default_library",
         "//go/pkg/tool:go_default_library",
         "@com_github_golang_glog//:go_default_library",
     ],
