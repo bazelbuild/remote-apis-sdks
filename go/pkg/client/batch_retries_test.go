@@ -23,6 +23,8 @@ import (
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 )
 
+var timeout100ms = client.RPCTimeouts(map[string]time.Duration{"default": 100 * time.Millisecond})
+
 type flakyBatchServer struct {
 	numErrors      int // A counter of errors the server has returned thus far.
 	updateRequests []*repb.BatchUpdateBlobsRequest
@@ -338,7 +340,7 @@ func TestBatchReadBlobsDeadlineExceededRetries(t *testing.T) {
 	client, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
-	}, retrier, client.RPCTimeout(100*time.Millisecond))
+	}, retrier, timeout100ms)
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -376,7 +378,7 @@ func TestBatchUpdateBlobsDeadlineExceededRetries(t *testing.T) {
 	client, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
-	}, retrier, client.RPCTimeout(100*time.Millisecond))
+	}, retrier, timeout100ms)
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}

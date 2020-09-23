@@ -27,6 +27,7 @@ go_test(
     deps = [
         "@com_github_google_uuid//:go_default_library",
         "@org_golang_google_grpc//balancer:go_default_library",
+        "@org_golang_google_grpc//connectivity:go_default_library",
         "@org_golang_google_grpc//resolver:go_default_library",
     ],
 )
