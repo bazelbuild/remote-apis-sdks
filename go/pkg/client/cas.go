@@ -161,7 +161,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 	opts := c.RPCOpts()
 	closure := func() error {
 		var resp *repb.BatchUpdateBlobsResponse
-		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		err := c.CallWithTimeout(ctx, "BatchUpdateBlobs", func(ctx context.Context) (e error) {
 			resp, e = c.cas.BatchUpdateBlobs(ctx, &repb.BatchUpdateBlobsRequest{
 				InstanceName: c.InstanceName,
 				Requests:     reqs,
@@ -235,7 +235,7 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 	opts := c.RPCOpts()
 	closure := func() error {
 		var resp *repb.BatchReadBlobsResponse
-		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		err := c.CallWithTimeout(ctx, "BatchReadBlobs", func(ctx context.Context) (e error) {
 			resp, e = c.cas.BatchReadBlobs(ctx, req, opts...)
 			return e
 		})

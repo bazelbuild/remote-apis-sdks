@@ -8,5 +8,6 @@ go_library(
     deps = [
         "//go/pkg/balancer:go_default_library",
         "//go/pkg/client:go_default_library",
+        "//go/pkg/moreflag:go_default_library",
     ],
 )

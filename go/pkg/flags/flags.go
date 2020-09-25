@@ -4,9 +4,11 @@ package flags
 import (
 	"context"
 	"flag"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag"
 )
 
 var (
@@ -42,17 +44,38 @@ var (
 	MaxConcurrentRequests = flag.Uint("max_concurrent_requests_per_conn", client.DefaultMaxConcurrentRequests, "Maximum number of concurrent RPCs on a single gRPC connection.")
 	// MaxConcurrentStreams denotes the maximum number of concurrent stream RPCs on a single gRPC connection.
 	MaxConcurrentStreams = flag.Uint("max_concurrent_streams_per_conn", client.DefaultMaxConcurrentStreams, "Maximum number of concurrent stream RPCs on a single gRPC connection.")
+	RPCTimeouts          map[string]string
 )
 
 func init() {
 	// MinConnections denotes the minimum number of gRPC sub-connections the gRPC balancer should create during SDK initialization.
 	flag.IntVar(&balancer.MinConnections, "min_grpc_connections", balancer.DefaultMinConnections, "Minimum number of gRPC sub-connections the gRPC balancer should create during SDK initialization.")
+	// RPCTimeouts stores the per-RPC timeout values. The flag allows users to override the defaults
+	// set in client.DefaultRPCTimeouts. This is in order to not force the users to familiarize
+	// themselves with every RPC, otherwise it is easy to accidentally enforce a timeout on
+	// WaitExecution, for example.
+	flag.Var((*moreflag.StringMapValue)(&RPCTimeouts), "rpc_timeouts", "Comma-separated key value pairs in the form rpc_name=timeout. The key for default RPC is named default. 0 indicates no timeout. Example: GetActionResult=500ms,Execute=0,default=10s.")
 }
 
 // NewClientFromFlags connects to a remote execution service and returns a client suitable for higher-level
 // functionality. It uses the flags from above to configure the connection to remote execution.
 func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
 	opts = append(opts, client.CASConcurrency(*CASConcurrency))
+	if len(RPCTimeouts) > 0 {
+		timeouts := make(map[string]time.Duration)
+		for rpc, d := range client.DefaultRPCTimeouts {
+			timeouts[rpc] = d
+		}
+		// Override the defaults with flags, but do not replace.
+		for rpc, s := range RPCTimeouts {
+			d, err := time.ParseDuration(s)
+			if err != nil {
+				return nil, err
+			}
+			timeouts[rpc] = d
+		}
+		opts = append(opts, client.RPCTimeouts(timeouts))
+	}
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
 		CASService:            *CASService,
