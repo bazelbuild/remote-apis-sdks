@@ -51,6 +51,9 @@ message Identifiers {
 
   // An optional tool version to pass to the remote server for logging.
   string tool_version = 5;
+
+  // An optional ID identifying a particular execution of this command.
+  string execution_id = 6;
 }
 
 message InputType {
