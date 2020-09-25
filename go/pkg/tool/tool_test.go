@@ -8,6 +8,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -77,7 +78,7 @@ Command Digest: 76a608e419da9ed3673f59b8b903f21dbf7cc3178281029151a090cac02d9e4d
 
 Inputs
 ======
-a: [Directory digest: b2fcb5f1407e2324dd81c4685724cac9228c7142cb34d665dfd3f37a8a18342c/75]
+[Root directory digest: e23e10be0d14b5b2b1b7af32de78dea554a74df5bb22b31ae6c49583c1a8aa0e/75]
 a/b/input.txt: [File digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/0]
 
 Output Files:
@@ -89,6 +90,69 @@ Output Files From Directories:
 `
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("ShowAction(%v) returned diff (-want +got): %v\n\ngot: %v\n\nwant: %v\n", acDg.String(), diff, got, want)
+	}
+}
+
+func TestTool_ReexecuteAction(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	cmd := &command.Command{
+		Args:        []string{"foo bar baz"},
+		ExecRoot:    e.ExecRoot,
+		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}},
+		OutputFiles: []string{"a/b/out"},
+	}
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	out := "output"
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true}
+	_, acDg := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
+		fakes.StdOut("stdout"), fakes.StdErr("stderr"))
+
+	client := &Client{GrpcClient: e.Client.GrpcClient}
+	oe := outerr.NewRecordingOutErr()
+	if err := client.ReexecuteAction(context.Background(), acDg.String(), "", oe); err != nil {
+		t.Errorf("error ReexecuteAction: %v", err)
+	}
+	if string(oe.Stderr()) != "stderr" {
+		t.Errorf("Incorrect stderr %v, expected \"stderr\"", oe.Stderr())
+	}
+	if string(oe.Stdout()) != "stdout" {
+		t.Errorf("Incorrect stdout %v, expected \"stdout\"", oe.Stdout())
+	}
+	// Now execute again with changed inputs.
+	tmpDir := t.TempDir()
+	if err := ioutil.WriteFile(filepath.Join(tmpDir, "i1"), []byte("i11"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(tmpDir, "i2"), []byte("i22"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	cmd.ExecRoot = tmpDir
+	_, acDg2 := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
+		fakes.StdOut("stdout2"), fakes.StdErr("stderr2"))
+	oe = outerr.NewRecordingOutErr()
+	if err := client.ReexecuteAction(context.Background(), acDg2.String(), tmpDir, oe); err != nil {
+		t.Errorf("error ReexecuteAction: %v", err)
+	}
+
+	fp := filepath.Join(tmpDir, "a/b/out")
+	c, err := ioutil.ReadFile(fp)
+	if err != nil {
+		t.Fatalf("Unable to read downloaded output %v: %v", fp, err)
+	}
+	if string(c) != out {
+		t.Fatalf("Incorrect content in downloaded file %v, want %s, got %s", fp, out, c)
+	}
+	if string(oe.Stderr()) != "stderr2" {
+		t.Errorf("Incorrect stderr %v, expected \"stderr\"", oe.Stderr())
+	}
+	if string(oe.Stdout()) != "stdout2" {
+		t.Errorf("Incorrect stdout %v, expected \"stdout\"", oe.Stdout())
 	}
 }
 
