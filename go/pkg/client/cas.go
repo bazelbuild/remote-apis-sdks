@@ -25,6 +25,11 @@ import (
 	log "github.com/golang/glog"
 )
 
+var (
+	mu                sync.Mutex
+	inProgressUploads map[string]error
+)
+
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
 // Returns a slice of the missing digests.
@@ -46,10 +51,41 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 		}
 	}
 
-	missing, err := c.MissingBlobs(ctx, dgs)
+	allMissing, err := c.MissingBlobs(ctx, dgs)
 	if err != nil {
 		return nil, err
 	}
+
+	alreadyRunning := []digest.Digest{}
+	missing := []digest.Digest{}
+	mu.Lock()
+	for _, m := range allMissing {
+		if _, ok := inProgressUploads[m.String()]; !ok {
+			inProgressUploads[m.String()] = nil
+			missing = append(missing, m)
+			continue
+		}
+		alreadyRunning = append(alreadyRunning, m)
+	}
+	log.Infof("Blobs already being uploaded: %v", alreadyRunning)
+	log.Infof("Blobs missing: %v", missing)
+	mu.Unlock()
+	defer func() {
+		isAnyRunning := true
+		for isAnyRunning {
+			mu.Lock()
+			log.Infof("Some blobs in %v are still being uploaded", alreadyRunning)
+			isAnyRunning = false
+			for _, dg := range alreadyRunning {
+				if _, ok := inProgressUploads[dg.String()]; ok {
+					isAnyRunning = true
+					break
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
 	log.V(2).Infof("%d items to store", len(missing))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
@@ -66,8 +102,10 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	for i, batch := range batches {
 		i, batch := i, batch   // https://golang.org/doc/faq#closures_and_goroutines
 		c.casUploaders <- true // Reserve an uploader thread.
-		eg.Go(func() error {
-			defer func() { <-c.casUploaders }()
+		eg.Go(func() (err error) {
+			defer func() {
+				<-c.casUploaders
+			}()
 			if i%logInterval == 0 {
 				log.V(2).Infof("%d batches left to store", len(batches)-i)
 			}
@@ -102,6 +140,13 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	log.V(2).Info("Waiting for remaining jobs")
 	err = eg.Wait()
 	log.V(2).Info("Done")
+	if err != nil {
+		for _, dg := range missing {
+			mu.Lock()
+			delete(inProgressUploads, dg.String())
+			mu.Unlock()
+		}
+	}
 
 	return missing, err
 }
