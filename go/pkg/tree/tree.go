@@ -22,12 +22,14 @@ import (
 // tree later. It corresponds roughly to a *repb.Directory, but with pointers, not digests, used to
 // refer to other nodes.
 type treeNode struct {
-	Files map[string]*fileNode
-	Dirs  map[string]*treeNode
+	Files    map[string]*fileNode
+	Dirs     map[string]*treeNode
+	Symlinks map[string]string
 }
 
 type fileNode struct {
 	Chunker              *chunker.Chunker
+	SymlinkTarget        string
 	IsExecutable         bool
 	EmptyDirectoryMarker bool
 }
@@ -79,6 +81,12 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		t = command.DirectoryInputType
 	}
 	if shouldIgnore(absPath, t, excl) {
+		return nil
+	}
+	if sym := meta.Symlink; sym != nil {
+		fs[path] = &fileNode{
+			SymlinkTarget: sym.Target,
+		}
 		return nil
 	}
 	if t == command.FileInputType {
@@ -169,6 +177,12 @@ func buildTree(files map[string]*fileNode) *treeNode {
 			}
 			node.Dirs[base] = &treeNode{}
 			continue
+		} else if fn.SymlinkTarget != "" {
+			if node.Symlinks == nil {
+				node.Symlinks = make(map[string]string)
+			}
+			node.Symlinks[base] = fn.SymlinkTarget
+			continue
 		}
 		if node.Files == nil {
 			node.Files = make(map[string]*fileNode)
@@ -202,6 +216,11 @@ func packageTree(t *treeNode, chunkSize int, stats *Stats) (root digest.Digest, 
 		stats.TotalInputBytes += dg.Size
 	}
 	sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
+
+	for name, target := range t.Symlinks {
+		dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: target})
+	}
+	sort.Slice(dir.Symlinks, func(i, j int) bool { return dir.Symlinks[i].Name < dir.Symlinks[j].Name })
 
 	ch, err := chunker.NewFromProto(dir, chunkSize)
 	if err != nil {
@@ -334,6 +353,10 @@ func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, child
 		files[dg] = fn.Chunker
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
+	for name, target := range t.Symlinks {
+		root.Symlinks = append(root.Symlinks, &repb.SymlinkNode{Name: name, Target: target})
+	}
+	sort.Slice(root.Symlinks, func(i, j int) bool { return root.Symlinks[i].Name < root.Symlinks[j].Name })
 	return root, children, files, nil
 }
 
