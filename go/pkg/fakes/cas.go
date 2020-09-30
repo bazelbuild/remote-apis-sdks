@@ -205,6 +205,7 @@ type CAS struct {
 	blobs       map[digest.Digest][]byte
 	reads       map[digest.Digest]int
 	writes      map[digest.Digest]int
+	missingReqs map[digest.Digest]int
 	mu          sync.RWMutex
 	batchReqs   int
 	writeReqs   int
@@ -226,6 +227,7 @@ func (f *CAS) Clear() {
 	f.blobs = make(map[digest.Digest][]byte)
 	f.reads = make(map[digest.Digest]int)
 	f.writes = make(map[digest.Digest]int)
+	f.missingReqs = make(map[digest.Digest]int)
 	f.batchReqs = 0
 	f.writeReqs = 0
 	f.concReqs = 0
@@ -257,6 +259,11 @@ func (f *CAS) BlobWrites(d digest.Digest) int {
 	return f.writes[d]
 }
 
+// BlobMissingReqs returns the total number of GetMissingBlobs requests for a particular digest.
+func (f *CAS) BlobMissingReqs(d digest.Digest) int {
+	return f.missingReqs[d]
+}
+
 // BatchReqs returns the total number of BatchUpdateBlobs requests to this fake.
 func (f *CAS) BatchReqs() int {
 	return f.batchReqs
@@ -274,15 +281,17 @@ func (f *CAS) MaxConcurrency() int {
 
 // FindMissingBlobs implements the corresponding RE API function.
 func (f *CAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	if req.InstanceName != "instance" {
 		return nil, status.Error(codes.InvalidArgument, "test fake expected instance name \"instance\"")
 	}
 	resp := new(repb.FindMissingBlobsResponse)
 	for _, dg := range req.BlobDigests {
-		if _, ok := f.blobs[digest.NewFromProtoUnvalidated(dg)]; !ok {
+		d := digest.NewFromProtoUnvalidated(dg)
+		f.missingReqs[d]++
+		if _, ok := f.blobs[d]; !ok {
 			resp.MissingBlobDigests = append(resp.MissingBlobDigests, dg)
 		}
 	}

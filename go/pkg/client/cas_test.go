@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -375,6 +376,88 @@ func TestMissingBlobs(t *testing.T) {
 	}
 }
 
+func TestUploadConcurrent(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+	client.CASConcurrency(defaultCASConcurrency).Apply(c)
+
+	blobs := make([][]byte, 1000)
+	for i := range blobs {
+		blobs[i] = []byte(fmt.Sprint(i))
+	}
+	tests := []struct {
+		name string
+		// Whether to use batching.
+		batching client.UseBatchOps
+		// The batch size.
+		maxBatchDigests client.MaxBatchDigests
+		// The CAS concurrency for uploading the blobs.
+		concurrency client.CASConcurrency
+	}{
+		{
+			name:        "no_batching_low_conc",
+			batching:    client.UseBatchOps(false),
+			concurrency: client.CASConcurrency(3),
+		},
+		{
+			name:        "no_batching_high_conc",
+			batching:    client.UseBatchOps(false),
+			concurrency: client.CASConcurrency(100),
+		},
+		{
+			name:            "batching_low_conc",
+			batching:        client.UseBatchOps(true),
+			maxBatchDigests: client.MaxBatchDigests(9),
+			concurrency:     client.CASConcurrency(3),
+		},
+		{
+			name:            "batching_high_conc",
+			batching:        client.UseBatchOps(true),
+			maxBatchDigests: client.MaxBatchDigests(9),
+			concurrency:     client.CASConcurrency(100),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake.Clear()
+			c.Reset()
+			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency} {
+				opt.Apply(c)
+			}
+
+			var wg sync.WaitGroup
+			for i := 0; i < 100; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var input []*chunker.Chunker
+					for _, blob := range blobs {
+						input = append(input, chunker.NewFromBlob(blob, 10))
+					}
+					_, err := c.UploadIfMissing(ctx, input...)
+					if err != nil {
+						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
+					}
+				}()
+			}
+			wg.Wait()
+			// Verify everything was written exactly once.
+			for i, blob := range blobs {
+				dg := digest.NewFromBlob(blob)
+				if fake.BlobWrites(dg) != 1 {
+					t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
+				}
+				if fake.BlobMissingReqs(dg) != 1 {
+					t.Errorf("wanted 1 missing request for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
+				}
+			}
+		})
+	}
+}
+
 func TestUpload(t *testing.T) {
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
@@ -444,6 +527,8 @@ func TestUpload(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
 					fake.Clear()
+					c.Reset()
+
 					if tc.concurrency > 0 {
 						tc.concurrency.Apply(c)
 					}
@@ -552,6 +637,7 @@ func TestWriteBlobsBatching(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fake.Clear()
+			c.Reset()
 			blobs := make(map[digest.Digest][]byte)
 			for i, sz := range tc.sizes {
 				blob := make([]byte, int(sz))
