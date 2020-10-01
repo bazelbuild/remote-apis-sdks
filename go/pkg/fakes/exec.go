@@ -1,9 +1,11 @@
 package fakes
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
@@ -104,6 +106,26 @@ func (s *Exec) fakeExecution(dg digest.Digest, skipCacheLookup bool) (*oppb.Oper
 		Done:   true,
 		Result: &oppb.Operation_Response{Response: any},
 	}, nil
+}
+
+// GetCapabilities returns the fake capabilities.
+func (c *Exec) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
+	dgFn := digest.GetDigestFunction()
+	res = &repb.ServerCapabilities{
+		ExecutionCapabilities: &repb.ExecutionCapabilities{
+			DigestFunction: dgFn,
+			ExecEnabled:    true,
+		},
+		CacheCapabilities: &repb.CacheCapabilities{
+			DigestFunction: []repb.DigestFunction_Value{dgFn},
+			ActionCacheUpdateCapabilities: &repb.ActionCacheUpdateCapabilities{
+				UpdateEnabled: true,
+			},
+			MaxBatchTotalSizeBytes:      client.DefaultMaxBatchSize,
+			SymlinkAbsolutePathStrategy: repb.SymlinkAbsolutePathStrategy_DISALLOWED,
+		},
+	}
+	return res, nil
 }
 
 // Execute returns the saved result ActionResult, or a Status. It also puts it in the action cache

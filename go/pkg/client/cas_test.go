@@ -64,7 +64,7 @@ func TestSplitEndpoints(t *testing.T) {
 		Service:    l1.Addr().String(),
 		CASService: l2.Addr().String(),
 		NoSecurity: true,
-	})
+	}, client.StartupCapabilities(false))
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestRead(t *testing.T) {
 	c, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
-	})
+	}, client.StartupCapabilities(false))
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestWrite(t *testing.T) {
 	c, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
-	}, client.ChunkMaxSize(20)) // Use small write chunk size for tests.
+	}, client.StartupCapabilities(false), client.ChunkMaxSize(20)) // Use small write chunk size for tests.
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
