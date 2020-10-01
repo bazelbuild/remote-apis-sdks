@@ -236,7 +236,7 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 	wait := false    // Should we retry by calling WaitExecution instead of Execute?
 	opError := false // Are we propagating an Operation status as an error for the retrier's benefit?
 	lastOp := &oppb.Operation{}
-	closure := func() (e error) {
+	closure := func(ctx context.Context) (e error) {
 		var res regrpc.Execution_ExecuteClient
 		if wait {
 			res, e = c.WaitExecution(ctx, &repb.WaitExecutionRequest{Name: lastOp.Name})
@@ -273,7 +273,7 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 		}
 		return nil
 	}
-	err = c.Retrier.Do(ctx, closure)
+	err = c.Retrier.Do(ctx, func() error { return c.CallWithTimeout(ctx, "Execute", closure) })
 	if err != nil && !opError {
 		return nil, err
 	}

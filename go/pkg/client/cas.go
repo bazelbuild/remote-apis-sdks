@@ -598,8 +598,9 @@ func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
 func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result []*repb.Directory, err error) {
 	pageTok := ""
 	result = []*repb.Directory{}
-	closure := func() error {
-		stream, err := c.GetTree(ctx, &repb.GetTreeRequest{
+	closure := func(ctx context.Context) error {
+		// Use the low-level GetTree method to avoid retrying twice.
+		stream, err := c.cas.GetTree(ctx, &repb.GetTreeRequest{
 			InstanceName: c.InstanceName,
 			RootDigest:   d,
 			PageToken:    pageTok,
@@ -621,7 +622,7 @@ func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result [
 		}
 		return nil
 	}
-	if err := c.Retrier.Do(ctx, closure); err != nil {
+	if err := c.Retrier.Do(ctx, func() error { return c.CallWithTimeout(ctx, "GetTree", closure) }); err != nil {
 		return nil, err
 	}
 	return result, nil

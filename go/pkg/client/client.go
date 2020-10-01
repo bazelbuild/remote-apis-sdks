@@ -435,8 +435,11 @@ var DefaultRPCTimeouts = map[string]time.Duration{
 	"BatchUpdateBlobs": time.Minute,
 	"BatchReadBlobs":   time.Minute,
 	"GetTree":          time.Minute,
-	"Execute":          0,
-	"WaitExecution":    0,
+	// Note: due to an implementation detail, WaitExecution will use the same
+	// per-RPC timeout as Execute. It is extremely ill-advised to set the Execute
+	// timeout at above 0; most users should use the Action Timeout instead.
+	"Execute":       0,
+	"WaitExecution": 0,
 }
 
 // RPCOpts returns the default RPC options that should be used for calls made with this client.
