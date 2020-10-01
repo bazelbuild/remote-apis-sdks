@@ -72,21 +72,31 @@ func TestTool_ShowAction(t *testing.T) {
 		t.Fatalf("ShowAction(%v) failed: %v", acDg.String(), err)
 	}
 	want := `Command
-========
+=======
 Command Digest: 76a608e419da9ed3673f59b8b903f21dbf7cc3178281029151a090cac02d9e4d/15
 	tool
+
+Platform
+========
 
 Inputs
 ======
 [Root directory digest: e23e10be0d14b5b2b1b7af32de78dea554a74df5bb22b31ae6c49583c1a8aa0e/75]
 a/b/input.txt: [File digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/0]
 
-Output Files:
-=============
+------------------------------------------------------------------------
+Action Result
+
+Exit code: 0
+stdout digest: 63d42d26156fcc761e57da4128e9881d5bdf3bf933f0f6e9c93d6e26b9b90ae7/6
+stderr digest: 7e6b710b765404cccbad9eedcff7615fc37b269d6db12cd81a58be541d93083c/6
+
+Output Files
+============
 a/b/out, digest: e0ee8bb50685e05fa0f47ed04203ae953fdfd055f5bd2892ea186504254f8c3a/6
 
-Output Files From Directories:
-=================
+Output Files From Directories
+=============================
 `
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("ShowAction(%v) returned diff (-want +got): %v\n\ngot: %v\n\nwant: %v\n", acDg.String(), diff, got, want)
