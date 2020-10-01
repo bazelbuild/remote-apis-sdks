@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
@@ -73,12 +74,14 @@ type Client struct {
 	// ExecutableMode is mode used to create executable files.
 	ExecutableMode os.FileMode
 	// RegularMode is mode used to create non-executable files.
-	RegularMode    os.FileMode
-	useBatchOps    UseBatchOps
-	casUploaders   chan bool
-	casDownloaders chan bool
-	rpcTimeouts    RPCTimeouts
-	creds          credentials.PerRPCCredentials
+	RegularMode     os.FileMode
+	useBatchOps     UseBatchOps
+	casUploaders    chan bool
+	casDownloaders  chan bool
+	casUploadLocks  sync.Map
+	casUploadErrors sync.Map
+	rpcTimeouts     RPCTimeouts
+	creds           credentials.PerRPCCredentials
 }
 
 const (
@@ -364,6 +367,8 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		useBatchOps:     true,
 		casUploaders:    make(chan bool, DefaultCASConcurrency),
 		casDownloaders:  make(chan bool, DefaultCASConcurrency),
+		casUploadLocks:  sync.Map{},
+		casUploadErrors: sync.Map{},
 		Retrier:         RetryTransient(),
 	}
 	for _, o := range opts {
