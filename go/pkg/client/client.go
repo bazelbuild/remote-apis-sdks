@@ -63,6 +63,8 @@ type Client struct {
 	Retrier       *Retrier
 	Connection    *grpc.ClientConn
 	CASConnection *grpc.ClientConn // Can be different from Connection a separate CAS endpoint is provided.
+	// StartupCapabilities denotes whether to load ServerCapabilities on startup.
+	StartupCapabilities StartupCapabilities
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
 	ChunkMaxSize ChunkMaxSize
 	// MaxBatchDigests is maximum amount of digests to batch in batched operations.
@@ -75,6 +77,7 @@ type Client struct {
 	ExecutableMode os.FileMode
 	// RegularMode is mode used to create non-executable files.
 	RegularMode     os.FileMode
+	serverCaps      *repb.ServerCapabilities
 	useBatchOps     UseBatchOps
 	casUploaders    chan bool
 	casDownloaders  chan bool
@@ -172,6 +175,16 @@ const DefaultMaxConcurrentStreams = 25
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casUploaders = make(chan bool, cy)
 	c.casDownloaders = make(chan bool, cy)
+}
+
+// StartupCapabilities controls whether the client should attempt to fetch the remote
+// server capabilities on New. If set to true, some configuration such as MaxBatchSize
+// is set according to the remote server capabilities instead of using the provided values.
+type StartupCapabilities bool
+
+// Apply sets the StartupCapabilities flag on a client.
+func (s StartupCapabilities) Apply(c *Client) {
+	c.StartupCapabilities = s
 }
 
 // PerRPCCreds sets per-call options that will be set on all RPCs to the underlying connection.
@@ -374,6 +387,11 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 	for _, o := range opts {
 		o.Apply(client)
 	}
+	if client.StartupCapabilities {
+		if err := client.CheckCapabilities(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return client, nil
 }
 
@@ -390,6 +408,7 @@ func (d RPCTimeouts) Apply(c *Client) {
 
 var DefaultRPCTimeouts = map[string]time.Duration{
 	"default":          20 * time.Second,
+	"GetCapabilities":  5 * time.Second,
 	"Read":             time.Minute,
 	"Write":            time.Minute,
 	"BatchUpdateBlobs": time.Minute,
@@ -661,32 +680,6 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientCo
 		return nil, err
 	}
 	return res, nil
-}
-
-// GetCapabilities returns the capabilities for the targeted servers.
-// If the CAS URL was set differently to the execution server then the CacheCapabilities will
-// be determined from that; ExecutionCapabilities will always come from the main URL.
-func (c *Client) GetCapabilities(ctx context.Context) (res *repb.ServerCapabilities, err error) {
-	return c.GetCapabilitiesForInstance(ctx, c.InstanceName)
-}
-
-// GetCapabilitiesForInstance returns the capabilities for the targeted servers.
-// If the CAS URL was set differently to the execution server then the CacheCapabilities will
-// be determined from that; ExecutionCapabilities will always come from the main URL.
-func (c *Client) GetCapabilitiesForInstance(ctx context.Context, instance string) (res *repb.ServerCapabilities, err error) {
-	req := &repb.GetCapabilitiesRequest{InstanceName: instance}
-	caps, err := c.GetBackendCapabilities(ctx, c.Connection, req)
-	if err != nil {
-		return nil, err
-	}
-	if c.CASConnection != c.Connection {
-		casCaps, err := c.GetBackendCapabilities(ctx, c.CASConnection, req)
-		if err != nil {
-			return nil, err
-		}
-		caps.CacheCapabilities = casCaps.CacheCapabilities
-	}
-	return caps, nil
 }
 
 // GetOperation wraps the underlying call with specific client options.

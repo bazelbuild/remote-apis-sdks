@@ -2,7 +2,7 @@
 package digest
 
 import (
-	"crypto/sha256"
+	"crypto"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -20,7 +20,10 @@ var (
 	// hexStringRegex doesn't contain the size because that's checked separately.
 	hexStringRegex = regexp.MustCompile("^[a-f0-9]+$")
 
-	// Empty is the SHA256 digest of the empty blob.
+	// The digest function used.
+	HashFn = crypto.SHA256
+
+	// Empty is the digest of the empty blob.
 	Empty = NewFromBlob([]byte{})
 )
 
@@ -28,6 +31,15 @@ var (
 type Digest struct {
 	Hash string
 	Size int64
+}
+
+// GetDigestFunction returns the digest function used by the client.
+func GetDigestFunction() repb.DigestFunction_Value {
+	name := strings.ReplaceAll(HashFn.String(), "-", "")
+	if val, ok := repb.DigestFunction_Value_value[name]; ok {
+		return repb.DigestFunction_Value(val)
+	}
+	return repb.DigestFunction_UNKNOWN
 }
 
 // ToProto converts a Digest into a repb.Digest. No validation is performed!
@@ -52,8 +64,8 @@ func (d Digest) IsEmpty() bool {
 // client.
 func (d Digest) Validate() error {
 	length := len(d.Hash)
-	if length != sha256.Size*2 {
-		return fmt.Errorf("valid hash length is %d, got length %d (%s)", sha256.Size*2, length, d.Hash)
+	if length != HashFn.Size()*2 {
+		return fmt.Errorf("valid hash length is %d, got length %d (%s)", HashFn.Size()*2, length, d.Hash)
 	}
 	if !hexStringRegex.MatchString(d.Hash) {
 		return fmt.Errorf("hash is not a lowercase hex string (%s)", d.Hash)
@@ -77,8 +89,10 @@ func New(hash string, size int64) (Digest, error) {
 // invalidations (execution cache and potentially others).
 // This cannot return an error, since the result is valid by definition.
 func NewFromBlob(blob []byte) Digest {
-	sha256Arr := sha256.Sum256(blob)
-	return Digest{Hash: hex.EncodeToString(sha256Arr[:]), Size: int64(len(blob))}
+	h := HashFn.New()
+	h.Write(blob)
+	arr := h.Sum(nil)
+	return Digest{Hash: hex.EncodeToString(arr[:]), Size: int64(len(blob))}
 }
 
 // NewFromMessage calculates the digest of a protobuf in SHA-256 mode.
@@ -125,7 +139,7 @@ func NewFromFile(path string) (Digest, error) {
 		return Empty, err
 	}
 	defer f.Close()
-	h := sha256.New()
+	h := HashFn.New()
 	size, err := io.Copy(h, f)
 	if err != nil {
 		return Empty, err
@@ -140,7 +154,7 @@ func NewFromFile(path string) (Digest, error) {
 // and panics on error rather than returning the error.
 // ONLY USE FOR TESTS.
 func TestNew(hash string, size int64) Digest {
-	hashLen := sha256.Size * 2
+	hashLen := HashFn.Size() * 2
 	if len(hash) < hashLen {
 		hash = strings.Repeat("0", hashLen-len(hash)) + hash
 	}

@@ -52,6 +52,7 @@ func NewServer(t *testing.T) (s *Server, err error) {
 	bsgrpc.RegisterByteStreamServer(s.srv, s.CAS)
 	regrpc.RegisterContentAddressableStorageServer(s.srv, s.CAS)
 	regrpc.RegisterActionCacheServer(s.srv, s.ActionCache)
+	regrpc.RegisterCapabilitiesServer(s.srv, s.Exec)
 	regrpc.RegisterExecutionServer(s.srv, s.Exec)
 	go s.srv.Serve(s.listener)
 	return s, nil
