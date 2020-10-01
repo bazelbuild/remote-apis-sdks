@@ -3,7 +3,10 @@ package flags
 
 import (
 	"context"
+	"crypto/x509"
 	"flag"
+	"fmt"
+	"io/ioutil"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
@@ -31,6 +34,8 @@ var (
 	// UseGCECredentials is whether to use the default GCE credentials to authenticate with remote
 	// execution. --use_application_default_credentials must be false.
 	UseGCECredentials = flag.Bool("use_gce_credentials", false, "If true (and --use_application_default_credentials is false), use the default GCE credentials to authenticate with remote execution.")
+	// UseRPCCredentials can be set to false to disable all per-RPC credentials.
+	UseRPCCredentials = flag.Bool("use_rpc_credentials", true, "If false, no per-RPC credentials will be used (disables --credential_file, --use_application_default_credentials, and --use_gce_credentials.")
 	// Service represents the host (and, if applicable, port) of the remote execution service.
 	Service = flag.String("service", "", "The remote execution service to dial when calling via gRPC, including port, such as 'localhost:8790' or 'remotebuildexecution.googleapis.com:443'")
 	// CASService represents the host (and, if applicable, port) of the CAS service, if different from the remote execution service.
@@ -44,7 +49,11 @@ var (
 	MaxConcurrentRequests = flag.Uint("max_concurrent_requests_per_conn", client.DefaultMaxConcurrentRequests, "Maximum number of concurrent RPCs on a single gRPC connection.")
 	// MaxConcurrentStreams denotes the maximum number of concurrent stream RPCs on a single gRPC connection.
 	MaxConcurrentStreams = flag.Uint("max_concurrent_streams_per_conn", client.DefaultMaxConcurrentStreams, "Maximum number of concurrent stream RPCs on a single gRPC connection.")
-	RPCTimeouts          map[string]string
+	// TLSServerName overrides the server name sent in the TLS session.
+	TLSServerName = flag.String("tls_server_name", "", "Override the TLS server name")
+	// TLSCACert loads CA certificates from a file
+	TLSCACert   = flag.String("tls_ca_cert", "", "Load TLS CA certificates from this file")
+	RPCTimeouts map[string]string
 )
 
 func init() {
@@ -76,12 +85,25 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 		opts = append(opts, client.RPCTimeouts(timeouts))
 	}
+	certPool := x509.NewCertPool()
+	if *TLSCACert != "" {
+		ca, err := ioutil.ReadFile(*TLSCACert)
+		if err != nil {
+			return nil, err
+		}
+		if ok := certPool.AppendCertsFromPEM(ca); !ok {
+			return nil, fmt.Errorf("failed to load TLS CA certificates from %s", *TLSCACert)
+		}
+	}
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
 		CASService:            *CASService,
 		CredFile:              *CredFile,
 		UseApplicationDefault: *UseApplicationDefaultCreds,
 		UseComputeEngine:      *UseGCECredentials,
+		TransportCredsOnly:    !*UseRPCCredentials,
+		TLSServerName:         *TLSServerName,
+		CertPool:              certPool,
 		MaxConcurrentRequests: uint32(*MaxConcurrentRequests),
 		MaxConcurrentStreams:  uint32(*MaxConcurrentStreams),
 	}, opts...)

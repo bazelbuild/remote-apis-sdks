@@ -3,6 +3,7 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"net/http"
 	"os"
@@ -251,6 +252,12 @@ type DialParams struct {
 	// This is not the same as NoSecurity, as transport credentials will still be set.
 	TransportCredsOnly bool
 
+	// CertPool supplies root certificates for the TLS session.
+	CertPool *x509.CertPool
+
+	// TLSServerName overrides the server name sent in TLS, if set to a non-empty string.
+	TLSServerName string
+
 	// DialOpts defines the set of gRPC DialOptions to apply, in addition to any used internally.
 	DialOpts []grpc.DialOption
 
@@ -316,7 +323,7 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 			opts = append(opts, grpc.WithPerRPCCredentials(rpcCreds))
 		}
 
-		tlsCreds := credentials.NewClientTLSFromCert(nil, "")
+		tlsCreds := credentials.NewClientTLSFromCert(params.CertPool, params.TLSServerName)
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
 	grpcInt := createGRPCInterceptor(params)
