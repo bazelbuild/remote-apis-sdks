@@ -49,8 +49,10 @@ var (
 	// TLSServerName overrides the server name sent in the TLS session.
 	TLSServerName = flag.String("tls_server_name", "", "Override the TLS server name")
 	// TLSCACert loads CA certificates from a file
-	TLSCACert   = flag.String("tls_ca_cert", "", "Load TLS CA certificates from this file")
-	RPCTimeouts map[string]string
+	TLSCACert = flag.String("tls_ca_cert", "", "Load TLS CA certificates from this file")
+	// StartupCapabilities specifies whether to self-configure based on remote server capabilities on startup.
+	StartupCapabilities = flag.Bool("startup_capabilities", true, "Whether to self-configure based on remote server capabilities on startup.")
+	RPCTimeouts         map[string]string
 )
 
 func init() {
@@ -66,7 +68,7 @@ func init() {
 // NewClientFromFlags connects to a remote execution service and returns a client suitable for higher-level
 // functionality. It uses the flags from above to configure the connection to remote execution.
 func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
-	opts = append(opts, client.CASConcurrency(*CASConcurrency))
+	opts = append(opts, []client.Opt{client.CASConcurrency(*CASConcurrency), client.StartupCapabilities(*StartupCapabilities)}...)
 	if len(RPCTimeouts) > 0 {
 		timeouts := make(map[string]time.Duration)
 		for rpc, d := range client.DefaultRPCTimeouts {
