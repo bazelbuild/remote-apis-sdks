@@ -324,8 +324,9 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 			opts = append(opts, grpc.WithPerRPCCredentials(rpcCreds))
 		}
 
-		certPool := x509.NewCertPool()
+		var certPool *x509.CertPool
 		if params.TLSCACertFile != "" {
+			certPool = x509.NewCertPool()
 			ca, err := ioutil.ReadFile(params.TLSCACertFile)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read %s: %w", params.TLSCACertFile, err)
