@@ -3,10 +3,7 @@ package flags
 
 import (
 	"context"
-	"crypto/x509"
 	"flag"
-	"fmt"
-	"io/ioutil"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
@@ -85,16 +82,6 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 		opts = append(opts, client.RPCTimeouts(timeouts))
 	}
-	certPool := x509.NewCertPool()
-	if *TLSCACert != "" {
-		ca, err := ioutil.ReadFile(*TLSCACert)
-		if err != nil {
-			return nil, err
-		}
-		if ok := certPool.AppendCertsFromPEM(ca); !ok {
-			return nil, fmt.Errorf("failed to load TLS CA certificates from %s", *TLSCACert)
-		}
-	}
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
 		CASService:            *CASService,
@@ -103,7 +90,7 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		UseComputeEngine:      *UseGCECredentials,
 		TransportCredsOnly:    !*UseRPCCredentials,
 		TLSServerName:         *TLSServerName,
-		CertPool:              certPool,
+		TLSCACertFile:         *TLSCACert,
 		MaxConcurrentRequests: uint32(*MaxConcurrentRequests),
 		MaxConcurrentStreams:  uint32(*MaxConcurrentStreams),
 	}, opts...)
