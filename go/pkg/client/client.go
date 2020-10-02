@@ -3,7 +3,9 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/user"
@@ -251,6 +253,12 @@ type DialParams struct {
 	// This is not the same as NoSecurity, as transport credentials will still be set.
 	TransportCredsOnly bool
 
+	// TLSCACertFile is the PEM file that contains TLS root certificates.
+	TLSCACertFile string
+
+	// TLSServerName overrides the server name sent in TLS, if set to a non-empty string.
+	TLSServerName string
+
 	// DialOpts defines the set of gRPC DialOptions to apply, in addition to any used internally.
 	DialOpts []grpc.DialOption
 
@@ -316,7 +324,18 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 			opts = append(opts, grpc.WithPerRPCCredentials(rpcCreds))
 		}
 
-		tlsCreds := credentials.NewClientTLSFromCert(nil, "")
+		certPool := x509.NewCertPool()
+		if params.TLSCACertFile != "" {
+			ca, err := ioutil.ReadFile(params.TLSCACertFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s: %w", params.TLSCACertFile, err)
+			}
+			if ok := certPool.AppendCertsFromPEM(ca); !ok {
+				return nil, fmt.Errorf("failed to load TLS CA certificates from %s", params.TLSCACertFile)
+			}
+		}
+
+		tlsCreds := credentials.NewClientTLSFromCert(certPool, params.TLSServerName)
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
 	grpcInt := createGRPCInterceptor(params)

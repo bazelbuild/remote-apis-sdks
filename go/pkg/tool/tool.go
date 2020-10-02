@@ -139,6 +139,9 @@ func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPre
 	if err != nil {
 		return err
 	}
+	if resPb == nil {
+		return fmt.Errorf("action digest %v not found in cache", actionDigest)
+	}
 
 	log.Infof("Cleaning contents of %v.", pathPrefix)
 	os.RemoveAll(pathPrefix)
@@ -245,42 +248,86 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 		return "", err
 	}
 
+	if actionProto.Timeout != nil {
+		timeout, err := ptypes.Duration(actionProto.Timeout)
+		if err != nil {
+			return "", err
+		}
+		showActionRes.WriteString(fmt.Sprintf("Timeout: %s\n", timeout.String()))
+	}
+
 	commandProto := &repb.Command{}
 	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
 	if err != nil {
 		return "", err
 	}
-	showActionRes.WriteString("Command\n========\n")
+	showActionRes.WriteString("Command\n=======\n")
 	showActionRes.WriteString(fmt.Sprintf("Command Digest: %v\n", cmdDg))
 
 	log.Infof("Reading command from action digest..")
 	if err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
 		return "", err
 	}
+	for _, ev := range commandProto.GetEnvironmentVariables() {
+		showActionRes.WriteString(fmt.Sprintf("\t%s=%s\n", ev.Name, ev.Value))
+	}
 	cmdStr := strings.Join(commandProto.GetArguments(), " ")
 	showActionRes.WriteString(fmt.Sprintf("\t%v\n", cmdStr))
 
+	showActionRes.WriteString("\nPlatform\n========\n")
+	for _, property := range commandProto.GetPlatform().GetProperties() {
+		showActionRes.WriteString(fmt.Sprintf("\t%s=%s\n", property.Name, property.Value))
+	}
+
+	showActionRes.WriteString("\nInputs\n======\n")
 	log.Infof("Fetching input tree from input root digest..")
 	inpTree, _, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
 	if err != nil {
-		return "", err
+		showActionRes.WriteString("Failed to fetch input tree:\n")
+		showActionRes.WriteString(err.Error())
+		showActionRes.WriteString("\n")
+	} else {
+		showActionRes.WriteString(inpTree)
 	}
-	showActionRes.WriteString("\nInputs\n======\n")
-	showActionRes.WriteString(inpTree)
 
-	log.Infof("Fetching output tree from action result..")
-	outs, err := c.getOutputs(ctx, resPb)
-	if err != nil {
-		return "", err
+	if resPb == nil {
+		showActionRes.WriteString("\nNo action result in cache.\n")
+	} else {
+		log.Infof("Fetching output tree from action result..")
+		outs, err := c.getOutputs(ctx, resPb)
+		if err != nil {
+			return "", err
+		}
+		showActionRes.WriteString("\n")
+		showActionRes.WriteString(outs)
 	}
-	showActionRes.WriteString("\n")
-	showActionRes.WriteString(outs)
 	return showActionRes.String(), nil
 }
 
 func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (string, error) {
 	var res bytes.Buffer
-	res.WriteString("Output Files:\n=============\n")
+
+	res.WriteString("------------------------------------------------------------------------\n")
+	res.WriteString("Action Result\n\n")
+	res.WriteString(fmt.Sprintf("Exit code: %d\n", actionRes.ExitCode))
+
+	if actionRes.StdoutDigest != nil {
+		dg, err := digest.NewFromProto(actionRes.StdoutDigest)
+		if err != nil {
+			return "", err
+		}
+		res.WriteString(fmt.Sprintf("stdout digest: %v\n", dg))
+	}
+
+	if actionRes.StderrDigest != nil {
+		dg, err := digest.NewFromProto(actionRes.StderrDigest)
+		if err != nil {
+			return "", err
+		}
+		res.WriteString(fmt.Sprintf("stderr digest: %v\n", dg))
+	}
+
+	res.WriteString("\nOutput Files\n============\n")
 	for _, of := range actionRes.GetOutputFiles() {
 		dg, err := digest.NewFromProto(of.GetDigest())
 		if err != nil {
@@ -289,7 +336,7 @@ func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (
 		res.WriteString(fmt.Sprintf("%v, digest: %v\n", of.GetPath(), dg))
 	}
 
-	res.WriteString("\nOutput Files From Directories:\n=================\n")
+	res.WriteString("\nOutput Files From Directories\n=============================\n")
 	for _, od := range actionRes.GetOutputDirectories() {
 		treeDigest := od.GetTreeDigest()
 		dg, err := digest.NewFromProto(treeDigest)
@@ -308,6 +355,7 @@ func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (
 		res.WriteString("\n")
 		res.WriteString(outputs)
 	}
+
 	return res.String(), nil
 }
 
@@ -378,9 +426,6 @@ func (c *Client) getActionResult(ctx context.Context, actionDigest string) (*rep
 	resPb, err := c.GrpcClient.CheckActionCache(ctx, d)
 	if err != nil {
 		return nil, err
-	}
-	if resPb == nil {
-		return nil, fmt.Errorf("action digest %v not found in cache", d)
 	}
 	return resPb, nil
 }
