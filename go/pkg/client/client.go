@@ -550,33 +550,19 @@ func (c *Client) UpdateActionResult(ctx context.Context, req *repb.UpdateActionR
 }
 
 // Read wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level functions such as ReadBlob(ToFile) instead,
+// as they include retries/timeouts handling.
 func (c *Client) Read(ctx context.Context, req *bspb.ReadRequest) (res bsgrpc.ByteStream_ReadClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, "Read", func(ctx context.Context) (e error) {
-			res, e = c.byteStream.Read(ctx, req, opts...)
-			return e
-		})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.byteStream.Read(ctx, req, c.RPCOpts()...)
 }
 
 // Write wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level functions such as WriteBlob(s) instead,
+// as they include retries/timeouts handling.
 func (c *Client) Write(ctx context.Context) (res bsgrpc.ByteStream_WriteClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, "Write", func(ctx context.Context) (e error) {
-			res, e = c.byteStream.Write(ctx, opts...)
-			return e
-		})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.byteStream.Write(ctx, c.RPCOpts()...)
 }
 
 // QueryWriteStatus wraps the underlying call with specific client options.
@@ -643,48 +629,27 @@ func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReq
 }
 
 // GetTree wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level GetDirectoryTree instead,
+// as it includes retries/timeouts handling.
 func (c *Client) GetTree(ctx context.Context, req *repb.GetTreeRequest) (res regrpc.ContentAddressableStorage_GetTreeClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, "GetTree", func(ctx context.Context) (e error) {
-			res, e = c.cas.GetTree(ctx, req, opts...)
-			return e
-		})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.cas.GetTree(ctx, req, c.RPCOpts()...)
 }
 
 // Execute wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level ExecuteAndWait instead,
+// as it includes retries/timeouts handling.
 func (c *Client) Execute(ctx context.Context, req *repb.ExecuteRequest) (res regrpc.Execution_ExecuteClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, "Execute", func(ctx context.Context) (e error) {
-			res, e = c.execution.Execute(ctx, req, opts...)
-			return e
-		})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.execution.Execute(ctx, req, c.RPCOpts()...)
 }
 
 // WaitExecution wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level ExecuteAndWait instead,
+// as it includes retries/timeouts handling.
 func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionRequest) (res regrpc.Execution_ExecuteClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, "WaitExecution", func(ctx context.Context) (e error) {
-			res, e = c.execution.WaitExecution(ctx, req, opts...)
-			return e
-		})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.execution.WaitExecution(ctx, req, c.RPCOpts()...)
 }
 
 // GetBackendCapabilities returns the capabilities for a specific server connection

@@ -52,7 +52,8 @@ var (
 	TLSCACert = flag.String("tls_ca_cert", "", "Load TLS CA certificates from this file")
 	// StartupCapabilities specifies whether to self-configure based on remote server capabilities on startup.
 	StartupCapabilities = flag.Bool("startup_capabilities", true, "Whether to self-configure based on remote server capabilities on startup.")
-	RPCTimeouts         map[string]string
+	// RPCTimeouts stores the per-RPC timeout values.
+	RPCTimeouts map[string]string
 )
 
 func init() {
