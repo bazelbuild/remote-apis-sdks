@@ -3,6 +3,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
@@ -267,6 +268,10 @@ type DialParams struct {
 
 	// MaxConcurrentStreams specifies the maximum number of concurrent stream RPCs on a single connection.
 	MaxConcurrentStreams uint32
+
+	// TLSClientAuthCert/TLSClientAuthKey sets the cert/key pair for using mTLS auth to connect to the RBE service.
+	TLSClientAuthCert string
+	TLSClientAuthKey  string
 }
 
 func createGRPCInterceptor(p DialParams) *balancer.GCPInterceptor {
@@ -336,7 +341,24 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 			}
 		}
 
-		tlsCreds := credentials.NewClientTLSFromCert(certPool, params.TLSServerName)
+		var mTLSCredentials []tls.Certificate
+		if params.TLSClientAuthCert != "" || params.TLSClientAuthKey != "" {
+			if params.TLSClientAuthCert == "" || params.TLSClientAuthKey == "" {
+				return nil, fmt.Errorf("TLSClientAuthCert and TLSClientAuthKey must both be empty or both be set, got TLSClientAuthCert='%v' and TLSClientAuthKey='%v'", params.TLSClientAuthCert, params.TLSClientAuthKey)
+			}
+
+			cert, err := tls.LoadX509KeyPair(params.TLSClientAuthCert, params.TLSClientAuthKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read mTLS cert pair ('%v', '%v'): %v", params.TLSClientAuthCert, params.TLSClientAuthKey, err)
+			}
+			mTLSCredentials = append(mTLSCredentials, cert)
+		}
+
+		tlsCreds := credentials.NewTLS(&tls.Config{
+			ServerName:   params.TLSServerName,
+			RootCAs:      certPool,
+			Certificates: mTLSCredentials,
+		})
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
 	grpcInt := createGRPCInterceptor(params)
