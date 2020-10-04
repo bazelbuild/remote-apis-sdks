@@ -35,6 +35,8 @@ var (
 	UseRPCCredentials = flag.Bool("use_rpc_credentials", true, "If false, no per-RPC credentials will be used (disables --credential_file, --use_application_default_credentials, and --use_gce_credentials.")
 	// Service represents the host (and, if applicable, port) of the remote execution service.
 	Service = flag.String("service", "", "The remote execution service to dial when calling via gRPC, including port, such as 'localhost:8790' or 'remotebuildexecution.googleapis.com:443'")
+	// ServiceNoSecurity can be set to connect to the gRPC service without TLS.
+	ServiceNoSecurity = flag.Bool("service_no_security", false, "If true, do not use TLS when connecting to the gRPC service.")
 	// CASService represents the host (and, if applicable, port) of the CAS service, if different from the remote execution service.
 	CASService = flag.String("cas_service", "", "The CAS service to dial when calling via gRPC, including port, such as 'localhost:8790' or 'remotebuildexecution.googleapis.com:443'")
 	// Instance gives the instance of remote execution to test (in
@@ -86,6 +88,7 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 	}
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
+		NoSecurity:            *ServiceNoSecurity,
 		CASService:            *CASService,
 		CredFile:              *CredFile,
 		UseApplicationDefault: *UseApplicationDefaultCreds,
