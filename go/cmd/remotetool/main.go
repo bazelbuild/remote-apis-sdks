@@ -41,6 +41,7 @@ const (
 	downloadBlob         OpType = "download_blob"
 	downloadDir          OpType = "download_dir"
 	reexecuteAction      OpType = "reexecute_action"
+	uploadBlob           OpType = "upload_blob"
 )
 
 var supportedOps = []OpType{
@@ -49,6 +50,7 @@ var supportedOps = []OpType{
 	downloadBlob,
 	downloadDir,
 	reexecuteAction,
+	uploadBlob,
 }
 
 var (
@@ -113,6 +115,14 @@ func main() {
 	case reexecuteAction:
 		if err := c.ReexecuteAction(ctx, *digest, *inputRoot, outerr.SystemOutErr); err != nil {
 			log.Exitf("error reexecuting action %v: %v", *digest, err)
+		}
+
+	case uploadBlob:
+		if *pathPrefix == "" {
+			log.Exitf("--path must be specified.")
+		}
+		if err := c.UploadBlob(ctx, *digest, *pathPrefix); err != nil {
+			log.Exitf("error uploading blob for digest %v: %v", *digest, err)
 		}
 
 	default:
