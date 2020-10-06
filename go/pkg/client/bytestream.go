@@ -21,14 +21,12 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 // WriteChunked uploads chunked data with a given resource name to the CAS.
 func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chunker) error {
 	cancelCtx, cancel := context.WithCancel(ctx)
-	opts := c.RPCOpts()
 	defer cancel()
-	closure := func() error {
+	closure := func(ctx context.Context) error {
 		ch.Reset() // Retry by starting the stream from the beginning.
 		// TODO(olaola): implement resumable uploads.
 
-		// Use lower-level Write in order to not retry twice.
-		stream, err := c.byteStream.Write(cancelCtx, opts...)
+		stream, err := c.Write(ctx)
 		if err != nil {
 			return err
 		}
@@ -59,7 +57,7 @@ func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chun
 		}
 		return nil
 	}
-	return c.Retrier.Do(cancelCtx, closure)
+	return c.Retrier.Do(cancelCtx, func() error { return c.CallWithTimeout(cancelCtx, "Write", closure) })
 }
 
 // ReadBytes fetches a resource's contents into a byte slice.
@@ -99,14 +97,13 @@ func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int
 func (c *Client) readStreamed(ctx context.Context, name string, offset, limit int64, w io.Writer) (n int64, e error) {
 	cancelCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	opts := c.RPCOpts()
-	closure := func() error {
+	closure := func(ctx context.Context) error {
 		// Use lower-level Read in order to not retry twice.
-		stream, err := c.byteStream.Read(cancelCtx, &bspb.ReadRequest{
+		stream, err := c.byteStream.Read(ctx, &bspb.ReadRequest{
 			ResourceName: name,
 			ReadOffset:   offset + n,
 			ReadLimit:    limit,
-		}, opts...)
+		})
 		if err != nil {
 			return err
 		}
@@ -139,6 +136,6 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 		}
 		return nil
 	}
-	e = c.Retrier.Do(cancelCtx, closure)
+	e = c.Retrier.Do(cancelCtx, func() error { return c.CallWithTimeout(cancelCtx, "Read", closure) })
 	return n, e
 }
