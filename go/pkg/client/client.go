@@ -11,14 +11,15 @@ import (
 	"os"
 	"os/user"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -37,9 +38,10 @@ import (
 )
 
 const (
-	scopes      = "https://www.googleapis.com/auth/cloud-platform"
-	authority   = "test-server"
-	localPrefix = "localhost"
+	scopes            = "https://www.googleapis.com/auth/cloud-platform"
+	authority         = "test-server"
+	localPrefix       = "localhost"
+	casChanBufferSize = 10000
 
 	// HomeDirMacro is replaced by the current user's home dir in the CredFile dial parameter.
 	HomeDirMacro = "${HOME}"
@@ -82,14 +84,18 @@ type Client struct {
 	RegularMode os.FileMode
 	// UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
 	UtilizeLocality UtilizeLocality
-	serverCaps      *repb.ServerCapabilities
-	useBatchOps     UseBatchOps
-	casUploaders    chan bool
-	casDownloaders  chan bool
-	casUploadLocks  sync.Map
-	casUploadErrors sync.Map
-	rpcTimeouts     RPCTimeouts
-	creds           credentials.PerRPCCredentials
+	// UnifiedCASOps specifies whether the client uploads/downloads files in the background
+	UnifiedCASOps       UnifiedCASOps
+	serverCaps          *repb.ServerCapabilities
+	useBatchOps         UseBatchOps
+	casConcurrency      int64
+	casUploaders        *semaphore.Weighted
+	casUploadRequests   chan *uploadRequest
+	casUploads          map[digest.Digest]*uploadState
+	casDownloaders      *semaphore.Weighted
+	casDownloadRequests chan *downloadRequest
+	rpcTimeouts         RPCTimeouts
+	creds               credentials.PerRPCCredentials
 }
 
 const (
@@ -113,6 +119,7 @@ const (
 
 // Close closes the underlying gRPC connection(s).
 func (c *Client) Close() error {
+	UnifiedCASOps(false).Apply(c) // Close the channels & stop background operations.
 	err := c.Connection.Close()
 	if err != nil {
 		return err
@@ -141,6 +148,26 @@ type UtilizeLocality bool
 
 func (s UtilizeLocality) Apply(c *Client) {
 	c.UtilizeLocality = s
+}
+
+// UnifiedCASOps is to specify whether client downloads/uploads files in the background, unifying operations between different actions.
+type UnifiedCASOps bool
+
+// Note: it is unsafe to change this property when connections are ongoing.
+func (s UnifiedCASOps) Apply(c *Client) {
+	if c.UnifiedCASOps == s {
+		return
+	}
+	if s {
+		c.casUploadRequests = make(chan *uploadRequest, casChanBufferSize)
+		c.casDownloadRequests = make(chan *downloadRequest, casChanBufferSize)
+		go c.uploadProcessor()
+		go c.downloadProcessor()
+	} else {
+		close(c.casUploadRequests)
+		close(c.casDownloadRequests)
+	}
+	c.UnifiedCASOps = s
 }
 
 // MaxBatchDigests is maximum amount of digests to batch in batched operations.
@@ -185,8 +212,9 @@ const DefaultMaxConcurrentStreams = 25
 
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
-	c.casUploaders = make(chan bool, cy)
-	c.casDownloaders = make(chan bool, cy)
+	c.casConcurrency = int64(cy)
+	c.casUploaders = semaphore.NewWeighted(c.casConcurrency)
+	c.casDownloaders = semaphore.NewWeighted(c.casConcurrency)
 }
 
 // StartupCapabilities controls whether the client should attempt to fetch the remote
@@ -377,7 +405,6 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 
 			opts = append(opts, grpc.WithPerRPCCredentials(rpcCreds))
 		}
-
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
 			return nil, fmt.Errorf("Could not create TLS config: %v", err)
@@ -444,8 +471,10 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		RegularMode:         DefaultRegularMode,
 		useBatchOps:         true,
 		StartupCapabilities: true,
-		casUploaders:        make(chan bool, DefaultCASConcurrency),
-		casDownloaders:      make(chan bool, DefaultCASConcurrency),
+		casConcurrency:      DefaultCASConcurrency,
+		casUploaders:        semaphore.NewWeighted(DefaultCASConcurrency),
+		casDownloaders:      semaphore.NewWeighted(DefaultCASConcurrency),
+		casUploads:          make(map[digest.Digest]*uploadState),
 		Retrier:             RetryTransient(),
 	}
 	for _, o := range opts {
@@ -455,6 +484,9 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		if err := client.CheckCapabilities(ctx); err != nil {
 			return nil, err
 		}
+	}
+	if client.casConcurrency < 1 {
+		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
 	return client, nil
 }
@@ -660,6 +692,7 @@ func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlob
 
 // BatchReadBlobs wraps the underlying call with specific client options.
 // NOTE that its retry logic ignores the per-blob errors embedded in the response.
+// It is recommended to use BatchDownloadBlobs instead.
 func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (res *repb.BatchReadBlobsResponse, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {

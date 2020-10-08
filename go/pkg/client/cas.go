@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -25,17 +27,231 @@ import (
 	log "github.com/golang/glog"
 )
 
-// UploadIfMissing stores a number of uploadable items.
-// It first queries the CAS to see which items are missing and only uploads those that are.
-// Returns a slice of the missing digests.
-func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) ([]digest.Digest, error) {
-	if cap(c.casUploaders) <= 0 {
-		return nil, fmt.Errorf("CASConcurrency should be at least 1")
-	}
-	const (
-		logInterval = 25
-	)
+const logInterval = 25
 
+type requestMetadata struct {
+	toolName     string
+	actionID     string
+	invocationID string
+}
+
+type uploadRequest struct {
+	c    *chunker.Chunker
+	meta *requestMetadata
+	wait chan<- *uploadResponse
+}
+
+type uploadResponse struct {
+	digest  digest.Digest
+	err     error
+	missing bool
+}
+
+type uploadState struct {
+	data *chunker.Chunker
+	err  error
+
+	// mu protects clients. The field needs protection since it is updated by upload
+	// whenever new clients join, and iterated on by updateAndNotify in the end of each upload.
+	// It does NOT protect data or error, because they do not need protection -
+	// they are only modified when a state object is created, and by updateAndNotify which is called
+	// exactly once for a given state object (this is the whole point of the algorithm).
+	mu      sync.Mutex
+	clients []chan<- *uploadResponse
+}
+
+func (c *Client) findBlobState(ctx context.Context, dgs []digest.Digest) (missing []digest.Digest, present []digest.Digest, err error) {
+	dgMap := make(map[digest.Digest]bool)
+	for _, d := range dgs {
+		dgMap[d] = true
+	}
+	missing, err = c.MissingBlobs(ctx, dgs)
+	for _, d := range missing {
+		delete(dgMap, d)
+	}
+	for d := range dgMap {
+		present = append(present, d)
+	}
+	return missing, present, err
+}
+
+func (c *Client) uploadProcessor() {
+	var buffer []*uploadRequest
+	ticker := time.NewTicker(50 * time.Millisecond)
+	for {
+		select {
+		case req, ok := <-c.casUploadRequests:
+			if !ok {
+				// Client is exiting. Notify remaining uploads to prevent deadlocks.
+				ticker.Stop()
+				if buffer != nil {
+					for _, r := range buffer {
+						r.wait <- &uploadResponse{err: context.Canceled}
+					}
+				}
+				return
+			}
+			buffer = append(buffer, req)
+			if len(buffer) >= casChanBufferSize {
+				c.upload(buffer)
+				buffer = nil
+			}
+		case <-ticker.C:
+			if buffer != nil {
+				c.upload(buffer)
+				buffer = nil
+			}
+		}
+	}
+}
+
+func updateAndNotify(st *uploadState, err error, missing bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.err = err
+	for i, cl := range st.clients {
+		cl <- &uploadResponse{
+			digest:  st.data.Digest(),
+			missing: i == 0 && missing, // Only first client is reported the digest missing.
+			err:     err,
+		}
+	}
+	st.clients = nil
+	st.data = nil
+}
+
+func getUnifiedMetadata(metas []*requestMetadata) *requestMetadata {
+	toolNames := make(map[string]bool)
+	actionIDs := make(map[string]bool)
+	invocationIDs := make(map[string]bool)
+	for _, m := range metas {
+		toolNames[m.toolName] = true
+		actionIDs[m.actionID] = true
+		invocationIDs[m.invocationID] = true
+	}
+	var tnKeys, aiKeys, iiKeys []string
+	for toolName := range toolNames {
+		tnKeys = append(tnKeys, toolName)
+	}
+	for actionID := range actionIDs {
+		aiKeys = append(aiKeys, actionID)
+	}
+	for invocationID := range invocationIDs {
+		iiKeys = append(iiKeys, invocationID)
+	}
+	sort.Strings(tnKeys)
+	sort.Strings(aiKeys)
+	sort.Strings(iiKeys)
+	return &requestMetadata{
+		toolName:     strings.Join(tnKeys, ","),
+		actionID:     strings.Join(aiKeys, ","),
+		invocationID: strings.Join(iiKeys, ","),
+	}
+}
+
+func (c *Client) upload(reqs []*uploadRequest) {
+	// Collect new uploads.
+	newStates := make(map[digest.Digest]*uploadState)
+	var newUploads []digest.Digest
+	var metas []*requestMetadata
+	for _, req := range reqs {
+		dg := req.c.Digest()
+		st, ok := c.casUploads[dg]
+		if ok {
+			st.mu.Lock()
+			if len(st.clients) > 0 {
+				st.clients = append(st.clients, req.wait)
+			} else {
+				req.wait <- &uploadResponse{err: st.err, missing: false} // Digest is only needed when missing=true
+			}
+			st.mu.Unlock()
+		} else {
+			st = &uploadState{
+				clients: []chan<- *uploadResponse{req.wait},
+				data:    req.c,
+			}
+			c.casUploads[dg] = st
+			newUploads = append(newUploads, dg)
+			metas = append(metas, req.meta)
+			newStates[dg] = st
+		}
+	}
+
+	unifiedMeta := getUnifiedMetadata(metas)
+	var err error
+	ctx := context.Background()
+	if unifiedMeta.actionID != "" {
+		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta.toolName, unifiedMeta.actionID, unifiedMeta.invocationID)
+	}
+	if err != nil {
+		for _, st := range newStates {
+			updateAndNotify(st, err, false)
+		}
+		return
+	}
+	missing, present, err := c.findBlobState(ctx, newUploads)
+	if err != nil {
+		for _, st := range newStates {
+			updateAndNotify(st, err, false)
+		}
+		return
+	}
+	for _, dg := range present {
+		updateAndNotify(newStates[dg], nil, false)
+	}
+
+	log.V(2).Infof("%d new items to store", len(missing))
+	var batches [][]digest.Digest
+	if c.useBatchOps {
+		batches = c.makeBatches(missing, true)
+	} else {
+		log.V(2).Info("Uploading them individually")
+		for i := range missing {
+			log.V(3).Infof("Creating single batch of blob %s", missing[i])
+			batches = append(batches, missing[i:i+1])
+		}
+	}
+
+	for i, batch := range batches {
+		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
+		go func() {
+			if c.casUploaders.Acquire(ctx, 1) == nil {
+				defer c.casUploaders.Release(1)
+			}
+			if i%logInterval == 0 {
+				log.V(2).Infof("%d batches left to store", len(batches)-i)
+			}
+			if len(batch) > 1 {
+				log.V(3).Infof("Uploading batch of %d blobs", len(batch))
+				bchMap := make(map[digest.Digest][]byte)
+				for _, dg := range batch {
+					st := newStates[dg]
+					data, err := st.data.FullData()
+					if err != nil {
+						updateAndNotify(st, err, true)
+						continue
+					}
+					bchMap[dg] = data
+				}
+				err := c.BatchWriteBlobs(ctx, bchMap)
+				for dg := range bchMap {
+					updateAndNotify(newStates[dg], err, true)
+				}
+			} else {
+				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
+				st := newStates[batch[0]]
+				ch := st.data
+				dg := ch.Digest()
+				err := c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
+				updateAndNotify(st, err, true)
+			}
+		}()
+	}
+}
+
+// This function is only used when UnifiedCASOps is false. It will be removed
+// once UnifiedCASOps=true is stable.
+func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker) ([]digest.Digest, error) {
 	var dgs []digest.Digest
 	chunkers := make(map[digest.Digest]*chunker.Chunker)
 	for _, c := range data {
@@ -64,10 +280,12 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 
 	eg, eCtx := errgroup.WithContext(ctx)
 	for i, batch := range batches {
-		i, batch := i, batch   // https://golang.org/doc/faq#closures_and_goroutines
-		c.casUploaders <- true // Reserve an uploader thread.
+		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
 		eg.Go(func() error {
-			defer func() { <-c.casUploaders }()
+			if err := c.casUploaders.Acquire(eCtx, 1); err != nil {
+				return err
+			}
+			defer c.casUploaders.Release(1)
 			if i%logInterval == 0 {
 				log.V(2).Infof("%d batches left to store", len(batches)-i)
 			}
@@ -104,6 +322,61 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	log.V(2).Info("Done")
 
 	return missing, err
+}
+
+// UploadIfMissing stores a number of uploadable items.
+// It first queries the CAS to see which items are missing and only uploads those that are.
+// Returns a slice of the missing digests.
+func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) ([]digest.Digest, error) {
+	if !c.UnifiedCASOps {
+		return c.uploadNonUnified(ctx, data...)
+	}
+	uploads := len(data)
+	log.V(2).Infof("Request to upload %d blobs", uploads)
+
+	if uploads == 0 {
+		return nil, nil
+	}
+	toolName, actionID, invocationID, err := GetContextMetadata(ctx)
+	if err != nil {
+		return nil, err
+	}
+	meta := &requestMetadata{
+		toolName:     toolName,
+		actionID:     actionID,
+		invocationID: invocationID,
+	}
+	wait := make(chan *uploadResponse, uploads)
+	var missing []digest.Digest
+	for _, ch := range data {
+		req := &uploadRequest{
+			c:    ch,
+			meta: meta,
+			wait: wait,
+		}
+		select {
+		case <-ctx.Done():
+			log.V(2).Infof("Upload canceled")
+			return nil, ctx.Err()
+		case c.casUploadRequests <- req:
+			continue
+		}
+	}
+	for uploads > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case resp := <-wait:
+			if resp.err != nil {
+				return nil, resp.err
+			}
+			if resp.missing {
+				missing = append(missing, resp.digest)
+			}
+			uploads--
+		}
+	}
+	return missing, nil
 }
 
 // WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
@@ -442,16 +715,10 @@ func (c *Client) ReadProto(ctx context.Context, d digest.Digest, msg proto.Messa
 // MissingBlobs queries the CAS to determine if it has the listed blobs. It returns a list of the
 // missing blobs.
 func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest.Digest, error) {
-	if cap(c.casUploaders) <= 0 {
-		return nil, fmt.Errorf("CASConcurrency should be at least 1")
-	}
 	var batches [][]digest.Digest
 	var missing []digest.Digest
 	var resultMutex sync.Mutex
-	const (
-		logInterval   = 25
-		maxQueryLimit = 10000
-	)
+	const maxQueryLimit = 10000
 	for len(ds) > 0 {
 		batchSize := maxQueryLimit
 		if len(ds) < maxQueryLimit {
@@ -469,10 +736,12 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 
 	eg, eCtx := errgroup.WithContext(ctx)
 	for i, batch := range batches {
-		i, batch := i, batch   // https://golang.org/doc/faq#closures_and_goroutines
-		c.casUploaders <- true // Reserve an uploader thread.
+		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
 		eg.Go(func() error {
-			defer func() { <-c.casUploaders }()
+			if err := c.casUploaders.Acquire(eCtx, 1); err != nil {
+				return err
+			}
+			defer c.casUploaders.Release(1)
 			if i%logInterval == 0 {
 				log.V(3).Infof("%d missing batches left to query", len(batches)-i)
 			}
@@ -673,7 +942,7 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*tree.Outp
 		if src.IsEmptyDirectory {
 			return fmt.Errorf("unexpected empty directory: %s", src.Path)
 		}
-		if err := copyFile(execRoot, src.Path, out.Path, perm); err != nil {
+		if err := copyFile(execRoot, execRoot, src.Path, out.Path, perm); err != nil {
 			return err
 		}
 	}
@@ -685,15 +954,15 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*tree.Outp
 	return nil
 }
 
-func copyFile(execRoot, from, to string, mode os.FileMode) error {
-	src := filepath.Join(execRoot, from)
+func copyFile(srcExecRoot, dstExecRoot, from, to string, mode os.FileMode) error {
+	src := filepath.Join(srcExecRoot, from)
 	s, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
-	dst := filepath.Join(execRoot, to)
+	dst := filepath.Join(dstExecRoot, to)
 	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
 		return err
@@ -703,15 +972,186 @@ func copyFile(execRoot, from, to string, mode os.FileMode) error {
 	return err
 }
 
-// DownloadFiles downloads the output files under |execRoot|.
-func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
-	if cap(c.casDownloaders) <= 0 {
-		return fmt.Errorf("CASConcurrency should be at least 1")
-	}
-	const (
-		logInterval = 25
-	)
+type downloadRequest struct {
+	digest   digest.Digest
+	execRoot string
+	output   *tree.Output
+	meta     *requestMetadata
+	wait     chan<- error
+}
 
+func (c *Client) downloadProcessor() {
+	var buffer []*downloadRequest
+	ticker := time.NewTicker(50 * time.Millisecond)
+	for {
+		select {
+		case ch, ok := <-c.casDownloadRequests:
+			if !ok {
+				// Client is exiting. Notify remaining downloads to prevent deadlocks.
+				ticker.Stop()
+				if buffer != nil {
+					for _, r := range buffer {
+						r.wait <- context.Canceled
+					}
+				}
+				return
+			}
+			buffer = append(buffer, ch)
+			if len(buffer) >= casChanBufferSize {
+				c.download(buffer)
+				buffer = nil
+			}
+		case <-ticker.C:
+			if buffer != nil {
+				c.download(buffer)
+				buffer = nil
+			}
+		}
+	}
+}
+
+func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest, err error) {
+	if err != nil {
+		log.Errorf("Error downloading %v: %v", batch[0], err)
+	}
+	for _, dg := range batch {
+		rs, ok := reqs[dg]
+		if !ok {
+			log.Errorf("Precondition failed: download request not found in input %v.", dg)
+		}
+		for _, r := range rs {
+			r.wait <- err
+		}
+	}
+}
+
+func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest) {
+	log.V(3).Infof("Downloading batch of %d files", len(batch))
+	bchMap, err := c.BatchDownloadBlobs(ctx, batch)
+	if err != nil {
+		afterDownload(batch, reqs, err)
+		return
+	}
+	for dg, data := range bchMap {
+		for _, r := range reqs[dg] {
+			perm := c.RegularMode
+			if r.output.IsExecutable {
+				perm = c.ExecutableMode
+			}
+			r.wait <- ioutil.WriteFile(filepath.Join(r.execRoot, r.output.Path), data, perm)
+		}
+	}
+}
+
+func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[digest.Digest][]*downloadRequest) (err error) {
+	// The lock is released when all file copies are finished.
+	// We cannot release the lock after each individual file copy, because
+	// the caller might move the file, and we don't have the contents in memory.
+	defer func() { afterDownload([]digest.Digest{dg}, reqs, err) }()
+	rs := reqs[dg]
+	if len(rs) < 1 {
+		return fmt.Errorf("Failed precondition: cannot find %v in reqs map", dg)
+	}
+	r := rs[0]
+	rs = rs[1:]
+	path := filepath.Join(r.execRoot, r.output.Path)
+	log.V(3).Infof("Downloading single file with digest %s to %s", r.output.Digest, path)
+	if _, err := c.ReadBlobToFile(ctx, r.output.Digest, path); err != nil {
+		return err
+	}
+	if r.output.IsExecutable {
+		if err := os.Chmod(path, c.ExecutableMode); err != nil {
+			return err
+		}
+	}
+	for _, cp := range rs {
+		perm := c.RegularMode
+		if cp.output.IsExecutable {
+			perm = c.ExecutableMode
+		}
+		if err := copyFile(r.execRoot, cp.execRoot, r.output.Path, cp.output.Path, perm); err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func (c *Client) download(data []*downloadRequest) {
+	// It is possible to have multiple same files download to different locations.
+	// This will download once and copy to the other locations.
+	reqs := make(map[digest.Digest][]*downloadRequest)
+	var metas []*requestMetadata
+	for _, r := range data {
+		rs := reqs[r.digest]
+		rs = append(rs, r)
+		reqs[r.digest] = rs
+		metas = append(metas, r.meta)
+	}
+
+	var dgs []digest.Digest
+
+	if bool(c.useBatchOps) && bool(c.UtilizeLocality) {
+		paths := make([]*tree.Output, 0, len(data))
+		for _, r := range data {
+			paths = append(paths, r.output)
+		}
+
+		// This is to utilize locality in disk when writing files.
+		sort.Slice(paths, func(i, j int) bool {
+			return paths[i].Path < paths[j].Path
+		})
+
+		for _, path := range paths {
+			dgs = append(dgs, path.Digest)
+		}
+	} else {
+		for dg := range reqs {
+			dgs = append(dgs, dg)
+		}
+	}
+	log.V(2).Infof("%d digests to download (%d reqs)", len(dgs), len(reqs))
+	var batches [][]digest.Digest
+	if c.useBatchOps {
+		batches = c.makeBatches(dgs, !bool(c.UtilizeLocality))
+	} else {
+		log.V(2).Info("Downloading them individually")
+		for i := range dgs {
+			log.V(3).Infof("Creating single batch of blob %s", dgs[i])
+			batches = append(batches, dgs[i:i+1])
+		}
+	}
+
+	unifiedMeta := getUnifiedMetadata(metas)
+	var err error
+	ctx := context.Background()
+	if unifiedMeta.actionID != "" {
+		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta.toolName, unifiedMeta.actionID, unifiedMeta.invocationID)
+	}
+	if err != nil {
+		afterDownload(dgs, reqs, err)
+		return
+	}
+	for i, batch := range batches {
+		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
+		go func() {
+			if c.casDownloaders.Acquire(ctx, 1) == nil {
+				defer c.casDownloaders.Release(1)
+			}
+			if i%logInterval == 0 {
+				log.V(2).Infof("%d batches left to download", len(batches)-i)
+			}
+			if len(batch) > 1 {
+				c.downloadBatch(ctx, batch, reqs)
+			} else {
+				c.downloadSingle(ctx, batch[0], reqs)
+			}
+		}()
+	}
+}
+
+// This is a legacy function used only when UnifiedCASOps=false.
+// It will be removed when UnifiedCASOps=true is stable.
+func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
 	var dgs []digest.Digest
 
 	if bool(c.useBatchOps) && bool(c.UtilizeLocality) {
@@ -748,10 +1188,12 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 
 	eg, eCtx := errgroup.WithContext(ctx)
 	for i, batch := range batches {
-		i, batch := i, batch     // https://golang.org/doc/faq#closures_and_goroutines
-		c.casDownloaders <- true // Reserve an downloader thread.
+		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
 		eg.Go(func() error {
-			defer func() { <-c.casDownloaders }()
+			if err := c.casDownloaders.Acquire(eCtx, 1); err != nil {
+				return err
+			}
+			defer c.casDownloaders.Release(1)
 			if i%logInterval == 0 {
 				log.V(2).Infof("%d batches left to download", len(batches)-i)
 			}
@@ -795,4 +1237,56 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 	err := eg.Wait()
 	log.V(3).Info("Done")
 	return err
+}
+
+// DownloadFiles downloads the output files under |execRoot|.
+func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
+	if !c.UnifiedCASOps {
+		return c.downloadNonUnified(ctx, execRoot, outputs)
+	}
+	count := len(outputs)
+	if count == 0 {
+		return nil
+	}
+	toolName, actionID, invocationID, err := GetContextMetadata(ctx)
+	if err != nil {
+		return err
+	}
+	meta := &requestMetadata{
+		toolName:     toolName,
+		actionID:     actionID,
+		invocationID: invocationID,
+	}
+	wait := make(chan error, count)
+	for dg, out := range outputs {
+		r := &downloadRequest{
+			digest:   dg,
+			execRoot: execRoot,
+			output:   out,
+			meta:     meta,
+			wait:     wait,
+		}
+		select {
+		case <-ctx.Done():
+			log.V(2).Infof("Download canceled")
+			return ctx.Err()
+		case c.casDownloadRequests <- r:
+			continue
+		}
+	}
+
+	// Wait for all downloads to finish.
+	for count > 0 {
+		select {
+		case <-ctx.Done():
+			log.V(2).Infof("Download canceled")
+			return ctx.Err()
+		case err := <-wait:
+			if err != nil {
+				return err
+			}
+			count--
+		}
+	}
+	return nil
 }

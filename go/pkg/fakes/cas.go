@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
@@ -201,20 +203,27 @@ func (f *Writer) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest
 // in a map. It also counts the number of requests to store received, for validating batching logic.
 type CAS struct {
 	// Maximum batch byte size to verify requests against.
-	BatchSize   int
-	blobs       map[digest.Digest][]byte
-	reads       map[digest.Digest]int
-	writes      map[digest.Digest]int
-	mu          sync.RWMutex
-	batchReqs   int
-	writeReqs   int
-	concReqs    int
-	maxConcReqs int
+	BatchSize         int
+	ReqSleepDuration  time.Duration
+	ReqSleepRandomize bool
+	PerDigestBlockFn  map[digest.Digest]func()
+	blobs             map[digest.Digest][]byte
+	reads             map[digest.Digest]int
+	writes            map[digest.Digest]int
+	missingReqs       map[digest.Digest]int
+	mu                sync.RWMutex
+	batchReqs         int
+	writeReqs         int
+	concReqs          int
+	maxConcReqs       int
 }
 
 // NewCAS returns a new empty fake CAS.
 func NewCAS() *CAS {
-	c := &CAS{BatchSize: client.DefaultMaxBatchSize}
+	c := &CAS{
+		BatchSize:        client.DefaultMaxBatchSize,
+		PerDigestBlockFn: make(map[digest.Digest]func()),
+	}
 	c.Clear()
 	return c
 }
@@ -226,6 +235,7 @@ func (f *CAS) Clear() {
 	f.blobs = make(map[digest.Digest][]byte)
 	f.reads = make(map[digest.Digest]int)
 	f.writes = make(map[digest.Digest]int)
+	f.missingReqs = make(map[digest.Digest]int)
 	f.batchReqs = 0
 	f.writeReqs = 0
 	f.concReqs = 0
@@ -257,6 +267,11 @@ func (f *CAS) BlobWrites(d digest.Digest) int {
 	return f.writes[d]
 }
 
+// BlobMissingReqs returns the total number of GetMissingBlobs requests for a particular digest.
+func (f *CAS) BlobMissingReqs(d digest.Digest) int {
+	return f.missingReqs[d]
+}
+
 // BatchReqs returns the total number of BatchUpdateBlobs requests to this fake.
 func (f *CAS) BatchReqs() int {
 	return f.batchReqs
@@ -274,23 +289,43 @@ func (f *CAS) MaxConcurrency() int {
 
 // FindMissingBlobs implements the corresponding RE API function.
 func (f *CAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.maybeSleep()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	if req.InstanceName != "instance" {
 		return nil, status.Error(codes.InvalidArgument, "test fake expected instance name \"instance\"")
 	}
 	resp := new(repb.FindMissingBlobsResponse)
 	for _, dg := range req.BlobDigests {
-		if _, ok := f.blobs[digest.NewFromProtoUnvalidated(dg)]; !ok {
+		d := digest.NewFromProtoUnvalidated(dg)
+		f.missingReqs[d]++
+		if _, ok := f.blobs[d]; !ok {
 			resp.MissingBlobDigests = append(resp.MissingBlobDigests, dg)
 		}
 	}
 	return resp, nil
 }
 
+func (f *CAS) maybeBlock(dg digest.Digest) {
+	if fn, ok := f.PerDigestBlockFn[dg]; ok {
+		fn()
+	}
+}
+
+func (f *CAS) maybeSleep() {
+	if f.ReqSleepDuration != 0 {
+		d := f.ReqSleepDuration
+		if f.ReqSleepRandomize {
+			d = time.Duration(rand.Float32()*float32(d.Microseconds())) * time.Microsecond
+		}
+		time.Sleep(d)
+	}
+}
+
 // BatchUpdateBlobs implements the corresponding RE API function.
 func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (*repb.BatchUpdateBlobsResponse, error) {
+	f.maybeSleep()
 	f.mu.Lock()
 	f.batchReqs++
 	f.concReqs++
@@ -340,6 +375,7 @@ func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRe
 
 // BatchReadBlobs implements the corresponding RE API function.
 func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (*repb.BatchReadBlobsResponse, error) {
+	f.maybeSleep()
 	f.mu.Lock()
 	f.batchReqs++
 	f.concReqs++
@@ -368,6 +404,7 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 		dg := digest.NewFromProtoUnvalidated(dgPb)
 		f.mu.Lock()
 		data, ok := f.blobs[dg]
+		f.mu.Unlock()
 		if !ok {
 			resps = append(resps, &repb.BatchReadBlobsResponse_Response{
 				Digest: dgPb,
@@ -375,6 +412,7 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 			})
 			continue
 		}
+		f.mu.Lock()
 		f.reads[dg]++
 		f.mu.Unlock()
 		resps = append(resps, &repb.BatchReadBlobsResponse_Response{
@@ -388,6 +426,7 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 
 // GetTree implements the corresponding RE API function.
 func (f *CAS) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
+	f.maybeSleep()
 	rootDigest, err := digest.NewFromProto(req.RootDigest)
 	if err != nil {
 		return fmt.Errorf("unable to parsse root digest %v", req.RootDigest)
@@ -445,6 +484,7 @@ func (f *CAS) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressable
 
 // Write implements the corresponding RE API function.
 func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
+	f.maybeSleep()
 	f.mu.Lock()
 	f.writeReqs++
 	f.concReqs++
@@ -485,6 +525,7 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
 	}
 
+	f.maybeBlock(dg)
 	res := req.ResourceName
 	done := false
 	for {
@@ -535,8 +576,7 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 
 // Read implements the corresponding RE API function.
 func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.maybeSleep()
 	if req.ReadOffset != 0 || req.ReadLimit != 0 {
 		return status.Error(codes.Unimplemented, "test fake does not implement read_offset or limit")
 	}
@@ -551,11 +591,14 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 	}
 	dg := digest.TestNew(path[2], int64(size))
 	blob, ok := f.blobs[dg]
+	f.mu.Lock()
 	f.reads[dg]++
+	f.mu.Unlock()
 	if !ok {
 		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", dg)
 	}
 
+	f.maybeBlock(dg)
 	ch := chunker.NewFromBlob(blob, 2*1024*1024)
 	resp := &bspb.ReadResponse{}
 	for ch.HasNext() {
