@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
@@ -214,6 +215,21 @@ func (c *Client) DownloadBlob(ctx context.Context, blobDigest, path string) (str
 		return "", err
 	}
 	return string(contents), nil
+}
+
+// UploadBlob uploads a blob from the specified path into the remote cache.
+func (c *Client) UploadBlob(ctx context.Context, path string) error {
+	dg, err := digest.NewFromFile(path)
+	if err != nil {
+		return err
+	}
+
+	log.Infof("Uploading blob of %v from %v.", dg, path)
+	chunk := chunker.NewFromFile(path, dg, 0)
+	if _, err := c.GrpcClient.UploadIfMissing(ctx, chunk); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DownloadDirectory downloads a an input root from the remote cache into the specified path.

@@ -3,10 +3,12 @@ package tool
 import (
 	"context"
 	"io/ioutil"
+	"path"
 	"path/filepath"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/google/go-cmp/cmp"
@@ -204,5 +206,39 @@ func TestTool_DownloadBlob(t *testing.T) {
 	got = string(c)
 	if got != want {
 		t.Fatalf("Incorrect content in downloaded file %v, want %v, got %v", fp, want, got)
+	}
+}
+
+func TestTool_UploadBlob(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	cas := e.Server.CAS
+
+	tmpFile := path.Join(t.TempDir(), "blob")
+	if err := ioutil.WriteFile(tmpFile, []byte("Hello, World!"), 777); err != nil {
+		t.Fatalf("Could not create temp blob: %v", err)
+	}
+
+	dg, err := digest.NewFromFile(tmpFile)
+	if err != nil {
+		t.Fatalf("digest.NewFromFile('%v') failed: %v", tmpFile, err)
+	}
+
+	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
+	if err := toolClient.UploadBlob(context.Background(), tmpFile); err != nil {
+		t.Fatalf("UploadBlob('%v', '%v') failed: %v", dg.String(), tmpFile, err)
+	}
+
+	// First request should upload the blob.
+	if cas.BlobWrites(dg) != 1 {
+		t.Fatalf("Expected 1 write for blob '%v', got %v", dg.String(), cas.BlobWrites(dg))
+	}
+
+	// Retries should check whether the blob already exists and skip uploading if it does.
+	if err := toolClient.UploadBlob(context.Background(), tmpFile); err != nil {
+		t.Fatalf("UploadBlob('%v', '%v') failed: %v", dg.String(), tmpFile, err)
+	}
+	if cas.BlobWrites(dg) != 1 {
+		t.Fatalf("Expected 1 write for blob '%v', got %v", dg.String(), cas.BlobWrites(dg))
 	}
 }
