@@ -69,9 +69,6 @@ func main() {
 	if *operation == "" {
 		log.Exitf("--operation must be specified.")
 	}
-	if *digest == "" {
-		log.Exitf("--digest must be specified.")
-	}
 
 	ctx := context.Background()
 	grpcClient, err := rflags.NewClientFromFlags(ctx)
@@ -83,49 +80,54 @@ func main() {
 
 	switch OpType(*operation) {
 	case downloadActionResult:
-		if *pathPrefix == "" {
-			log.Exitf("--path must be specified.")
-		}
-		if err := c.DownloadActionResult(ctx, *digest, *pathPrefix); err != nil {
-			log.Exitf("error downloading action result for digest %v: %v", *digest, err)
+		if err := c.DownloadActionResult(ctx, getDigestFlag(), getPathFlag()); err != nil {
+			log.Exitf("error downloading action result for digest %v: %v", getDigestFlag(), err)
 		}
 
 	case downloadBlob:
-		res, err := c.DownloadBlob(ctx, *digest, *pathPrefix)
+		res, err := c.DownloadBlob(ctx, getDigestFlag(), getPathFlag())
 		if err != nil {
-			log.Exitf("error downloading blob for digest %v: %v", *digest, err)
+			log.Exitf("error downloading blob for digest %v: %v", getDigestFlag(), err)
 		}
 		fmt.Fprintf(os.Stdout, res)
 
 	case downloadDir:
-		if *pathPrefix == "" {
-			log.Exitf("--path must be specified.")
-		}
-		if err := c.DownloadDirectory(ctx, *digest, *pathPrefix); err != nil {
-			log.Exitf("error downloading directory for digest %v: %v", *digest, err)
+		if err := c.DownloadDirectory(ctx, getDigestFlag(), getPathFlag()); err != nil {
+			log.Exitf("error downloading directory for digest %v: %v", getDigestFlag(), err)
 		}
 
 	case showAction:
-		res, err := c.ShowAction(ctx, *digest)
+		res, err := c.ShowAction(ctx, getDigestFlag())
 		if err != nil {
-			log.Exitf("error fetching action %v: %v", *digest, err)
+			log.Exitf("error fetching action %v: %v", getDigestFlag(), err)
 		}
 		fmt.Fprintf(os.Stdout, res)
 
 	case reexecuteAction:
-		if err := c.ReexecuteAction(ctx, *digest, *inputRoot, outerr.SystemOutErr); err != nil {
-			log.Exitf("error reexecuting action %v: %v", *digest, err)
+		if err := c.ReexecuteAction(ctx, getDigestFlag(), *inputRoot, outerr.SystemOutErr); err != nil {
+			log.Exitf("error reexecuting action %v: %v", getDigestFlag(), err)
 		}
 
 	case uploadBlob:
-		if *pathPrefix == "" {
-			log.Exitf("--path must be specified.")
-		}
-		if err := c.UploadBlob(ctx, *digest, *pathPrefix); err != nil {
-			log.Exitf("error uploading blob for digest %v: %v", *digest, err)
+		if err := c.UploadBlob(ctx, getPathFlag()); err != nil {
+			log.Exitf("error uploading blob for digest %v: %v", getDigestFlag(), err)
 		}
 
 	default:
 		log.Exitf("unsupported operation %v. Supported operations:\n%v", *operation, supportedOps)
 	}
+}
+
+func getDigestFlag() string {
+	if *digest == "" {
+		log.Exitf("--digest must be specified.")
+	}
+	return *digest
+}
+
+func getPathFlag() string {
+	if *pathPrefix == "" {
+		log.Exitf("--path must be specified.")
+	}
+	return *pathPrefix
 }

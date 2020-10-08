@@ -2,8 +2,8 @@ package tool
 
 import (
 	"context"
-	"io"
 	"io/ioutil"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -214,25 +214,19 @@ func TestTool_UploadBlob(t *testing.T) {
 	defer cleanup()
 	cas := e.Server.CAS
 
-	tmpFile, err := ioutil.TempFile(t.TempDir(), "")
-	if err != nil {
-		t.Fatalf("TempFile failed: %v", err)
-	}
-	if _, err := io.WriteString(tmpFile, "Hello, World!"); err != nil {
-		t.Fatalf("Writing to tmpFile failed: %v", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		t.Fatalf("TempFile Close failed: %v", err)
+	tmpFile := path.Join(t.TempDir(), "blob")
+	if err := ioutil.WriteFile(tmpFile, []byte("Hello, World!"), 777); err != nil {
+		t.Fatalf("Could not create temp blob: %v", err)
 	}
 
-	dg, err := digest.NewFromFile(tmpFile.Name())
+	dg, err := digest.NewFromFile(tmpFile)
 	if err != nil {
-		t.Fatalf("digest.NewFromFile('%v') failed: %v", tmpFile.Name(), err)
+		t.Fatalf("digest.NewFromFile('%v') failed: %v", tmpFile, err)
 	}
 
 	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
-	if err := toolClient.UploadBlob(context.Background(), dg.String(), tmpFile.Name()); err != nil {
-		t.Fatalf("UploadBlob('%v', '%v') failed: %v", dg.String(), tmpFile.Name(), err)
+	if err := toolClient.UploadBlob(context.Background(), tmpFile); err != nil {
+		t.Fatalf("UploadBlob('%v', '%v') failed: %v", dg.String(), tmpFile, err)
 	}
 
 	// First request should upload the blob.
@@ -241,8 +235,8 @@ func TestTool_UploadBlob(t *testing.T) {
 	}
 
 	// Retries should check whether the blob already exists and skip uploading if it does.
-	if err := toolClient.UploadBlob(context.Background(), dg.String(), tmpFile.Name()); err != nil {
-		t.Fatalf("UploadBlob('%v', '%v') failed: %v", dg.String(), tmpFile.Name(), err)
+	if err := toolClient.UploadBlob(context.Background(), tmpFile); err != nil {
+		t.Fatalf("UploadBlob('%v', '%v') failed: %v", dg.String(), tmpFile, err)
 	}
 	if cas.BlobWrites(dg) != 1 {
 		t.Fatalf("Expected 1 write for blob '%v', got %v", dg.String(), cas.BlobWrites(dg))

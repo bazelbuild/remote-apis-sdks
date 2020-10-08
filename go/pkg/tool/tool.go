@@ -218,8 +218,8 @@ func (c *Client) DownloadBlob(ctx context.Context, blobDigest, path string) (str
 }
 
 // UploadBlob uploads a blob from the specified path into the remote cache.
-func (c *Client) UploadBlob(ctx context.Context, blobDigest, path string) error {
-	dg, err := digest.NewFromString(blobDigest)
+func (c *Client) UploadBlob(ctx context.Context, path string) error {
+	dg, err := digest.NewFromFile(path)
 	if err != nil {
 		return err
 	}
