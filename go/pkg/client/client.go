@@ -299,6 +299,40 @@ func createGRPCInterceptor(p DialParams) *balancer.GCPInterceptor {
 	return balancer.NewGCPInterceptor(apiConfig)
 }
 
+func createTLSConfig(params DialParams) (*tls.Config, error) {
+	var certPool *x509.CertPool
+	if params.TLSCACertFile != "" {
+		certPool = x509.NewCertPool()
+		ca, err := ioutil.ReadFile(params.TLSCACertFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", params.TLSCACertFile, err)
+		}
+		if ok := certPool.AppendCertsFromPEM(ca); !ok {
+			return nil, fmt.Errorf("failed to load TLS CA certificates from %s", params.TLSCACertFile)
+		}
+	}
+
+	var mTLSCredentials []tls.Certificate
+	if params.TLSClientAuthCert != "" || params.TLSClientAuthKey != "" {
+		if params.TLSClientAuthCert == "" || params.TLSClientAuthKey == "" {
+			return nil, fmt.Errorf("TLSClientAuthCert and TLSClientAuthKey must both be empty or both be set, got TLSClientAuthCert='%v' and TLSClientAuthKey='%v'", params.TLSClientAuthCert, params.TLSClientAuthKey)
+		}
+
+		cert, err := tls.LoadX509KeyPair(params.TLSClientAuthCert, params.TLSClientAuthKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read mTLS cert pair ('%v', '%v'): %v", params.TLSClientAuthCert, params.TLSClientAuthKey, err)
+		}
+		mTLSCredentials = append(mTLSCredentials, cert)
+	}
+
+	c := &tls.Config{
+		ServerName:   params.TLSServerName,
+		RootCAs:      certPool,
+		Certificates: mTLSCredentials,
+	}
+	return c, nil
+}
+
 // Dial dials a given endpoint and returns the grpc connection that is established.
 func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, error) {
 	var opts []grpc.DialOption
@@ -335,37 +369,11 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 			opts = append(opts, grpc.WithPerRPCCredentials(rpcCreds))
 		}
 
-		var certPool *x509.CertPool
-		if params.TLSCACertFile != "" {
-			certPool = x509.NewCertPool()
-			ca, err := ioutil.ReadFile(params.TLSCACertFile)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read %s: %w", params.TLSCACertFile, err)
-			}
-			if ok := certPool.AppendCertsFromPEM(ca); !ok {
-				return nil, fmt.Errorf("failed to load TLS CA certificates from %s", params.TLSCACertFile)
-			}
+		tlsConfig, err := createTLSConfig(params)
+		if err != nil {
+			return nil, fmt.Errorf("Could not create TLS config: %v", err)
 		}
-
-		var mTLSCredentials []tls.Certificate
-		if params.TLSClientAuthCert != "" || params.TLSClientAuthKey != "" {
-			if params.TLSClientAuthCert == "" || params.TLSClientAuthKey == "" {
-				return nil, fmt.Errorf("TLSClientAuthCert and TLSClientAuthKey must both be empty or both be set, got TLSClientAuthCert='%v' and TLSClientAuthKey='%v'", params.TLSClientAuthCert, params.TLSClientAuthKey)
-			}
-
-			cert, err := tls.LoadX509KeyPair(params.TLSClientAuthCert, params.TLSClientAuthKey)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read mTLS cert pair ('%v', '%v'): %v", params.TLSClientAuthCert, params.TLSClientAuthKey, err)
-			}
-			mTLSCredentials = append(mTLSCredentials, cert)
-		}
-
-		tlsCreds := credentials.NewTLS(&tls.Config{
-			ServerName:   params.TLSServerName,
-			RootCAs:      certPool,
-			Certificates: mTLSCredentials,
-		})
-		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
 	grpcInt := createGRPCInterceptor(params)
 	opts = append(opts, grpc.WithBalancerName(balancer.Name))
