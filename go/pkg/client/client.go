@@ -269,9 +269,15 @@ type DialParams struct {
 	// MaxConcurrentStreams specifies the maximum number of concurrent stream RPCs on a single connection.
 	MaxConcurrentStreams uint32
 
-	// TLSClientAuthCert/TLSClientAuthKey sets the cert/key pair for using mTLS auth to connect to the RBE service.
+	// TLSClientAuthCert specifies the public key in PEM format for using mTLS auth to connect to the RBE service.
+	//
+	// If this is specified, TLSClientAuthKey must also be specified.
 	TLSClientAuthCert string
-	TLSClientAuthKey  string
+
+	// TLSClientAuthKey specifies the private key for using mTLS auth to connect to the RBE service.
+	//
+	// If this is specified, TLSClientAuthCert must also be specified.
+	TLSClientAuthKey string
 }
 
 func createGRPCInterceptor(p DialParams) *balancer.GCPInterceptor {

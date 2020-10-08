@@ -50,9 +50,10 @@ var (
 	TLSServerName = flag.String("tls_server_name", "", "Override the TLS server name")
 	// TLSCACert loads CA certificates from a file
 	TLSCACert = flag.String("tls_ca_cert", "", "Load TLS CA certificates from this file")
-	// TLSClientAuthCert/TLSClientAuthKey sets the cert/key pair for using mTLS auth to connect to the RBE service.
+	// TLSClientAuthCert sets the public key in PEM format for using mTLS auth to connect to the RBE service.
 	TLSClientAuthCert = flag.String("tls_client_auth_cert", "", "Certificate to use when using mTLS to connect to the RBE service.")
-	TLSClientAuthKey  = flag.String("tls_client_auth_key", "", "Key to use when using mTLS to connect to the RBE service.")
+	// TLSClientAuthKey sets the private key for using mTLS auth to connect to the RBE service.
+	TLSClientAuthKey = flag.String("tls_client_auth_key", "", "Key to use when using mTLS to connect to the RBE service.")
 	// StartupCapabilities specifies whether to self-configure based on remote server capabilities on startup.
 	StartupCapabilities = flag.Bool("startup_capabilities", true, "Whether to self-configure based on remote server capabilities on startup.")
 	RPCTimeouts         map[string]string
