@@ -15,6 +15,7 @@ const (
 
 func TestMultipleNamespaces(t *testing.T) {
 	c := GetInstance()
+	defer c.Reset()
 
 	got1, err := c.LoadOrStore(ns1, key1, func() (interface{}, error) { return val1, nil })
 	if err != nil {
@@ -41,6 +42,7 @@ func TestMultipleNamespaces(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	c := GetInstance()
+	defer c.Reset()
 
 	got1, err := c.LoadOrStore(ns1, key1, func() (interface{}, error) { return val1, nil })
 	if err != nil {

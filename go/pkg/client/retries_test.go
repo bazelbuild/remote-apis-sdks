@@ -216,7 +216,7 @@ func setup(t *testing.T) *flakyFixture {
 	f.client, err = client.NewClient(f.ctx, instance, client.DialParams{
 		Service:    f.listener.Addr().String(),
 		NoSecurity: true,
-	}, client.ChunkMaxSize(2), client.RPCTimeout(time.Second))
+	}, client.StartupCapabilities(false), client.ChunkMaxSize(2), client.RPCTimeouts(map[string]time.Duration{"default": time.Second}))
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -230,6 +230,7 @@ func (f *flakyFixture) shutDown() {
 }
 
 func TestWriteRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -244,6 +245,7 @@ func TestWriteRetries(t *testing.T) {
 }
 
 func TestReadRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -280,6 +282,7 @@ func assertUnimplementedErr(t *testing.T, err error, method string) {
 }
 
 func TestQueryWriteStatusRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -291,6 +294,7 @@ func TestQueryWriteStatusRetries(t *testing.T) {
 }
 
 func TestGetActionResultRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -302,6 +306,7 @@ func TestGetActionResultRetries(t *testing.T) {
 }
 
 func TestUpdateActionResultRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -313,6 +318,7 @@ func TestUpdateActionResultRetries(t *testing.T) {
 }
 
 func TestFindMissingBlobsRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -324,6 +330,7 @@ func TestFindMissingBlobsRetries(t *testing.T) {
 }
 
 func TestBatchUpdateBlobsRpcRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -335,6 +342,7 @@ func TestBatchUpdateBlobsRpcRetries(t *testing.T) {
 }
 
 func TestBatchWriteBlobsRpcRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -349,6 +357,7 @@ func TestBatchWriteBlobsRpcRetries(t *testing.T) {
 // Verify for one arbitrary method that when retries are exhausted, we get the retriable error code
 // back.
 func TestBatchWriteBlobsRpcRetriesExhausted(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	f.fake.retriableForever = true
 	defer f.shutDown()
@@ -362,6 +371,7 @@ func TestBatchWriteBlobsRpcRetriesExhausted(t *testing.T) {
 }
 
 func TestGetTreeRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -376,6 +386,7 @@ func TestGetTreeRetries(t *testing.T) {
 }
 
 func TestGetOperationRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -391,6 +402,7 @@ func TestGetOperationRetries(t *testing.T) {
 }
 
 func TestListOperationsRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -406,6 +418,7 @@ func TestListOperationsRetries(t *testing.T) {
 }
 
 func TestCancelOperationRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -421,6 +434,7 @@ func TestCancelOperationRetries(t *testing.T) {
 }
 
 func TestDeleteOperationRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 
@@ -436,6 +450,7 @@ func TestDeleteOperationRetries(t *testing.T) {
 }
 
 func TestExecuteAndWaitRetries(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()
 

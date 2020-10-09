@@ -13,6 +13,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
@@ -24,11 +25,53 @@ import (
 	log "github.com/golang/glog"
 )
 
+func (c *Client) afterUpload(batch []digest.Digest, err error) {
+	for _, dg := range batch {
+		l, loaded := c.casUploadLocks.Load(dg)
+		lock, ok := l.(*sync.RWMutex)
+		if !ok {
+			log.Errorf("Unexpected type found in locks map")
+		}
+		if !loaded {
+			log.Errorf("Precondition failed: upload lock not found on %v.", dg)
+		}
+		if err != nil {
+			c.casUploadErrors.Store(dg, err)
+		}
+		lock.Unlock()
+	}
+}
+
+// Reset clears the Client state (e.g. makes it forget which blobs were
+// previously uploaded, or in the process of being uploaded).
+// This function is not thread safe, and should only be used outside of
+// ongoing client operations!
+func (c *Client) Reset() {
+	c.casUploadLocks = sync.Map{}
+	c.casUploadErrors = sync.Map{}
+}
+
+func (c *Client) getMissingPresent(ctx context.Context, dgs []digest.Digest) (missing []digest.Digest, present []digest.Digest, err error) {
+	dgMap := make(map[digest.Digest]bool)
+	for _, d := range dgs {
+		dgMap[d] = true
+	}
+	missing, err = c.MissingBlobs(ctx, dgs)
+	for _, d := range missing {
+		delete(dgMap, d)
+	}
+	for d := range dgMap {
+		present = append(present, d)
+	}
+	return missing, present, err
+}
+
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
-func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) error {
+// Returns a slice of the missing digests.
+func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) ([]digest.Digest, error) {
 	if cap(c.casUploaders) <= 0 {
-		return fmt.Errorf("CASConcurrency should be at least 1")
+		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
 	const (
 		logInterval = 25
@@ -44,11 +87,39 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 		}
 	}
 
-	missing, err := c.MissingBlobs(ctx, dgs)
-	if err != nil {
-		return err
+	// Separate the digests into two groups: new and previous.
+	// Previous have either been uploaded earlier, or are in the process of being
+	// uploaded by another thread.
+	var newUploads []digest.Digest
+	var previousUploads []digest.Digest
+	locks := make(map[digest.Digest]*sync.RWMutex)
+	for _, d := range dgs {
+		mu := &sync.RWMutex{}
+		mu.Lock()
+
+		l, loaded := c.casUploadLocks.LoadOrStore(d, mu)
+		lock, ok := l.(*sync.RWMutex)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type found in lock map")
+		}
+		locks[d] = lock
+		if loaded {
+			previousUploads = append(previousUploads, d)
+		} else {
+			// We will unlock as soon as we finish uploading the digest.
+			newUploads = append(newUploads, d)
+		}
 	}
-	log.V(2).Infof("%d items to store", len(missing))
+
+	missing, present, err := c.getMissingPresent(ctx, newUploads)
+	if err != nil {
+		c.afterUpload(newUploads, err)
+		return nil, err
+	}
+	log.V(2).Infof("%d new items to store", len(missing))
+	for _, d := range present {
+		locks[d].Unlock()
+	}
 	var batches [][]digest.Digest
 	if c.useBatchOps {
 		batches = c.makeBatches(missing)
@@ -64,8 +135,9 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	for i, batch := range batches {
 		i, batch := i, batch   // https://golang.org/doc/faq#closures_and_goroutines
 		c.casUploaders <- true // Reserve an uploader thread.
-		eg.Go(func() error {
+		eg.Go(func() (err error) {
 			defer func() { <-c.casUploaders }()
+			defer func() { c.afterUpload(batch, err) }()
 			if i%logInterval == 0 {
 				log.V(2).Infof("%d batches left to store", len(batches)-i)
 			}
@@ -97,10 +169,29 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 		})
 	}
 
-	log.V(2).Info("Waiting for remaining jobs")
+	log.V(2).Info("Waiting for remaining new uploads")
 	err = eg.Wait()
-	log.V(2).Info("Done")
-	return err
+	log.V(2).Info("Done new uploads.")
+	log.V(2).Infof("Waiting for remaining %v previous uploads", len(previousUploads))
+	for _, dg := range previousUploads {
+		// Wait on all uploads, but return the first error.
+		mu := locks[dg]
+		mu.RLock()
+		defer mu.RUnlock()
+		if err != nil {
+			continue
+		}
+		if v, _ := c.casUploadErrors.Load(dg); v != nil {
+			e, ok := v.(error)
+			if !ok {
+				err = fmt.Errorf("unexpected type found in error map")
+			}
+			err = e
+		}
+	}
+	log.V(2).Info("Done waiting on previous uploads.")
+
+	return missing, err
 }
 
 // WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
@@ -115,7 +206,8 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	for _, blob := range blobs {
 		chunkers = append(chunkers, chunker.NewFromBlob(blob, int(c.ChunkMaxSize)))
 	}
-	return c.UploadIfMissing(ctx, chunkers...)
+	_, err := c.UploadIfMissing(ctx, chunkers...)
+	return err
 }
 
 // WriteProto marshals and writes a proto.
@@ -157,7 +249,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 	opts := c.RPCOpts()
 	closure := func() error {
 		var resp *repb.BatchUpdateBlobsResponse
-		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		err := c.CallWithTimeout(ctx, "BatchUpdateBlobs", func(ctx context.Context) (e error) {
 			resp, e = c.cas.BatchUpdateBlobs(ctx, &repb.BatchUpdateBlobsRequest{
 				InstanceName: c.InstanceName,
 				Requests:     reqs,
@@ -231,7 +323,7 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 	opts := c.RPCOpts()
 	closure := func() error {
 		var resp *repb.BatchReadBlobsResponse
-		err := c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		err := c.CallWithTimeout(ctx, "BatchReadBlobs", func(ctx context.Context) (e error) {
 			resp, e = c.cas.BatchReadBlobs(ctx, req, opts...)
 			return e
 		})
@@ -507,14 +599,13 @@ func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
 func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result []*repb.Directory, err error) {
 	pageTok := ""
 	result = []*repb.Directory{}
-	opts := c.RPCOpts()
-	closure := func() error {
+	closure := func(ctx context.Context) error {
 		// Use the low-level GetTree method to avoid retrying twice.
 		stream, err := c.cas.GetTree(ctx, &repb.GetTreeRequest{
 			InstanceName: c.InstanceName,
 			RootDigest:   d,
 			PageToken:    pageTok,
-		}, opts...)
+		})
 		if err != nil {
 			return err
 		}
@@ -532,7 +623,7 @@ func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result [
 		}
 		return nil
 	}
-	if err := c.Retrier.Do(ctx, closure); err != nil {
+	if err := c.Retrier.Do(ctx, func() error { return c.CallWithTimeout(ctx, "GetTree", closure) }); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -577,8 +668,31 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 	return outs, nil
 }
 
+// DownloadDirectory downloads the entire directory of given digest.
+func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) (map[string]*tree.Output, error) {
+	dir := &repb.Directory{}
+	if err := c.ReadProto(ctx, d, dir); err != nil {
+		return nil, fmt.Errorf("digest %v cannot be mapped to a directory proto: %v", d, err)
+	}
+
+	dirs, err := c.GetDirectoryTree(ctx, d.ToProto())
+	if err != nil {
+		return nil, err
+	}
+
+	outputs, err := tree.FlattenTree(&repb.Tree{
+		Root:     dir,
+		Children: dirs,
+	}, "")
+	if err != nil {
+		return nil, err
+	}
+
+	return outputs, c.downloadOutputs(ctx, outputs, execRoot, cache)
+}
+
 // DownloadActionOutputs downloads the output files and directories in the given action result.
-func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string) error {
+func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string, cache filemetadata.Cache) error {
 	outs, err := c.FlattenActionOutputs(ctx, resPb)
 	if err != nil {
 		return err
@@ -589,17 +703,21 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 			return err
 		}
 	}
+	return c.downloadOutputs(ctx, outs, execRoot, cache)
+}
+
+func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*tree.Output, execRoot string, cache filemetadata.Cache) error {
 	var symlinks, copies []*tree.Output
 	downloads := make(map[digest.Digest]*tree.Output)
 	for _, out := range outs {
 		path := filepath.Join(execRoot, out.Path)
 		if out.IsEmptyDirectory {
-			if err := os.MkdirAll(path, os.FileMode(0777)); err != nil {
+			if err := os.MkdirAll(path, c.DirMode); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(path), os.FileMode(0777)); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), c.DirMode); err != nil {
 			return err
 		}
 		// We create the symbolic links after all regular downloads are finished, because dangling
@@ -614,11 +732,29 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 			downloads[out.Digest] = out
 		}
 	}
-	if err := c.downloadFiles(ctx, execRoot, downloads); err != nil {
+	if err := c.DownloadFiles(ctx, execRoot, downloads); err != nil {
 		return err
 	}
+	for _, output := range downloads {
+		path := output.Path
+		md := &filemetadata.Metadata{
+			Digest:       output.Digest,
+			IsExecutable: output.IsExecutable,
+		}
+		if err := cache.Update(path, md); err != nil {
+			return err
+		}
+	}
 	for _, out := range copies {
-		if err := copyFile(execRoot, downloads[out.Digest].Path, out.Path); err != nil {
+		perm := c.RegularMode
+		if out.IsExecutable {
+			perm = c.ExecutableMode
+		}
+		src := downloads[out.Digest]
+		if src.IsEmptyDirectory {
+			return fmt.Errorf("unexpected empty directory: %s", src.Path)
+		}
+		if err := copyFile(execRoot, src.Path, out.Path, perm); err != nil {
 			return err
 		}
 	}
@@ -630,17 +766,8 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	return nil
 }
 
-func copyFile(execRoot, from, to string) error {
+func copyFile(execRoot, from, to string, mode os.FileMode) error {
 	src := filepath.Join(execRoot, from)
-	st, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	if !st.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a regular file", src)
-	}
-
 	s, err := os.Open(src)
 	if err != nil {
 		return err
@@ -648,7 +775,7 @@ func copyFile(execRoot, from, to string) error {
 	defer s.Close()
 
 	dst := filepath.Join(execRoot, to)
-	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, st.Mode())
+	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
 		return err
 	}
@@ -657,7 +784,8 @@ func copyFile(execRoot, from, to string) error {
 	return err
 }
 
-func (c *Client) downloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
+// DownloadFiles downloads the output files under |execRoot|.
+func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
 	if cap(c.casDownloaders) <= 0 {
 		return fmt.Errorf("CASConcurrency should be at least 1")
 	}
@@ -699,9 +827,9 @@ func (c *Client) downloadFiles(ctx context.Context, execRoot string, outputs map
 				}
 				for dg, data := range bchMap {
 					out := outputs[dg]
-					perm := os.FileMode(0644)
+					perm := c.RegularMode
 					if out.IsExecutable {
-						perm = os.FileMode(0777)
+						perm = c.ExecutableMode
 					}
 					if err := ioutil.WriteFile(filepath.Join(execRoot, out.Path), data, perm); err != nil {
 						return err
@@ -715,7 +843,7 @@ func (c *Client) downloadFiles(ctx context.Context, execRoot string, outputs map
 					return err
 				}
 				if out.IsExecutable {
-					if err := os.Chmod(path, os.FileMode(0777)); err != nil {
+					if err := os.Chmod(path, c.ExecutableMode); err != nil {
 						return err
 					}
 				}

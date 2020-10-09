@@ -31,7 +31,7 @@ def remote_apis_sdks_go_deps():
         name = "org_golang_google_grpc",
         build_file_proto_mode = "disable",
         importpath = "google.golang.org/grpc",
-        tag = "v1.26.0",
+        tag = "v1.30.0",
     )
     _maybe(
         go_repository,

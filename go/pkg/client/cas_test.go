@@ -9,12 +9,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
@@ -26,7 +28,8 @@ import (
 )
 
 const (
-	instance = "instance"
+	instance              = "instance"
+	defaultCASConcurrency = 50
 )
 
 func TestSplitEndpoints(t *testing.T) {
@@ -61,7 +64,7 @@ func TestSplitEndpoints(t *testing.T) {
 		Service:    l1.Addr().String(),
 		CASService: l2.Addr().String(),
 		NoSecurity: true,
-	})
+	}, client.StartupCapabilities(false))
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -111,7 +114,7 @@ func TestRead(t *testing.T) {
 	c, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
-	})
+	}, client.StartupCapabilities(false))
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -257,7 +260,7 @@ func TestWrite(t *testing.T) {
 	c, err := client.NewClient(ctx, instance, client.DialParams{
 		Service:    listener.Addr().String(),
 		NoSecurity: true,
-	}, client.ChunkMaxSize(20)) // Use small write chunk size for tests.
+	}, client.StartupCapabilities(false), client.ChunkMaxSize(20)) // Use small write chunk size for tests.
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -373,12 +376,170 @@ func TestMissingBlobs(t *testing.T) {
 	}
 }
 
+func TestUploadConcurrent(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+	client.CASConcurrency(defaultCASConcurrency).Apply(c)
+
+	blobs := make([][]byte, 1000)
+	for i := range blobs {
+		blobs[i] = []byte(fmt.Sprint(i))
+	}
+	tests := []struct {
+		name string
+		// Whether to use batching.
+		batching client.UseBatchOps
+		// The batch size.
+		maxBatchDigests client.MaxBatchDigests
+		// The CAS concurrency for uploading the blobs.
+		concurrency client.CASConcurrency
+	}{
+		{
+			name:        "no_batching_low_conc",
+			batching:    client.UseBatchOps(false),
+			concurrency: client.CASConcurrency(3),
+		},
+		{
+			name:        "no_batching_high_conc",
+			batching:    client.UseBatchOps(false),
+			concurrency: client.CASConcurrency(100),
+		},
+		{
+			name:            "batching_low_conc",
+			batching:        client.UseBatchOps(true),
+			maxBatchDigests: client.MaxBatchDigests(9),
+			concurrency:     client.CASConcurrency(3),
+		},
+		{
+			name:            "batching_high_conc",
+			batching:        client.UseBatchOps(true),
+			maxBatchDigests: client.MaxBatchDigests(9),
+			concurrency:     client.CASConcurrency(100),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake.Clear()
+			c.Reset()
+			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency} {
+				opt.Apply(c)
+			}
+
+			var wg sync.WaitGroup
+			for i := 0; i < 100; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var input []*chunker.Chunker
+					for _, blob := range blobs {
+						input = append(input, chunker.NewFromBlob(blob, 10))
+					}
+					_, err := c.UploadIfMissing(ctx, input...)
+					if err != nil {
+						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
+					}
+				}()
+			}
+			wg.Wait()
+			// Verify everything was written exactly once.
+			for i, blob := range blobs {
+				dg := digest.NewFromBlob(blob)
+				if fake.BlobWrites(dg) != 1 {
+					t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
+				}
+				if fake.BlobMissingReqs(dg) != 1 {
+					t.Errorf("wanted 1 missing request for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
+				}
+			}
+		})
+	}
+}
+
+func TestUploadConcurrentCancel(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+	client.CASConcurrency(defaultCASConcurrency).Apply(c)
+
+	blobs := make([][]byte, 1000)
+	for i := range blobs {
+		blobs[i] = []byte(fmt.Sprint(i))
+	}
+	tests := []struct {
+		name string
+		// Whether to use batching.
+		batching client.UseBatchOps
+		// The batch size.
+		maxBatchDigests client.MaxBatchDigests
+		// The CAS concurrency for uploading the blobs.
+		concurrency client.CASConcurrency
+	}{
+		{
+			name:        "no_batching_low_conc",
+			batching:    client.UseBatchOps(false),
+			concurrency: client.CASConcurrency(3),
+		},
+		{
+			name:        "no_batching_high_conc",
+			batching:    client.UseBatchOps(false),
+			concurrency: client.CASConcurrency(100),
+		},
+		{
+			name:            "batching_low_conc",
+			batching:        client.UseBatchOps(true),
+			maxBatchDigests: client.MaxBatchDigests(9),
+			concurrency:     client.CASConcurrency(3),
+		},
+		{
+			name:            "batching_high_conc",
+			batching:        client.UseBatchOps(true),
+			maxBatchDigests: client.MaxBatchDigests(9),
+			concurrency:     client.CASConcurrency(100),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake.Clear()
+			c.Reset()
+			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency} {
+				opt.Apply(c)
+			}
+
+			cCtx, cancel := context.WithCancel(ctx)
+			var wg sync.WaitGroup
+			for i := 0; i < 100; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					var input []*chunker.Chunker
+					for _, blob := range blobs {
+						input = append(input, chunker.NewFromBlob(blob, 10))
+					}
+					_, err := c.UploadIfMissing(cCtx, input...)
+					// Verify that we got a context cancellation error.
+					if err != nil && err != context.Canceled {
+						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil or context canceled", err)
+					}
+				}()
+			}
+			go cancel()
+			wg.Wait()
+		})
+	}
+}
+
 func TestUpload(t *testing.T) {
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
+	client.CASConcurrency(defaultCASConcurrency).Apply(c)
 
 	chunkSize := 5
 	var twoThousandBlobs [][]byte
@@ -404,7 +565,7 @@ func TestUpload(t *testing.T) {
 		// and the test verifies no attempt was made to upload them.
 		present [][]byte
 		// concurrency is the CAS concurrency with which we should be uploading the blobs. If not
-		// specified, it uses client.DefaultCASConcurrency.
+		// specified, it uses defaultCASConcurrency.
 		concurrency client.CASConcurrency
 	}{
 		{
@@ -441,6 +602,8 @@ func TestUpload(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
 					fake.Clear()
+					c.Reset()
+
 					if tc.concurrency > 0 {
 						tc.concurrency.Apply(c)
 					}
@@ -455,11 +618,15 @@ func TestUpload(t *testing.T) {
 						input = append(input, chunker.NewFromBlob(blob, chunkSize))
 					}
 
-					err := c.UploadIfMissing(ctx, input...)
+					missing, err := c.UploadIfMissing(ctx, input...)
 					if err != nil {
 						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
 
+					missingSet := make(map[digest.Digest]struct{})
+					for _, dg := range missing {
+						missingSet[dg] = struct{}{}
+					}
 					for _, ch := range input {
 						dg := ch.Digest()
 						blob, err := ch.FullData()
@@ -470,6 +637,9 @@ func TestUpload(t *testing.T) {
 							if fake.BlobWrites(dg) > 0 {
 								t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
 							}
+							if _, ok := missingSet[dg]; ok {
+								t.Errorf("Stats said that blob %v with digest %s was missing in the CAS", blob, dg)
+							}
 							continue
 						}
 						if gotBlob, ok := fake.Get(dg); !ok {
@@ -477,9 +647,12 @@ func TestUpload(t *testing.T) {
 						} else if !bytes.Equal(blob, gotBlob) {
 							t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
 						}
+						if _, ok := missingSet[dg]; !ok {
+							t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
+						}
 					}
-					if fake.MaxConcurrency() > client.DefaultCASConcurrency {
-						t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), client.DefaultCASConcurrency)
+					if fake.MaxConcurrency() > defaultCASConcurrency {
+						t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
 					}
 				})
 			}
@@ -539,6 +712,7 @@ func TestWriteBlobsBatching(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fake.Clear()
+			c.Reset()
 			blobs := make(map[digest.Digest][]byte)
 			for i, sz := range tc.sizes {
 				blob := make([]byte, int(sz))
@@ -671,6 +845,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	defer cleanup()
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
+	cache := filemetadata.NewSingleFlightCache()
 
 	fooDigest := fake.Put([]byte("foo"))
 	barDigest := fake.Put([]byte("bar"))
@@ -732,7 +907,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 		t.Fatalf("failed to make temp dir: %v", err)
 	}
 	defer os.RemoveAll(execRoot)
-	err = c.DownloadActionOutputs(ctx, ar, execRoot)
+	err = c.DownloadActionOutputs(ctx, ar, execRoot, cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
@@ -742,6 +917,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 		contents         []byte
 		symlinkTarget    string
 		isEmptyDirectory bool
+		fileDigest       *digest.Digest
 	}{
 		{
 			path:             "dir/e1",
@@ -755,6 +931,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 			path:         "dir/a/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
 		},
 		{
 			path:     "dir/a/bar",
@@ -764,6 +941,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 			path:         "dir/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
 		},
 		{
 			path:             "dir2/e2",
@@ -773,14 +951,16 @@ func TestDownloadActionOutputs(t *testing.T) {
 			path:         "dir2/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
 		},
 		{
 			path:     "dir2/bar",
 			contents: []byte("bar"),
 		},
 		{
-			path:     "foo",
-			contents: []byte("foo"),
+			path:       "foo",
+			contents:   []byte("foo"),
+			fileDigest: &fooDigest,
 		},
 		{
 			path:          "x/a",
@@ -796,6 +976,16 @@ func TestDownloadActionOutputs(t *testing.T) {
 		fi, err := os.Lstat(path)
 		if err != nil {
 			t.Errorf("expected output %s is missing", path)
+		}
+		if out.fileDigest != nil {
+			fmd := cache.Get(path)
+			if fmd == nil {
+				t.Errorf("cache does not contain metadata for path: %v", path)
+			} else {
+				if diff := cmp.Diff(*out.fileDigest, fmd.Digest); diff != "" {
+					t.Errorf("invalid digeset in cache for path %v, (-want +got): %v", path, diff)
+				}
+			}
 		}
 		if out.symlinkTarget != "" {
 			if fi.Mode()&os.ModeSymlink == 0 {
@@ -830,6 +1020,51 @@ func TestDownloadActionOutputs(t *testing.T) {
 			// TODO(olaola): verify the file is executable, if required.
 			// Doing this naively failed go test in CI.
 		}
+	}
+}
+
+func TestDownloadDirectory(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+	cache := filemetadata.NewSingleFlightCache()
+
+	fooDigest := fake.Put([]byte("foo"))
+	dir := &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
+		},
+	}
+	dirBlob, err := proto.Marshal(dir)
+	if err != nil {
+		t.Fatalf("failed marshalling Tree: %s", err)
+	}
+	fake.Put(dirBlob)
+
+	d := digest.TestNewFromMessage(dir)
+	execRoot := t.TempDir()
+
+	outputs, err := c.DownloadDirectory(ctx, d, execRoot, cache)
+	if err != nil {
+		t.Errorf("error in DownloadActionOutputs: %s", err)
+	}
+
+	if diff := cmp.Diff(outputs, map[string]*tree.Output{"foo": {
+		Digest:       fooDigest,
+		Path:         "foo",
+		IsExecutable: true,
+	}}); diff != "" {
+		t.Fatalf("DownloadDirectory() mismatch (-want +got):\n%s", diff)
+	}
+
+	b, err := ioutil.ReadFile(filepath.Join(execRoot, "foo"))
+	if err != nil {
+		t.Fatalf("failed to read foo: %s", err)
+	}
+	if want, got := []byte("foo"), b; !bytes.Equal(want, got) {
+		t.Errorf("want %s, got %s", want, got)
 	}
 }
 
@@ -902,7 +1137,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 				t.Fatalf("failed to make temp dir: %v", err)
 			}
 			defer os.RemoveAll(execRoot)
-			err = c.DownloadActionOutputs(ctx, ar, execRoot)
+			err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if err != nil {
 				t.Errorf("error in DownloadActionOutputs: %s", err)
 			}
@@ -929,6 +1164,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 	defer cleanup()
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
+	client.CASConcurrency(defaultCASConcurrency).Apply(c)
 
 	blobs := make(map[digest.Digest][]byte)
 	for i := 0; i < 1000; i++ {
@@ -954,7 +1190,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 				t.Fatalf("failed to make temp dir: %v", err)
 			}
 			defer os.RemoveAll(execRoot)
-			err = c.DownloadActionOutputs(ctx, ar, execRoot)
+			err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if err != nil {
 				t.Errorf("error in DownloadActionOutputs: %s", err)
 			}
@@ -968,8 +1204,8 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 					t.Errorf("expected %s to contain %v, got %v", path, contents, data)
 				}
 			}
-			if fake.MaxConcurrency() > client.DefaultCASConcurrency {
-				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), client.DefaultCASConcurrency)
+			if fake.MaxConcurrency() > defaultCASConcurrency {
+				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
 			}
 		})
 	}
@@ -999,5 +1235,41 @@ func TestWriteAndReadProto(t *testing.T) {
 	}
 	if !proto.Equal(dirA, dirB) {
 		t.Errorf("Protos not equal: %s / %s", dirA, dirB)
+	}
+}
+
+func TestDownloadFiles(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+
+	fooDigest := fake.Put([]byte("foo"))
+	barDigest := fake.Put([]byte("bar"))
+
+	execRoot, err := ioutil.TempDir("", "DownloadOuts")
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(execRoot)
+
+	if err := c.DownloadFiles(ctx, execRoot, map[digest.Digest]*tree.Output{
+		fooDigest: {Digest: fooDigest, Path: "foo", IsExecutable: true},
+		barDigest: {Digest: barDigest, Path: "bar"},
+	}); err != nil {
+		t.Errorf("Failed to run DownloadFiles: %v", err)
+	}
+
+	if b, err := ioutil.ReadFile(filepath.Join(execRoot, "foo")); err != nil {
+		t.Errorf("failed to read file: %v", err)
+	} else if diff := cmp.Diff(b, []byte("foo")); diff != "" {
+		t.Errorf("foo mismatch (-want +got):\n%s", diff)
+	}
+
+	if b, err := ioutil.ReadFile(filepath.Join(execRoot, "bar")); err != nil {
+		t.Errorf("failed to read file: %v", err)
+	} else if diff := cmp.Diff(b, []byte("bar")); diff != "" {
+		t.Errorf("foo mismatch (-want +got):\n%s", diff)
 	}
 }

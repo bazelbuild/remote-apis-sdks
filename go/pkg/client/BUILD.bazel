@@ -4,6 +4,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "bytestream.go",
+        "capabilities.go",
         "cas.go",
         "client.go",
         "client_context.go",
@@ -17,6 +18,7 @@ go_library(
         "//go/pkg/balancer/proto:go_default_library",
         "//go/pkg/chunker:go_default_library",
         "//go/pkg/digest:go_default_library",
+        "//go/pkg/filemetadata:go_default_library",
         "//go/pkg/retry:go_default_library",
         "//go/pkg/tree:go_default_library",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
@@ -52,6 +54,7 @@ go_test(
         "//go/pkg/chunker:go_default_library",
         "//go/pkg/digest:go_default_library",
         "//go/pkg/fakes:go_default_library",
+        "//go/pkg/filemetadata:go_default_library",
         "//go/pkg/portpicker:go_default_library",
         "//go/pkg/retry:go_default_library",
         "//go/pkg/tree:go_default_library",

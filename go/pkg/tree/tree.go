@@ -65,13 +65,13 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	meta := cache.Get(absPath)
 	t := command.FileInputType
+	if smd := meta.Symlink; smd != nil && smd.IsDangling {
+		return nil
+	}
 	if meta.Err != nil {
 		e, ok := meta.Err.(*filemetadata.FileError)
 		if !ok {
 			return meta.Err
-		}
-		if e.IsInvalidSymlink {
-			return nil
 		}
 		if !e.IsDirectory {
 			return meta.Err
@@ -110,14 +110,6 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache filemetadata.Cache) (root digest.Digest, inputs []*chunker.Chunker, stats *Stats, err error) {
 	stats = &Stats{}
 	fs := make(map[string]*fileNode)
-	for _, i := range is.Inputs {
-		if i == "" {
-			return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
-		}
-		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache); e != nil {
-			return digest.Empty, nil, nil, e
-		}
-	}
 	for _, i := range is.VirtualInputs {
 		if i.Path == "" {
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
@@ -129,6 +121,14 @@ func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, ca
 		fs[i.Path] = &fileNode{
 			Chunker:      chunker.NewFromBlob(i.Contents, chunkSize),
 			IsExecutable: i.IsExecutable,
+		}
+	}
+	for _, i := range is.Inputs {
+		if i == "" {
+			return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
+		}
+		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache); e != nil {
+			return digest.Empty, nil, nil, e
 		}
 	}
 	ft := buildTree(fs)
@@ -268,6 +268,7 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 		if len(dir.Files)+len(dir.Directories)+len(dir.Symlinks) == 0 {
 			flatFiles[flatDir.p] = &Output{
 				Path:             flatDir.p,
+				Digest:           digest.Empty,
 				IsEmptyDirectory: true,
 			}
 			continue
@@ -378,11 +379,16 @@ func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cach
 		if err != nil {
 			return nil, nil, err
 		}
+		ch, err := chunker.NewFromProto(rootDir, chunkSize)
+		if err != nil {
+			return nil, nil, err
+		}
+		outs[ch.Digest()] = ch
 		treePb.Root = rootDir
 		for _, c := range childDirs {
 			treePb.Children = append(treePb.Children, c)
 		}
-		ch, err := chunker.NewFromProto(treePb, chunkSize)
+		ch, err = chunker.NewFromProto(treePb, chunkSize)
 		if err != nil {
 			return nil, nil, err
 		}

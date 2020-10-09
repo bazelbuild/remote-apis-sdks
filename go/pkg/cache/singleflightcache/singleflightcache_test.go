@@ -12,6 +12,8 @@ const (
 	key2 = "key2"
 	val1 = "val1"
 	val2 = "val2"
+	key3 = "key3"
+	val3 = "val3"
 )
 
 func TestSimpleValueStore(t *testing.T) {
@@ -157,6 +159,100 @@ func TestLoadDelete(t *testing.T) {
 	wg.Add(100)
 	for i := 0; i < 50; i++ {
 		go load()
+		go del()
+	}
+	wg.Wait()
+}
+
+func TestStore(t *testing.T) {
+	c := &Cache{}
+	wg := &sync.WaitGroup{}
+	var mu sync.Mutex
+	load := func() {
+		mu.Lock()
+		if err := c.Store(key3, val3); err != nil {
+			t.Errorf("Store(%v) failed: %v", key3, err)
+		}
+		// LoadOrStore should load the already loaded value "val3" and shouldn't
+		// overwrite "val1" to "key3".
+		val, err := c.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
+		if err != nil {
+			t.Errorf("LoadOrStore(%v) failed: %v", key3, err)
+		}
+		mu.Unlock()
+		if val != val3 {
+			t.Errorf("LoadOrStore(%v) = %v, want %v", key3, val, val3)
+		}
+		wg.Done()
+	}
+	del := func() {
+		mu.Lock()
+		c.Delete(key3)
+		mu.Unlock()
+		wg.Done()
+	}
+	wg.Add(100)
+	for i := 0; i < 50; i++ {
+		go load()
+		go del()
+	}
+	wg.Wait()
+}
+
+func TestStoreOverwrite(t *testing.T) {
+	c := &Cache{}
+
+	val, err := c.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
+	if err != nil {
+		t.Errorf("LoadOrStore(%v) failed: %v", key3, err)
+	}
+	if val != val1 {
+		t.Errorf("LoadOrStore(%v) = %v, want %v", key3, val, val1)
+	}
+
+	if err := c.Store(key3, val3); err != nil {
+		t.Errorf("Store(%v) failed: %v", key3, err)
+	}
+
+	// LoadOrStore should load the already loaded value "val3" and shouldn't
+	// overwrite "val1" to "key3".
+	val, err = c.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
+	if err != nil {
+		t.Errorf("LoadOrStore(%v) failed: %v", key3, err)
+	}
+	if val != val3 {
+		t.Errorf("LoadOrStore(%v) = %v, want %v", key3, val, val3)
+	}
+}
+
+// This test purposefully tests if there is a race condition in concurrent
+// go-routines writing / deleting to the same key value - it is not expected
+// that the end result of the key in the cache is a specific value which is why
+// the output of LoadOrStore is not tested for correctness. You can run the race
+// detector using: "bazelisk test --features race //go/pkg/cache/..."
+func TestRacedValueStore(t *testing.T) {
+	c := &Cache{}
+	wg := &sync.WaitGroup{}
+	load := func() {
+		if _, err := c.LoadOrStore(key1, func() (interface{}, error) { return val1, nil }); err != nil {
+			t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
+		}
+		wg.Done()
+	}
+	load2 := func() {
+		if _, err := c.LoadOrStore(key1, func() (interface{}, error) { return val2, nil }); err != nil {
+			t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
+		}
+		wg.Done()
+	}
+	del := func() {
+		c.Delete(key1)
+		wg.Done()
+	}
+	wg.Add(150)
+	for i := 0; i < 50; i++ {
+		go load()
+		go load2()
 		go del()
 	}
 	wg.Wait()

@@ -123,7 +123,7 @@ func TestExecNotAcceptCached(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(wantMeta, meta, cmpopts.EquateEmpty(), cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes")); diff != "" {
+	if diff := cmp.Diff(wantMeta, meta, cmpopts.EquateEmpty(), cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes", "MissingDigests")); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
 	var eventNames []string
@@ -419,5 +419,53 @@ func TestUpdateRemoteCache(t *testing.T) {
 	}
 	if len(oe.Stderr()) != 0 {
 		t.Errorf("GetCachedResult() gave unexpected stdout: %v", oe.Stderr())
+	}
+}
+
+func TestDownloadResults(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fooPath := filepath.Join(e.ExecRoot, "foo")
+	fooBlob := []byte("hello")
+	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
+		t.Fatalf("failed to write input file %s", fooBlob)
+	}
+	cmd := &command.Command{
+		Args:        []string{"tool"},
+		ExecRoot:    e.ExecRoot,
+		InputSpec:   &command.InputSpec{Inputs: []string{"foo"}},
+		OutputFiles: []string{"a/b/out"},
+	}
+	opt := &command.ExecutionOptions{AcceptCached: true, DownloadOutputs: false}
+	oe := outerr.NewRecordingOutErr()
+	ec, err := e.Client.NewContext(context.Background(), cmd, opt, oe)
+	if err != nil {
+		t.Fatalf("failed creating execution context: %v", err)
+	}
+	outPath := filepath.Join(e.ExecRoot, "a/b/out")
+	outBlob := []byte("out!")
+	wantRes := &command.Result{Status: command.CacheHitResultStatus}
+	e.Set(cmd, opt, wantRes, &fakes.OutputFile{Path: "a/b/out", Contents: string(outBlob)},
+		fakes.StdOut("stdout"), fakes.StdErrRaw("stderr"))
+	ec.GetCachedResult()
+	if diff := cmp.Diff(wantRes, ec.Result); diff != "" {
+		t.Errorf("GetCachedResult() gave result diff (-want +got):\n%s", diff)
+	}
+	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
+		t.Errorf("expected output file %s to not be downloaded, but it was", outPath)
+	}
+	if len(oe.Stdout()) == 0 {
+		t.Errorf("GetCachedResult() gave unexpected stdout: %v", oe.Stdout())
+	}
+	if len(oe.Stderr()) == 0 {
+		t.Errorf("GetCachedResult() gave unexpected stderr: %v", oe.Stderr())
+	}
+	ec.DownloadResults(e.ExecRoot)
+	contents, err := ioutil.ReadFile(outPath)
+	if err != nil {
+		t.Errorf("error reading from %s: %v", outPath, err)
+	}
+	if !bytes.Equal(contents, outBlob) {
+		t.Errorf("expected %s to contain %q, got %v", outPath, string(outBlob), contents)
 	}
 }

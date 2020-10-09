@@ -3,6 +3,7 @@ package fakes
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -204,6 +205,7 @@ type CAS struct {
 	blobs       map[digest.Digest][]byte
 	reads       map[digest.Digest]int
 	writes      map[digest.Digest]int
+	missingReqs map[digest.Digest]int
 	mu          sync.RWMutex
 	batchReqs   int
 	writeReqs   int
@@ -225,6 +227,7 @@ func (f *CAS) Clear() {
 	f.blobs = make(map[digest.Digest][]byte)
 	f.reads = make(map[digest.Digest]int)
 	f.writes = make(map[digest.Digest]int)
+	f.missingReqs = make(map[digest.Digest]int)
 	f.batchReqs = 0
 	f.writeReqs = 0
 	f.concReqs = 0
@@ -256,6 +259,11 @@ func (f *CAS) BlobWrites(d digest.Digest) int {
 	return f.writes[d]
 }
 
+// BlobMissingReqs returns the total number of GetMissingBlobs requests for a particular digest.
+func (f *CAS) BlobMissingReqs(d digest.Digest) int {
+	return f.missingReqs[d]
+}
+
 // BatchReqs returns the total number of BatchUpdateBlobs requests to this fake.
 func (f *CAS) BatchReqs() int {
 	return f.batchReqs
@@ -273,15 +281,17 @@ func (f *CAS) MaxConcurrency() int {
 
 // FindMissingBlobs implements the corresponding RE API function.
 func (f *CAS) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	if req.InstanceName != "instance" {
 		return nil, status.Error(codes.InvalidArgument, "test fake expected instance name \"instance\"")
 	}
 	resp := new(repb.FindMissingBlobsResponse)
 	for _, dg := range req.BlobDigests {
-		if _, ok := f.blobs[digest.NewFromProtoUnvalidated(dg)]; !ok {
+		d := digest.NewFromProtoUnvalidated(dg)
+		f.missingReqs[d]++
+		if _, ok := f.blobs[d]; !ok {
 			resp.MissingBlobDigests = append(resp.MissingBlobDigests, dg)
 		}
 	}
@@ -386,8 +396,60 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 }
 
 // GetTree implements the corresponding RE API function.
-func (f *CAS) GetTree(*repb.GetTreeRequest, regrpc.ContentAddressableStorage_GetTreeServer) error {
-	return status.Error(codes.Unimplemented, "test fake does not implement method")
+func (f *CAS) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
+	rootDigest, err := digest.NewFromProto(req.RootDigest)
+	if err != nil {
+		return fmt.Errorf("unable to parsse root digest %v", req.RootDigest)
+	}
+	blob, ok := f.Get(rootDigest)
+	if !ok {
+		return fmt.Errorf("root digest %v not found", rootDigest)
+	}
+	rootDir := &repb.Directory{}
+	proto.Unmarshal(blob, rootDir)
+
+	res := []*repb.Directory{rootDir}
+	queue := []*repb.Directory{rootDir}
+	for len(queue) > 0 {
+		ele := queue[0]
+		res = append(res, ele)
+		queue = queue[1:]
+
+		for _, inpFile := range ele.GetFiles() {
+			fd, err := digest.NewFromProto(inpFile.GetDigest())
+			if err != nil {
+				return fmt.Errorf("unable to parse file digest %v", inpFile.GetDigest())
+			}
+			blob, ok := f.Get(fd)
+			if !ok {
+				return fmt.Errorf("file digest %v not found", fd)
+			}
+			dir := &repb.Directory{}
+			proto.Unmarshal(blob, dir)
+			queue = append(queue, dir)
+			res = append(res, dir)
+		}
+
+		for _, dir := range ele.GetDirectories() {
+			fd, err := digest.NewFromProto(dir.GetDigest())
+			if err != nil {
+				return fmt.Errorf("unable to parse directory digest %v", dir.GetDigest())
+			}
+			blob, ok := f.Get(fd)
+			if !ok {
+				return fmt.Errorf("directory digest %v not found", fd)
+			}
+			directory := &repb.Directory{}
+			proto.Unmarshal(blob, directory)
+			queue = append(queue, directory)
+			res = append(res, directory)
+		}
+	}
+
+	resp := &repb.GetTreeResponse{
+		Directories: res,
+	}
+	return stream.Send(resp)
 }
 
 // Write implements the corresponding RE API function.

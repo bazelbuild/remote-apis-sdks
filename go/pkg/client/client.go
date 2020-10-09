@@ -3,10 +3,14 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
+	"io/ioutil"
 	"net/http"
+	"os"
 	"os/user"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
@@ -61,17 +65,28 @@ type Client struct {
 	Retrier       *Retrier
 	Connection    *grpc.ClientConn
 	CASConnection *grpc.ClientConn // Can be different from Connection a separate CAS endpoint is provided.
+	// StartupCapabilities denotes whether to load ServerCapabilities on startup.
+	StartupCapabilities StartupCapabilities
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
 	ChunkMaxSize ChunkMaxSize
 	// MaxBatchDigests is maximum amount of digests to batch in batched operations.
 	MaxBatchDigests MaxBatchDigests
 	// MaxBatchSize is maximum size in bytes of a batch request for batch operations.
-	MaxBatchSize   MaxBatchSize
-	useBatchOps    UseBatchOps
-	casUploaders   chan bool
-	casDownloaders chan bool
-	rpcTimeout     time.Duration
-	creds          credentials.PerRPCCredentials
+	MaxBatchSize MaxBatchSize
+	// DirMode is mode used to create directories.
+	DirMode os.FileMode
+	// ExecutableMode is mode used to create executable files.
+	ExecutableMode os.FileMode
+	// RegularMode is mode used to create non-executable files.
+	RegularMode     os.FileMode
+	serverCaps      *repb.ServerCapabilities
+	useBatchOps     UseBatchOps
+	casUploaders    chan bool
+	casDownloaders  chan bool
+	casUploadLocks  sync.Map
+	casUploadErrors sync.Map
+	rpcTimeouts     RPCTimeouts
+	creds           credentials.PerRPCCredentials
 }
 
 const (
@@ -82,6 +97,15 @@ const (
 	// DefaultMaxBatchDigests is a suggested approximate limit based on current RBE implementation.
 	// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
 	DefaultMaxBatchDigests = 4000
+
+	// DefaultDirMode is mode used to create directories.
+	DefaultDirMode = 0777
+
+	// DefaultExecutableMode is mode used to create executable files.
+	DefaultExecutableMode = 0777
+
+	// DefaultRegularMode is mode used to create non-executable files.
+	DefaultRegularMode = 0644
 )
 
 // Close closes the underlying gRPC connection(s).
@@ -139,20 +163,30 @@ func (u UseBatchOps) Apply(c *Client) {
 type CASConcurrency int
 
 // DefaultCASConcurrency is the default maximum number of concurrent upload and download operations.
-const DefaultCASConcurrency = 50
+const DefaultCASConcurrency = 500
 
-// MaxConcurrentRequests specifies the maximum number of concurrent requests on a single connection
+// DefaultMaxConcurrentRequests specifies the default maximum number of concurrent requests on a single connection
 // that the GRPC balancer can perform.
-const MaxConcurrentRequests = 1000
+const DefaultMaxConcurrentRequests = 25
 
-// ConcurrentStreamsThreshold specifies the threshold value at which the GRPC balancer should create
+// DefaultMaxConcurrentStreams specifies the default threshold value at which the GRPC balancer should create
 // new sub-connections.
-const ConcurrentStreamsThreshold = 90
+const DefaultMaxConcurrentStreams = 25
 
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casUploaders = make(chan bool, cy)
 	c.casDownloaders = make(chan bool, cy)
+}
+
+// StartupCapabilities controls whether the client should attempt to fetch the remote
+// server capabilities on New. If set to true, some configuration such as MaxBatchSize
+// is set according to the remote server capabilities instead of using the provided values.
+type StartupCapabilities bool
+
+// Apply sets the StartupCapabilities flag on a client.
+func (s StartupCapabilities) Apply(c *Client) {
+	c.StartupCapabilities = s
 }
 
 // PerRPCCreds sets per-call options that will be set on all RPCs to the underlying connection.
@@ -219,15 +253,27 @@ type DialParams struct {
 	// This is not the same as NoSecurity, as transport credentials will still be set.
 	TransportCredsOnly bool
 
+	// TLSCACertFile is the PEM file that contains TLS root certificates.
+	TLSCACertFile string
+
+	// TLSServerName overrides the server name sent in TLS, if set to a non-empty string.
+	TLSServerName string
+
 	// DialOpts defines the set of gRPC DialOptions to apply, in addition to any used internally.
 	DialOpts []grpc.DialOption
+
+	// MaxConcurrentRequests specifies the maximum number of concurrent RPCs on a single connection.
+	MaxConcurrentRequests uint32
+
+	// MaxConcurrentStreams specifies the maximum number of concurrent stream RPCs on a single connection.
+	MaxConcurrentStreams uint32
 }
 
-func createGRPCInterceptor() *balancer.GCPInterceptor {
+func createGRPCInterceptor(p DialParams) *balancer.GCPInterceptor {
 	apiConfig := &configpb.ApiConfig{
 		ChannelPool: &configpb.ChannelPoolConfig{
-			MaxSize:                          MaxConcurrentRequests,
-			MaxConcurrentStreamsLowWatermark: ConcurrentStreamsThreshold,
+			MaxSize:                          p.MaxConcurrentRequests,
+			MaxConcurrentStreamsLowWatermark: p.MaxConcurrentStreams,
 		},
 		Method: []*configpb.MethodConfig{
 			&configpb.MethodConfig{
@@ -247,6 +293,12 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 	var opts []grpc.DialOption
 	opts = append(opts, params.DialOpts...)
 
+	if params.MaxConcurrentRequests == 0 {
+		params.MaxConcurrentRequests = DefaultMaxConcurrentRequests
+	}
+	if params.MaxConcurrentStreams == 0 {
+		params.MaxConcurrentStreams = DefaultMaxConcurrentStreams
+	}
 	if params.NoSecurity {
 		opts = append(opts, grpc.WithInsecure())
 	} else {
@@ -272,10 +324,22 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 			opts = append(opts, grpc.WithPerRPCCredentials(rpcCreds))
 		}
 
-		tlsCreds := credentials.NewClientTLSFromCert(nil, "")
+		var certPool *x509.CertPool
+		if params.TLSCACertFile != "" {
+			certPool = x509.NewCertPool()
+			ca, err := ioutil.ReadFile(params.TLSCACertFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s: %w", params.TLSCACertFile, err)
+			}
+			if ok := certPool.AppendCertsFromPEM(ca); !ok {
+				return nil, fmt.Errorf("failed to load TLS CA certificates from %s", params.TLSCACertFile)
+			}
+		}
+
+		tlsCreds := credentials.NewClientTLSFromCert(certPool, params.TLSServerName)
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
-	grpcInt := createGRPCInterceptor()
+	grpcInt := createGRPCInterceptor(params)
 	opts = append(opts, grpc.WithBalancerName(balancer.Name))
 	opts = append(opts, grpc.WithUnaryInterceptor(grpcInt.GCPUnaryClientInterceptor))
 	opts = append(opts, grpc.WithStreamInterceptor(grpcInt.GCPStreamClientInterceptor))
@@ -318,37 +382,64 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		return nil, err
 	}
 	client := &Client{
-		InstanceName:    instanceName,
-		actionCache:     regrpc.NewActionCacheClient(casConn),
-		byteStream:      bsgrpc.NewByteStreamClient(casConn),
-		cas:             regrpc.NewContentAddressableStorageClient(casConn),
-		execution:       regrpc.NewExecutionClient(conn),
-		operations:      opgrpc.NewOperationsClient(conn),
-		rpcTimeout:      time.Minute,
-		Connection:      conn,
-		CASConnection:   casConn,
-		ChunkMaxSize:    chunker.DefaultChunkSize,
-		MaxBatchDigests: DefaultMaxBatchDigests,
-		MaxBatchSize:    DefaultMaxBatchSize,
-		useBatchOps:     true,
-		casUploaders:    make(chan bool, DefaultCASConcurrency),
-		casDownloaders:  make(chan bool, DefaultCASConcurrency),
-		Retrier:         RetryTransient(),
+		InstanceName:        instanceName,
+		actionCache:         regrpc.NewActionCacheClient(casConn),
+		byteStream:          bsgrpc.NewByteStreamClient(casConn),
+		cas:                 regrpc.NewContentAddressableStorageClient(casConn),
+		execution:           regrpc.NewExecutionClient(conn),
+		operations:          opgrpc.NewOperationsClient(conn),
+		rpcTimeouts:         DefaultRPCTimeouts,
+		Connection:          conn,
+		CASConnection:       casConn,
+		ChunkMaxSize:        chunker.DefaultChunkSize,
+		MaxBatchDigests:     DefaultMaxBatchDigests,
+		MaxBatchSize:        DefaultMaxBatchSize,
+		DirMode:             DefaultDirMode,
+		ExecutableMode:      DefaultExecutableMode,
+		RegularMode:         DefaultRegularMode,
+		useBatchOps:         true,
+		StartupCapabilities: true,
+		casUploaders:        make(chan bool, DefaultCASConcurrency),
+		casDownloaders:      make(chan bool, DefaultCASConcurrency),
+		casUploadLocks:      sync.Map{},
+		casUploadErrors:     sync.Map{},
+		Retrier:             RetryTransient(),
 	}
 	for _, o := range opts {
 		o.Apply(client)
 	}
+	if client.StartupCapabilities {
+		if err := client.CheckCapabilities(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return client, nil
 }
 
-// RPCTimeout is a Opt that sets the per-RPC deadline.
-// NOTE that the deadline is only applied to non-streaming calls.
-// The default timeout value is 1 minute.
-type RPCTimeout time.Duration
+// RPCTimeouts is a Opt that sets the per-RPC deadline.
+// The keys are RPC names. The "default" key, if present, is the default
+// timeout. 0 values are valid and indicate no timeout.
+type RPCTimeouts map[string]time.Duration
 
-// Apply applies the timeout to a Client.
-func (d RPCTimeout) Apply(c *Client) {
-	c.rpcTimeout = time.Duration(d)
+// Apply applies the timeouts to a Client. It overrides the provided values,
+// but doesn't remove/alter any other present values.
+func (d RPCTimeouts) Apply(c *Client) {
+	c.rpcTimeouts = map[string]time.Duration(d)
+}
+
+var DefaultRPCTimeouts = map[string]time.Duration{
+	"default":          20 * time.Second,
+	"GetCapabilities":  5 * time.Second,
+	"Read":             time.Minute,
+	"Write":            time.Minute,
+	"BatchUpdateBlobs": time.Minute,
+	"BatchReadBlobs":   time.Minute,
+	"GetTree":          time.Minute,
+	// Note: due to an implementation detail, WaitExecution will use the same
+	// per-RPC timeout as Execute. It is extremely ill-advised to set the Execute
+	// timeout at above 0; most users should use the Action Timeout instead.
+	"Execute":       0,
+	"WaitExecution": 0,
 }
 
 // RPCOpts returns the default RPC options that should be used for calls made with this client.
@@ -366,8 +457,17 @@ func (c *Client) RPCOpts() []grpc.CallOption {
 // CallWithTimeout executes the given function f with a context that times out after an RPC timeout.
 //
 // This method is logically "protected" and is intended for use by extensions of Client.
-func (c *Client) CallWithTimeout(ctx context.Context, f func(ctx context.Context) error) error {
-	childCtx, cancel := context.WithTimeout(ctx, c.rpcTimeout)
+func (c *Client) CallWithTimeout(ctx context.Context, rpcName string, f func(ctx context.Context) error) error {
+	timeout, ok := c.rpcTimeouts[rpcName]
+	if !ok {
+		if timeout, ok = c.rpcTimeouts["default"]; !ok {
+			timeout = 0
+		}
+	}
+	if timeout == 0 {
+		return f(ctx)
+	}
+	childCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	e := f(childCtx)
 	if childCtx.Err() != nil {
@@ -426,7 +526,7 @@ func RetryTransient() *Retrier {
 func (c *Client) GetActionResult(ctx context.Context, req *repb.GetActionResultRequest) (res *repb.ActionResult, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "GetActionResult", func(ctx context.Context) (e error) {
 			res, e = c.actionCache.GetActionResult(ctx, req, opts...)
 			return e
 		})
@@ -441,7 +541,7 @@ func (c *Client) GetActionResult(ctx context.Context, req *repb.GetActionResultR
 func (c *Client) UpdateActionResult(ctx context.Context, req *repb.UpdateActionResultRequest) (res *repb.ActionResult, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "UpdateActionResult", func(ctx context.Context) (e error) {
 			res, e = c.actionCache.UpdateActionResult(ctx, req, opts...)
 			return e
 		})
@@ -453,36 +553,26 @@ func (c *Client) UpdateActionResult(ctx context.Context, req *repb.UpdateActionR
 }
 
 // Read wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level functions such as ReadBlob(ToFile) instead,
+// as they include retries/timeouts handling.
 func (c *Client) Read(ctx context.Context, req *bspb.ReadRequest) (res bsgrpc.ByteStream_ReadClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		res, e = c.byteStream.Read(ctx, req, opts...)
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.byteStream.Read(ctx, req, c.RPCOpts()...)
 }
 
 // Write wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level functions such as WriteBlob(s) instead,
+// as they include retries/timeouts handling.
 func (c *Client) Write(ctx context.Context) (res bsgrpc.ByteStream_WriteClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		res, e = c.byteStream.Write(ctx, opts...)
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.byteStream.Write(ctx, c.RPCOpts()...)
 }
 
 // QueryWriteStatus wraps the underlying call with specific client options.
 func (c *Client) QueryWriteStatus(ctx context.Context, req *bspb.QueryWriteStatusRequest) (res *bspb.QueryWriteStatusResponse, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "QueryWriteStatus", func(ctx context.Context) (e error) {
 			res, e = c.byteStream.QueryWriteStatus(ctx, req, opts...)
 			return e
 		})
@@ -497,7 +587,7 @@ func (c *Client) QueryWriteStatus(ctx context.Context, req *bspb.QueryWriteStatu
 func (c *Client) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (res *repb.FindMissingBlobsResponse, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "FindMissingBlobs", func(ctx context.Context) (e error) {
 			res, e = c.cas.FindMissingBlobs(ctx, req, opts...)
 			return e
 		})
@@ -514,7 +604,7 @@ func (c *Client) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlob
 func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (res *repb.BatchUpdateBlobsResponse, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "BatchUpdateBlobs", func(ctx context.Context) (e error) {
 			res, e = c.cas.BatchUpdateBlobs(ctx, req, opts...)
 			return e
 		})
@@ -530,7 +620,7 @@ func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlob
 func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (res *repb.BatchReadBlobsResponse, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "BatchReadBlobs", func(ctx context.Context) (e error) {
 			res, e = c.cas.BatchReadBlobs(ctx, req, opts...)
 			return e
 		})
@@ -542,42 +632,27 @@ func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReq
 }
 
 // GetTree wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level GetDirectoryTree instead,
+// as it includes retries/timeouts handling.
 func (c *Client) GetTree(ctx context.Context, req *repb.GetTreeRequest) (res regrpc.ContentAddressableStorage_GetTreeClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		res, e = c.cas.GetTree(ctx, req, opts...)
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.cas.GetTree(ctx, req, c.RPCOpts()...)
 }
 
 // Execute wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level ExecuteAndWait instead,
+// as it includes retries/timeouts handling.
 func (c *Client) Execute(ctx context.Context, req *repb.ExecuteRequest) (res regrpc.Execution_ExecuteClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		res, e = c.execution.Execute(ctx, req, opts...)
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.execution.Execute(ctx, req, c.RPCOpts()...)
 }
 
 // WaitExecution wraps the underlying call with specific client options.
+// The wrapper is here for completeness to provide access to the low-level
+// RPCs. Prefer using higher-level ExecuteAndWait instead,
+// as it includes retries/timeouts handling.
 func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionRequest) (res regrpc.Execution_ExecuteClient, err error) {
-	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
-		res, e = c.execution.WaitExecution(ctx, req, opts...)
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return c.execution.WaitExecution(ctx, req, c.RPCOpts()...)
 }
 
 // GetBackendCapabilities returns the capabilities for a specific server connection
@@ -585,7 +660,7 @@ func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionReque
 func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientConn, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "GetCapabilities", func(ctx context.Context) (e error) {
 			res, e = regrpc.NewCapabilitiesClient(conn).GetCapabilities(ctx, req, opts...)
 			return e
 		})
@@ -596,37 +671,11 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientCo
 	return res, nil
 }
 
-// GetCapabilities returns the capabilities for the targeted servers.
-// If the CAS URL was set differently to the execution server then the CacheCapabilities will
-// be determined from that; ExecutionCapabilities will always come from the main URL.
-func (c *Client) GetCapabilities(ctx context.Context) (res *repb.ServerCapabilities, err error) {
-	return c.GetCapabilitiesForInstance(ctx, c.InstanceName)
-}
-
-// GetCapabilitiesForInstance returns the capabilities for the targeted servers.
-// If the CAS URL was set differently to the execution server then the CacheCapabilities will
-// be determined from that; ExecutionCapabilities will always come from the main URL.
-func (c *Client) GetCapabilitiesForInstance(ctx context.Context, instance string) (res *repb.ServerCapabilities, err error) {
-	req := &repb.GetCapabilitiesRequest{InstanceName: instance}
-	caps, err := c.GetBackendCapabilities(ctx, c.Connection, req)
-	if err != nil {
-		return nil, err
-	}
-	if c.CASConnection != c.Connection {
-		casCaps, err := c.GetBackendCapabilities(ctx, c.CASConnection, req)
-		if err != nil {
-			return nil, err
-		}
-		caps.CacheCapabilities = casCaps.CacheCapabilities
-	}
-	return caps, nil
-}
-
 // GetOperation wraps the underlying call with specific client options.
 func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest) (res *oppb.Operation, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "GetOperation", func(ctx context.Context) (e error) {
 			res, e = c.operations.GetOperation(ctx, req, opts...)
 			return e
 		})
@@ -641,7 +690,7 @@ func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest
 func (c *Client) ListOperations(ctx context.Context, req *oppb.ListOperationsRequest) (res *oppb.ListOperationsResponse, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "ListOperations", func(ctx context.Context) (e error) {
 			res, e = c.operations.ListOperations(ctx, req, opts...)
 			return e
 		})
@@ -656,7 +705,7 @@ func (c *Client) ListOperations(ctx context.Context, req *oppb.ListOperationsReq
 func (c *Client) CancelOperation(ctx context.Context, req *oppb.CancelOperationRequest) (res *emptypb.Empty, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "CancelOperation", func(ctx context.Context) (e error) {
 			res, e = c.operations.CancelOperation(ctx, req, opts...)
 			return e
 		})
@@ -671,7 +720,7 @@ func (c *Client) CancelOperation(ctx context.Context, req *oppb.CancelOperationR
 func (c *Client) DeleteOperation(ctx context.Context, req *oppb.DeleteOperationRequest) (res *emptypb.Empty, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
-		return c.CallWithTimeout(ctx, func(ctx context.Context) (e error) {
+		return c.CallWithTimeout(ctx, "DeleteOperation", func(ctx context.Context) (e error) {
 			res, e = c.operations.DeleteOperation(ctx, req, opts...)
 			return e
 		})

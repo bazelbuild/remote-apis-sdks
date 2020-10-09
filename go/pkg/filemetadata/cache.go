@@ -2,10 +2,8 @@ package filemetadata
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync/atomic"
-	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache"
 )
@@ -17,19 +15,13 @@ const (
 // Cache is a store for file digests that supports invalidation.
 type fmCache struct {
 	Backend     *cache.Cache
-	CacheHits   uint64
-	CacheMisses uint64
-	Validate    bool
+	cacheHits   uint64
+	cacheMisses uint64
 }
 
 // NewSingleFlightCache returns a singleton-backed in-memory cache, with no validation.
 func NewSingleFlightCache() Cache {
 	return &fmCache{Backend: cache.GetInstance()}
-}
-
-// NewSingleFlightValidatedCache returns a singleton-backed in-memory cache, with validation.
-func NewSingleFlightValidatedCache() Cache {
-	return &fmCache{Backend: cache.GetInstance(), Validate: true}
 }
 
 // Get retrieves the metadata of the file with the given filename, whether from cache or by
@@ -43,25 +35,6 @@ func (c *fmCache) Get(filename string) *Metadata {
 		return &Metadata{Err: err}
 	}
 	md, ch, err := c.loadMetadata(abs)
-	if err != nil {
-		return &Metadata{Err: err}
-	}
-	if !c.Validate {
-		c.updateMetrics(ch)
-		return md
-	}
-	valid, err := c.validate(abs, md.MTime)
-	if err != nil {
-		return &Metadata{Err: err}
-	}
-	if valid {
-		c.updateMetrics(ch)
-		return md
-	}
-	if err = c.Backend.Delete(namespace, abs); err != nil {
-		return &Metadata{Err: err}
-	}
-	md, ch, err = c.loadMetadata(abs)
 	if err != nil {
 		return &Metadata{Err: err}
 	}
@@ -81,9 +54,28 @@ func (c *fmCache) Delete(filename string) error {
 	return c.Backend.Delete(namespace, abs)
 }
 
+// Update updates the cache entry for the filename with the given value.
+func (c *fmCache) Update(filename string, cacheEntry *Metadata) error {
+	absFilename, err := filepath.Abs(filename)
+	if err != nil {
+		return err
+	}
+	return c.Backend.Store(namespace, absFilename, cacheEntry)
+}
+
 // Reset clears the cache.
 func (c *fmCache) Reset() {
 	c.Backend.Reset()
+}
+
+// GetCacheHits returns the number of cache hits.
+func (c *fmCache) GetCacheHits() uint64 {
+	return c.cacheHits
+}
+
+// GetCacheMisses returns the number of cache misses.
+func (c *fmCache) GetCacheMisses() uint64 {
+	return c.cacheMisses
 }
 
 func (c *fmCache) check() error {
@@ -91,14 +83,6 @@ func (c *fmCache) check() error {
 		return fmt.Errorf("no backend found for store")
 	}
 	return nil
-}
-
-func (c *fmCache) validate(filename string, mtime time.Time) (bool, error) {
-	file, err := os.Stat(filename)
-	if err != nil {
-		return false, err
-	}
-	return file.ModTime().Equal(mtime), nil
 }
 
 func (c *fmCache) loadMetadata(filename string) (*Metadata, bool, error) {
@@ -119,8 +103,8 @@ func (c *fmCache) loadMetadata(filename string) (*Metadata, bool, error) {
 
 func (c *fmCache) updateMetrics(cacheHit bool) {
 	if cacheHit {
-		atomic.AddUint64(&c.CacheHits, 1)
+		atomic.AddUint64(&c.cacheHits, 1)
 	} else {
-		atomic.AddUint64(&c.CacheMisses, 1)
+		atomic.AddUint64(&c.cacheMisses, 1)
 	}
 }

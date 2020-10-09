@@ -122,9 +122,27 @@ func (c *callCountingMetadataCache) Delete(path string) error {
 	return c.cache.Delete(path)
 }
 
+func (c *callCountingMetadataCache) Update(path string, ce *filemetadata.Metadata) error {
+	c.t.Helper()
+	p, err := filepath.Rel(c.execRoot, path)
+	if err != nil {
+		c.t.Errorf("expected %v to be under %v", path, c.execRoot)
+	}
+	c.calls[p]++
+	return c.cache.Update(path, ce)
+}
+
 func (c *callCountingMetadataCache) Reset() {
 	c.t.Helper()
 	c.cache.Reset()
+}
+
+func (c *callCountingMetadataCache) GetCacheHits() uint64 {
+	return 0
+}
+
+func (c *callCountingMetadataCache) GetCacheMisses() uint64 {
+	return 0
 }
 
 func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
@@ -733,6 +751,36 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "Physical inputs supercede virtual inputs",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "barDir/bar", fileContents: barBlob},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir", "barDir"},
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "fooDir/foo", Contents: barBlob, IsExecutable: true},
+					&command.VirtualInput{Path: "barDir/bar", IsEmptyDirectory: true},
+				},
+			},
+			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
+				{Name: "barDir", Digest: barDirDgPb},
+				{Name: "fooDir", Digest: fooDirDgPb},
+			}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"barDir":     1,
+				"barDir/bar": 1,
+			},
+			wantStats: &Stats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
+			},
+		},
+		{
 			desc: "Normalizing virtual inputs paths",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
@@ -984,13 +1032,13 @@ func TestFlattenTreeRepeated(t *testing.T) {
 	}
 	wantOutputs := map[string]*Output{
 		"x/baz":     &Output{Digest: bazDigest},
-		"x/a/b/c":   &Output{IsEmptyDirectory: true},
+		"x/a/b/c":   &Output{IsEmptyDirectory: true, Digest: digest.Empty},
 		"x/a/b/foo": &Output{Digest: fooDigest},
 		"x/a/b/bar": &Output{Digest: barDigest, IsExecutable: true},
-		"x/b/c":     &Output{IsEmptyDirectory: true},
+		"x/b/c":     &Output{IsEmptyDirectory: true, Digest: digest.Empty},
 		"x/b/foo":   &Output{Digest: fooDigest},
 		"x/b/bar":   &Output{Digest: barDigest, IsExecutable: true},
-		"x/c":       &Output{IsEmptyDirectory: true},
+		"x/c":       &Output{IsEmptyDirectory: true, Digest: digest.Empty},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenTree gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))
@@ -1233,6 +1281,8 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 				t.Fatalf("ComputeOutputsToUpload(...) tree proto with digest %+v not uploaded", dg)
 			}
 			wantBlobs[dg] = treeBlob
+			rootBlob := mustMarshal(tc.wantTreeRoot)
+			wantBlobs[digest.NewFromBlob(rootBlob)] = rootBlob
 			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
 			}

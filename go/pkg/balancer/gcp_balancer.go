@@ -19,6 +19,17 @@ const (
 	healthCheckEnabled = true
 )
 
+var (
+	// DefaultMinConnections is the default number of gRPC sub-connections the
+	// gRPC balancer should create during SDK initialization.
+	DefaultMinConnections = 5
+
+	// MinConnections is the minimum number of gRPC sub-connections the gRPC balancer
+	// should create during SDK initialization.
+	// It is initialized in flags package.
+	MinConnections = DefaultMinConnections
+)
+
 func init() {
 	balancer.Register(newBuilder())
 }
@@ -134,40 +145,46 @@ func (ref *subConnRef) streamsDecr() {
 }
 
 type gcpBalancer struct {
-	addrs   []resolver.Address
-	cc      balancer.ClientConn
-	csEvltr *connectivityStateEvaluator
-	state   connectivity.State
+	balancer.Balancer // Embed V1 Balancer so it compiles with Builder
+	addrs             []resolver.Address
+	cc                balancer.ClientConn
+	csEvltr           *connectivityStateEvaluator
+	state             connectivity.State
 
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	affinityMap map[string]balancer.SubConn
 	scStates    map[balancer.SubConn]connectivity.State
 	scRefs      map[balancer.SubConn]*subConnRef
 
-	picker balancer.V2Picker
+	picker balancer.Picker
 }
 
-func (gb *gcpBalancer) HandleResolvedAddrs(addrs []resolver.Address, err error) {
-	if err != nil {
-		grpclog.Infof(
-			"grpcgcp.gcpBalancer: HandleResolvedAddrs called with error %v",
-			err,
-		)
-		return
-	}
-	grpclog.Infoln("grpcgcp.gcpBalancer: got new resolved addresses: ", addrs)
+func (gb *gcpBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
+	addrs := ccs.ResolverState.Addresses
 	gb.addrs = addrs
 
-	if len(gb.scRefs) == 0 {
+	createdSubCons := false
+	for len(gb.scRefs) < MinConnections {
 		gb.newSubConn()
-		return
+		createdSubCons = true
+	}
+	if createdSubCons {
+		return nil
 	}
 
 	for _, scRef := range gb.scRefs {
-		// TODO(weiranf): update streams count when new addrs resolved?
 		scRef.subConn.UpdateAddresses(addrs)
 		scRef.subConn.Connect()
 	}
+
+	return nil
+}
+
+func (gb *gcpBalancer) ResolverError(err error) {
+	grpclog.Warningf(
+		"grpcgcp.gcpBalancer: ResolverError: %v",
+		err,
+	)
 }
 
 // check current connection pool size
@@ -209,8 +226,8 @@ func (gb *gcpBalancer) newSubConn() {
 // the boundKey exists in the affinityMap. If returned subConnRef is a nil, it
 // means the underlying subconn is not READY yet.
 func (gb *gcpBalancer) getReadySubConnRef(boundKey string) (*subConnRef, bool) {
-	gb.mu.Lock()
-	defer gb.mu.Unlock()
+	gb.mu.RLock()
+	defer gb.mu.RUnlock()
 
 	if sc, ok := gb.affinityMap[boundKey]; ok {
 		if gb.scStates[sc] != connectivity.Ready {
@@ -252,6 +269,9 @@ func (gb *gcpBalancer) unbindSubConn(boundKey string) {
 //  - errPicker with ErrTransientFailure if the balancer is in TransientFailure,
 //  - built by the pickerBuilder with all READY SubConns otherwise.
 func (gb *gcpBalancer) regeneratePicker() {
+	gb.mu.RLock()
+	defer gb.mu.RUnlock()
+
 	if gb.state == connectivity.TransientFailure {
 		gb.picker = newErrPicker(balancer.ErrTransientFailure)
 		return
@@ -267,7 +287,8 @@ func (gb *gcpBalancer) regeneratePicker() {
 	gb.picker = newGCPPicker(readyRefs, gb)
 }
 
-func (gb *gcpBalancer) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
+func (gb *gcpBalancer) UpdateSubConnState(sc balancer.SubConn, scs balancer.SubConnState) {
+	s := scs.ConnectivityState
 	grpclog.Infof("grpcgcp.gcpBalancer: handle SubConn state change: %p, %v", sc, s)
 
 	gb.mu.Lock()

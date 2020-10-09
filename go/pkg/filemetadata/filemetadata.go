@@ -4,25 +4,29 @@ package filemetadata
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 )
+
+// SymlinkMetadata contains details if the given path is a symlink.
+type SymlinkMetadata struct {
+	Target     string
+	IsDangling bool
+}
 
 // Metadata contains details for a particular file.
 type Metadata struct {
 	Digest       digest.Digest
 	IsExecutable bool
-	MTime        time.Time
 	Err          error
+	Symlink      *SymlinkMetadata
 }
 
 // FileError is the error returned by the Compute function.
 type FileError struct {
-	IsDirectory      bool
-	IsNotFound       bool
-	IsInvalidSymlink bool
-	Err              error
+	IsDirectory bool
+	IsNotFound  bool
+	Err         error
 }
 
 // Error returns the error message.
@@ -43,18 +47,31 @@ func isSymlink(filename string) (bool, error) {
 func Compute(filename string) *Metadata {
 	md := &Metadata{Digest: digest.Empty}
 	file, err := os.Stat(filename)
+	if isSym, _ := isSymlink(filename); isSym {
+		md.Symlink = &SymlinkMetadata{}
+		if dest, rlErr := os.Readlink(filename); rlErr != nil {
+			md.Err = &FileError{Err: rlErr}
+			return md
+		} else {
+			// If Readlink was OK, we set Target, even if this could be a dangling symlink.
+			md.Symlink.Target = dest
+		}
+
+		if err != nil {
+			md.Err = &FileError{Err: err}
+			md.Symlink.IsDangling = true
+			return md
+		}
+	}
+
 	if err != nil {
 		fe := &FileError{Err: err}
-		if s, err := isSymlink(filename); err == nil && s {
-			fe.IsInvalidSymlink = true
-		}
 		if os.IsNotExist(err) {
 			fe.IsNotFound = true
 		}
 		md.Err = fe
 		return md
 	}
-	md.MTime = file.ModTime()
 	mode := file.Mode()
 	md.IsExecutable = (mode & 0100) != 0
 	if mode.IsDir() {
@@ -69,7 +86,10 @@ func Compute(filename string) *Metadata {
 type Cache interface {
 	Get(path string) *Metadata
 	Delete(filename string) error
+	Update(path string, cacheEntry *Metadata) error
 	Reset()
+	GetCacheHits() uint64
+	GetCacheMisses() uint64
 }
 
 type noopCache struct{}
@@ -85,8 +105,24 @@ func (c *noopCache) Delete(string) error {
 	return nil
 }
 
+// Update updates a cache entry with the given value. It is a noop for Noop cache.
+func (c *noopCache) Update(string, *Metadata) error {
+	return nil
+}
+
 // Reset clears the cache. It is a noop for the Noop cache.
 func (c *noopCache) Reset() {}
+
+// GetCacheHits returns the number of cache hits. It returns 0 for Noop cache.
+func (c *noopCache) GetCacheHits() uint64 {
+	return 0
+}
+
+// GetCacheMisses returns the number of cache misses.
+// It returns 0 for Noop cache.
+func (c *noopCache) GetCacheMisses() uint64 {
+	return 0
+}
 
 // NewNoopCache returns a cache that doesn't cache (evaluates on every Get).
 func NewNoopCache() Cache {

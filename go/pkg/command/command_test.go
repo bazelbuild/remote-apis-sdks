@@ -389,6 +389,20 @@ func TestToFromProto(t *testing.T) {
 		ExecRoot: "/exec/root",
 		InputSpec: &InputSpec{
 			Inputs: []string{"foo.h", "bar.h"},
+			VirtualInputs: []*VirtualInput{
+				&VirtualInput{
+					Path:         "empty_file",
+					IsExecutable: true,
+				},
+				&VirtualInput{
+					Path:             "foo/empty_dir",
+					IsEmptyDirectory: true,
+				},
+				&VirtualInput{
+					Path:     "foo/bar",
+					Contents: []byte("bar-contents"),
+				},
+			},
 			InputExclusions: []*InputExclusion{
 				&InputExclusion{
 					Regex: "*.bla",
@@ -407,7 +421,7 @@ func TestToFromProto(t *testing.T) {
 		OutputFiles: []string{"a/b/out"},
 	}
 	gotCmd := FromProto(ToProto(cmd))
-	if diff := cmp.Diff(cmd, gotCmd); diff != "" {
+	if diff := cmp.Diff(cmd, gotCmd, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("FromProto(ToProto()) returned diff in result: (-want +got)\n%s", diff)
 	}
 }
