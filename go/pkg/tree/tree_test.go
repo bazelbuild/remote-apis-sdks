@@ -1220,7 +1220,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 				{path: "a/b/fooDir/dir1/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "a/b/fooDir/dir2/foo", fileContents: fooBlob, isExecutable: true},
 			},
-			wantBlobs: [][]byte{fooBlob},
+			wantBlobs: [][]byte{fooBlob, fooDirBlob},
 			wantTreeRoot: &repb.Directory{Directories: []*repb.DirectoryNode{
 				{Name: "dir1", Digest: fooDirDgPb},
 				{Name: "dir2", Digest: fooDirDgPb},
