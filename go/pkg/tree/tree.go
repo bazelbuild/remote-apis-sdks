@@ -397,6 +397,13 @@ func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cach
 			outs[ch.Digest()] = ch
 		}
 		resPb.OutputDirectories = append(resPb.OutputDirectories, &repb.OutputDirectory{Path: normPath, TreeDigest: ch.Digest().ToProto()})
+		// Upload the child directories individually as well
+		chRoot, _ := chunker.NewFromProto(treePb.Root, chunkSize)
+		outs[chRoot.Digest()] = chRoot
+		for _, child := range treePb.Children {
+			chChild, _ := chunker.NewFromProto(child, chunkSize)
+			outs[chChild.Digest()] = chChild
+		}
 	}
 	return outs, resPb, nil
 }
