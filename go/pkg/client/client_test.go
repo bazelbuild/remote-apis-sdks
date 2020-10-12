@@ -63,34 +63,11 @@ h4A58eQ+JGSLao6JSmi2T0tZ
 `
 )
 
-func assertNil(t *testing.T, prefix string, v interface{}) {
-	if v != nil {
-		t.Fatalf("%v: Expected nil, got %v", prefix, v)
-	}
-}
-
-func assertNotNil(t *testing.T, prefix string, v interface{}) {
-	if v == nil {
-		t.Fatalf("%v: Unexpected nil", prefix)
-	}
-}
-
-func assertStringEquals(t *testing.T, prefix, expected, actual string) {
-	if expected != actual {
-		t.Fatalf("%v: Expected '%v', got '%v'", prefix, expected, actual)
-	}
-}
-
 func TestCreateTLSConfig(t *testing.T) {
 	t.Run("EmptyDialParams", func(t *testing.T) {
-		tlsConfig, err := createTLSConfig(DialParams{})
-		assertNil(t, "err", err)
-		assertStringEquals(t, "ServerName", "", tlsConfig.ServerName)
-		if tlsConfig.RootCAs != nil {
-			t.Fatalf("RootCAs: Expected nil, got %v", tlsConfig.RootCAs)
-		}
-		if len(tlsConfig.Certificates) != 0 {
-			t.Fatalf("Certificates should be empty, got: %v", tlsConfig.Certificates)
+		_, err := createTLSConfig(DialParams{})
+		if err != nil {
+			t.Errorf("Could not create TLS config: %v", err)
 		}
 	})
 
@@ -98,13 +75,11 @@ func TestCreateTLSConfig(t *testing.T) {
 		tlsConfig, err := createTLSConfig(DialParams{
 			TLSServerName: "foo.example.com",
 		})
-		assertNil(t, "err", err)
-		assertStringEquals(t, "ServerName", "foo.example.com", tlsConfig.ServerName)
-		if tlsConfig.RootCAs != nil {
-			t.Fatalf("RootCAs: Expected nil, got %v", tlsConfig.RootCAs)
+		if err != nil {
+			t.Errorf("Could not create TLS config: %v", err)
 		}
-		if len(tlsConfig.Certificates) != 0 {
-			t.Fatalf("Certificates should be empty, got: %v", tlsConfig.Certificates)
+		if tlsConfig.ServerName != "foo.example.com" {
+			t.Errorf("Expected ServerName to be 'foo.example.com', got '%v'", tlsConfig.ServerName)
 		}
 	})
 
@@ -113,32 +88,39 @@ func TestCreateTLSConfig(t *testing.T) {
 			_, err := createTLSConfig(DialParams{
 				TLSClientAuthCert: "/foo/bar",
 			})
-			assertNotNil(t, "err", err)
+			if err == nil {
+				t.Error("Expected error creating mTLS config without auth-key, got nil")
+			}
 		})
 
 		t.Run("OnlyTLSClientAuthKey", func(t *testing.T) {
 			_, err := createTLSConfig(DialParams{
 				TLSClientAuthKey: "/foo/bar",
 			})
-			assertNotNil(t, "err", err)
+			if err == nil {
+				t.Error("Expected error creating mTLS config without auth-cert, got nil")
+			}
 		})
 
 		t.Run("OnlyTLSClientAuthCert", func(t *testing.T) {
 			certPath := path.Join(t.TempDir(), "cert.pem")
+			if err := ioutil.WriteFile(certPath, []byte(tlsCert), 0644); err != nil {
+				t.Fatalf("Could not write '%v': %v", certPath, err)
+			}
 			keyPath := path.Join(t.TempDir(), "key.pem")
-			assertNil(t, "Write cert", ioutil.WriteFile(certPath, []byte(tlsCert), 0644))
-			assertNil(t, "Write key", ioutil.WriteFile(keyPath, []byte(tlsKey), 0644))
+			if err := ioutil.WriteFile(keyPath, []byte(tlsKey), 0644); err != nil {
+				t.Fatalf("Could not write '%v': %v", keyPath, err)
+			}
+
 			tlsConfig, err := createTLSConfig(DialParams{
 				TLSClientAuthCert: certPath,
 				TLSClientAuthKey:  keyPath,
 			})
-			assertNil(t, "err", err)
-			assertStringEquals(t, "ServerName", "", tlsConfig.ServerName)
-			if tlsConfig.RootCAs != nil {
-				t.Fatalf("RootCAs: Expected nil, got %v", tlsConfig.RootCAs)
+			if err != nil {
+				t.Errorf("Could not create TLS config: %v", err)
 			}
 			if len(tlsConfig.Certificates) != 1 {
-				t.Fatalf("Expected exactly 1 certificate, got: %v", tlsConfig.Certificates)
+				t.Errorf("Expected exactly 1 certificate, got: %v", tlsConfig.Certificates)
 			}
 		})
 	})
