@@ -107,7 +107,7 @@ func TestExecNotAcceptCached(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 	cmd := &command.Command{Args: []string{"tool"}, ExecRoot: e.ExecRoot}
-	opt := &command.ExecutionOptions{AcceptCached: false}
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true}
 	wantRes := &command.Result{Status: command.SuccessResultStatus}
 	_, acDg := e.Set(cmd, opt, wantRes, fakes.StdOutRaw("not cached"))
 	e.Server.ActionCache.Put(acDg, &repb.ActionResult{StdoutRaw: []byte("cached")})
@@ -204,7 +204,7 @@ func TestExecDoNotCache_NotAcceptCached(t *testing.T) {
 	defer cleanup()
 	cmd := &command.Command{Args: []string{"tool"}, ExecRoot: e.ExecRoot}
 	// DoNotCache true implies in particular that we also skip action cache lookups, local or remote.
-	opt := &command.ExecutionOptions{DoNotCache: true}
+	opt := &command.ExecutionOptions{DoNotCache: true, DownloadOutputs: true}
 	wantRes := &command.Result{Status: command.SuccessResultStatus}
 	_, acDg := e.Set(cmd, opt, wantRes, fakes.StdOutRaw("not cached"))
 	e.Server.ActionCache.Put(acDg, &repb.ActionResult{StdoutRaw: []byte("cached")})
@@ -342,8 +342,8 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 			if len(oe.Stdout()) != 0 {
 				t.Errorf("Run() gave unexpected stdout: %v", oe.Stdout())
 			}
-			if !bytes.Equal(oe.Stderr(), []byte("stderr")) {
-				t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
+			if len(oe.Stderr()) != 0 {
+				t.Errorf("Run() gave unexpected stderr: %v", oe.Stderr())
 			}
 			path := filepath.Join(e.ExecRoot, "a/b/out")
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -454,10 +454,10 @@ func TestDownloadResults(t *testing.T) {
 	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
 		t.Errorf("expected output file %s to not be downloaded, but it was", outPath)
 	}
-	if len(oe.Stdout()) == 0 {
+	if len(oe.Stdout()) != 0 {
 		t.Errorf("GetCachedResult() gave unexpected stdout: %v", oe.Stdout())
 	}
-	if len(oe.Stderr()) == 0 {
+	if len(oe.Stderr()) != 0 {
 		t.Errorf("GetCachedResult() gave unexpected stderr: %v", oe.Stderr())
 	}
 	ec.DownloadResults(e.ExecRoot)
@@ -467,5 +467,11 @@ func TestDownloadResults(t *testing.T) {
 	}
 	if !bytes.Equal(contents, outBlob) {
 		t.Errorf("expected %s to contain %q, got %v", outPath, string(outBlob), contents)
+	}
+	if string(oe.Stdout()) != "stdout" {
+		t.Errorf("DownloadResults() stdout = %v, want 'stdout'", string(oe.Stdout()))
+	}
+	if string(oe.Stderr()) != "stderr" {
+		t.Errorf("DownloadResults() stderr = %v, want 'stder'", string(oe.Stderr()))
 	}
 }
