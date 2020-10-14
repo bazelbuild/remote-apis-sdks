@@ -921,6 +921,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 	tests := []struct {
 		name      string
 		sizes     []int
+		locality  bool
 		batchReqs int
 	}{
 		{
@@ -948,11 +949,42 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 			sizes:     []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
 			batchReqs: 4,
 		},
+		{
+			name:      "single small blob locality",
+			sizes:     []int{1},
+			locality:  true,
+			batchReqs: 0,
+		},
+		{
+			name:      "large and small blobs hitting max exactly locality",
+			sizes:     []int{338, 338, 338, 1, 1, 1},
+			locality:  true,
+			batchReqs: 2,
+		},
+		{
+			name:      "small batches of big blobs locality",
+			sizes:     []int{88, 88, 88, 88, 88, 88, 88},
+			locality:  true,
+			batchReqs: 2,
+		},
+		{
+			name:      "batch with blob that's too big locality",
+			sizes:     []int{400, 88, 88, 88},
+			locality:  true,
+			batchReqs: 1,
+		},
+		{
+			name:      "many small blobs hitting max digests locality",
+			sizes:     []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+			locality:  true,
+			batchReqs: 4,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fake.Clear()
+			c.UtilizeLocality = client.UtilizeLocality(tc.locality)
 			var dgs []digest.Digest
 			blobs := make(map[digest.Digest][]byte)
 			ar := &repb.ActionResult{}
