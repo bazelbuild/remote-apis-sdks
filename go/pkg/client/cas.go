@@ -113,7 +113,6 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 
 	missing, present, err := c.getMissingPresent(ctx, newUploads)
 	if err != nil {
-		c.afterUpload(newUploads, err)
 		return nil, err
 	}
 	log.V(2).Infof("%d new items to store", len(missing))
