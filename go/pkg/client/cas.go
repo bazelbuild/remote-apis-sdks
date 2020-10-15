@@ -25,47 +25,6 @@ import (
 	log "github.com/golang/glog"
 )
 
-func (c *Client) afterUpload(batch []digest.Digest, err error) {
-	for _, dg := range batch {
-		l, loaded := c.casUploadLocks.Load(dg)
-		lock, ok := l.(*sync.RWMutex)
-		if !ok {
-			log.Errorf("Unexpected type found in locks map")
-		}
-		if !loaded {
-			log.Errorf("Precondition failed: upload lock not found on %v.", dg)
-		}
-		if err != nil {
-			c.casUploadErrors.Store(dg, err)
-		}
-		lock.Unlock()
-	}
-}
-
-// Reset clears the Client state (e.g. makes it forget which blobs were
-// previously uploaded, or in the process of being uploaded).
-// This function is not thread safe, and should only be used outside of
-// ongoing client operations!
-func (c *Client) Reset() {
-	c.casUploadLocks = sync.Map{}
-	c.casUploadErrors = sync.Map{}
-}
-
-func (c *Client) getMissingPresent(ctx context.Context, dgs []digest.Digest) (missing []digest.Digest, present []digest.Digest, err error) {
-	dgMap := make(map[digest.Digest]bool)
-	for _, d := range dgs {
-		dgMap[d] = true
-	}
-	missing, err = c.MissingBlobs(ctx, dgs)
-	for _, d := range missing {
-		delete(dgMap, d)
-	}
-	for d := range dgMap {
-		present = append(present, d)
-	}
-	return missing, present, err
-}
-
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
 // Returns a slice of the missing digests.
@@ -87,38 +46,11 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 		}
 	}
 
-	// Separate the digests into two groups: new and previous.
-	// Previous have either been uploaded earlier, or are in the process of being
-	// uploaded by another thread.
-	var newUploads []digest.Digest
-	var previousUploads []digest.Digest
-	locks := make(map[digest.Digest]*sync.RWMutex)
-	for _, d := range dgs {
-		mu := &sync.RWMutex{}
-		mu.Lock()
-
-		l, loaded := c.casUploadLocks.LoadOrStore(d, mu)
-		lock, ok := l.(*sync.RWMutex)
-		if !ok {
-			return nil, fmt.Errorf("unexpected type found in lock map")
-		}
-		locks[d] = lock
-		if loaded {
-			previousUploads = append(previousUploads, d)
-		} else {
-			// We will unlock as soon as we finish uploading the digest.
-			newUploads = append(newUploads, d)
-		}
-	}
-
-	missing, present, err := c.getMissingPresent(ctx, newUploads)
+	missing, err := c.MissingBlobs(ctx, dgs)
 	if err != nil {
 		return nil, err
 	}
-	log.V(2).Infof("%d new items to store", len(missing))
-	for _, d := range present {
-		locks[d].Unlock()
-	}
+	log.V(2).Infof("%d items to store", len(missing))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
 		batches = c.makeBatches(missing)
@@ -134,9 +66,8 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	for i, batch := range batches {
 		i, batch := i, batch   // https://golang.org/doc/faq#closures_and_goroutines
 		c.casUploaders <- true // Reserve an uploader thread.
-		eg.Go(func() (err error) {
+		eg.Go(func() error {
 			defer func() { <-c.casUploaders }()
-			defer func() { c.afterUpload(batch, err) }()
 			if i%logInterval == 0 {
 				log.V(2).Infof("%d batches left to store", len(batches)-i)
 			}
@@ -168,27 +99,9 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 		})
 	}
 
-	log.V(2).Info("Waiting for remaining new uploads")
+	log.V(2).Info("Waiting for remaining jobs")
 	err = eg.Wait()
-	log.V(2).Info("Done new uploads.")
-	log.V(2).Infof("Waiting for remaining %v previous uploads", len(previousUploads))
-	for _, dg := range previousUploads {
-		// Wait on all uploads, but return the first error.
-		mu := locks[dg]
-		mu.RLock()
-		defer mu.RUnlock()
-		if err != nil {
-			continue
-		}
-		if v, _ := c.casUploadErrors.Load(dg); v != nil {
-			e, ok := v.(error)
-			if !ok {
-				err = fmt.Errorf("unexpected type found in error map")
-			}
-			err = e
-		}
-	}
-	log.V(2).Info("Done waiting on previous uploads.")
+	log.V(2).Info("Done")
 
 	return missing, err
 }
