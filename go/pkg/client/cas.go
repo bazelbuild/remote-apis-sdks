@@ -517,7 +517,7 @@ func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result [
 			InstanceName: c.InstanceName,
 			RootDigest:   d,
 			PageToken:    pageTok,
-		})
+		}, c.RPCOpts()...)
 		if err != nil {
 			return err
 		}
