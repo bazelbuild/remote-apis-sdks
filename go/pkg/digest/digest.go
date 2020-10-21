@@ -35,7 +35,9 @@ type Digest struct {
 
 // GetDigestFunction returns the digest function used by the client.
 func GetDigestFunction() repb.DigestFunction_Value {
-	name := strings.ReplaceAll(HashFn.String(), "-", "")
+	// TODO: replace this line after all clients support Go 1.15 where .String() is defined:
+	// name := strings.ReplaceAll(HashFn.String(), "-", "")
+	name := "SHA256"
 	if val, ok := repb.DigestFunction_Value_value[name]; ok {
 		return repb.DigestFunction_Value(val)
 	}
