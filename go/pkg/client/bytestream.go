@@ -98,8 +98,7 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 	cancelCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	closure := func(ctx context.Context) error {
-		// Use lower-level Read in order to not retry twice.
-		stream, err := c.byteStream.Read(ctx, &bspb.ReadRequest{
+		stream, err := c.Read(ctx, &bspb.ReadRequest{
 			ResourceName: name,
 			ReadOffset:   offset + n,
 			ReadLimit:    limit,
