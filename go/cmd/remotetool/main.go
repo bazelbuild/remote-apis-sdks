@@ -89,7 +89,7 @@ func main() {
 		if err != nil {
 			log.Exitf("error downloading blob for digest %v: %v", getDigestFlag(), err)
 		}
-		fmt.Fprintf(os.Stdout, res)
+		os.Stdout.Write([]byte(res))
 
 	case downloadDir:
 		if err := c.DownloadDirectory(ctx, getDigestFlag(), getPathFlag()); err != nil {
@@ -101,7 +101,7 @@ func main() {
 		if err != nil {
 			log.Exitf("error fetching action %v: %v", getDigestFlag(), err)
 		}
-		fmt.Fprintf(os.Stdout, res)
+		os.Stdout.Write([]byte(res))
 
 	case reexecuteAction:
 		if err := c.ReexecuteAction(ctx, getDigestFlag(), *inputRoot, outerr.SystemOutErr); err != nil {
