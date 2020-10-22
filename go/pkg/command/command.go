@@ -84,6 +84,16 @@ type InputSpec struct {
 	EnvironmentVariables map[string]string
 }
 
+// String returns the string representation of the VirtualInput.
+func (s *VirtualInput) String() string {
+	return fmt.Sprintf("%+v", *s)
+}
+
+// String returns the string representation of the InputExclusion.
+func (s *InputExclusion) String() string {
+	return fmt.Sprintf("%+v", *s)
+}
+
 // Identifiers is a group of identifiers of a command.
 type Identifiers struct {
 	// CommandID is an optional id to use to identify a command.
