@@ -149,6 +149,7 @@ func (ec *Context) computeInputs() error {
 	log.V(1).Infof("%s> Command digest: %s", executionID, cmdDg)
 	log.V(1).Infof("%s> Computing input Merkle tree...", executionID)
 	root, blobs, stats, err := tree.ComputeMerkleTree(ec.cmd.ExecRoot, ec.cmd.InputSpec, chunkSize, ec.client.FileMetadataCache)
+	log.V(1).Infof("%s> Finished Merkle tree...", executionID)
 	if err != nil {
 		return err
 	}
