@@ -136,9 +136,9 @@ func (ec *Context) computeInputs() error {
 	}
 	ec.Metadata.EventTimes[command.EventComputeMerkleTree] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventComputeMerkleTree].To = time.Now() }()
-	cmdID := ec.cmd.Identifiers.CommandID
+	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
 	cmdPb := ec.cmd.ToREProto()
-	log.V(2).Infof("%s> Command: \n%s\n", cmdID, proto.MarshalTextString(cmdPb))
+	log.V(2).Infof("%s %s> Command: \n%s\n", cmdID, executionID, proto.MarshalTextString(cmdPb))
 	chunkSize := int(ec.client.GrpcClient.ChunkMaxSize)
 	var err error
 	if ec.cmdCh, err = chunker.NewFromProto(cmdPb, chunkSize); err != nil {
@@ -146,8 +146,8 @@ func (ec *Context) computeInputs() error {
 	}
 	cmdDg := ec.cmdCh.Digest()
 	ec.Metadata.CommandDigest = cmdDg
-	log.V(1).Infof("%s> Command digest: %s", cmdID, cmdDg)
-	log.V(1).Infof("%s> Computing input Merkle tree...", cmdID)
+	log.V(1).Infof("%s %s> Command digest: %s", cmdID, executionID, cmdDg)
+	log.V(1).Infof("%s %s> Computing input Merkle tree...", cmdID, executionID)
 	root, blobs, stats, err := tree.ComputeMerkleTree(ec.cmd.ExecRoot, ec.cmd.InputSpec, chunkSize, ec.client.FileMetadataCache)
 	if err != nil {
 		return err
@@ -168,7 +168,7 @@ func (ec *Context) computeInputs() error {
 		return err
 	}
 	acDg := ec.acCh.Digest()
-	log.V(1).Infof("%s> Action digest: %s", cmdID, acDg)
+	log.V(1).Infof("%s %s> Action digest: %s", cmdID, executionID, acDg)
 	ec.inputBlobs = append(ec.inputBlobs, ec.cmdCh)
 	ec.inputBlobs = append(ec.inputBlobs, ec.acCh)
 	ec.Metadata.ActionDigest = acDg
@@ -196,7 +196,8 @@ func (ec *Context) GetCachedResult() {
 		ec.resPb = resPb
 	}
 	if ec.resPb != nil {
-		log.V(1).Infof("%s> Found cached result, downloading outputs...", ec.cmd.Identifiers.CommandID)
+		cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
+		log.V(1).Infof("%s %s> Found cached result, downloading outputs...", cmdID, executionID)
 		ec.Result = ec.downloadResults(ec.cmd.ExecRoot, ec.opt.DownloadOutputs)
 		if ec.Result.Err == nil {
 			ec.Result.Status = command.CacheHitResultStatus
@@ -209,10 +210,10 @@ func (ec *Context) GetCachedResult() {
 // UpdateCachedResult tries to write local results of the execution to the remote cache.
 // TODO(olaola): optional arguments to override values of local outputs, and also stdout/err.
 func (ec *Context) UpdateCachedResult() {
-	cmdID := ec.cmd.Identifiers.CommandID
+	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
 	ec.Result = &command.Result{Status: command.SuccessResultStatus}
 	if ec.opt.DoNotCache {
-		log.V(1).Infof("%s> Command is marked do-not-cache, skipping remote caching.", cmdID)
+		log.V(1).Infof("%s %s> Command is marked do-not-cache, skipping remote caching.", cmdID, executionID)
 		return
 	}
 	if err := ec.computeInputs(); err != nil {
@@ -234,14 +235,14 @@ func (ec *Context) UpdateCachedResult() {
 	for _, ch := range blobs {
 		toUpload = append(toUpload, ch)
 	}
-	log.V(1).Infof("%s> Uploading local outputs...", cmdID)
+	log.V(1).Infof("%s %s> Uploading local outputs...", cmdID, executionID)
 	if missing, err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, toUpload...); err != nil {
 		ec.Result = command.NewRemoteErrorResult(err)
 		return
 	} else {
 		ec.Metadata.MissingDigests = missing
 	}
-	log.V(1).Infof("%s> Updating remote cache...", cmdID)
+	log.V(1).Infof("%s %s> Updating remote cache...", cmdID, executionID)
 	req := &repb.UpdateActionResultRequest{
 		InstanceName: ec.client.GrpcClient.InstanceName,
 		ActionDigest: ec.Metadata.ActionDigest.ToProto(),
@@ -260,8 +261,8 @@ func (ec *Context) ExecuteRemotely() {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
-	cmdID := ec.cmd.Identifiers.CommandID
-	log.V(1).Infof("%s> Checking inputs to upload...", cmdID)
+	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
+	log.V(1).Infof("%s %s> Checking inputs to upload...", cmdID, executionID)
 	// TODO(olaola): compute input cache hit stats.
 	ec.Metadata.EventTimes[command.EventUploadInputs] = &command.TimeInterval{From: time.Now()}
 	missing, err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, ec.inputBlobs...)
@@ -271,7 +272,7 @@ func (ec *Context) ExecuteRemotely() {
 		return
 	}
 	ec.Metadata.MissingDigests = missing
-	log.V(1).Infof("%s> Executing remotely...\n%s", cmdID, strings.Join(ec.cmd.Args, " "))
+	log.V(1).Infof("%s %s> Executing remotely...\n%s", cmdID, executionID, strings.Join(ec.cmd.Args, " "))
 	ec.Metadata.EventTimes[command.EventExecuteRemotely] = &command.TimeInterval{From: time.Now()}
 	op, err := ec.client.GrpcClient.ExecuteAndWait(ec.ctx, &repb.ExecuteRequest{
 		InstanceName:    ec.client.GrpcClient.InstanceName,
@@ -303,7 +304,7 @@ func (ec *Context) ExecuteRemotely() {
 	}
 
 	if ec.resPb != nil {
-		log.V(1).Infof("%s> Downloading outputs...", cmdID)
+		log.V(1).Infof("%s %s> Downloading outputs...", cmdID, executionID)
 		ec.Result = ec.downloadResults(ec.cmd.ExecRoot, ec.opt.DownloadOutputs)
 		if resp.CachedResult && ec.Result.Err == nil {
 			ec.Result.Status = command.CacheHitResultStatus
