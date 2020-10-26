@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
@@ -78,13 +79,17 @@ type Client struct {
 	// ExecutableMode is mode used to create executable files.
 	ExecutableMode os.FileMode
 	// RegularMode is mode used to create non-executable files.
-	RegularMode    os.FileMode
-	serverCaps     *repb.ServerCapabilities
-	useBatchOps    UseBatchOps
-	casUploaders   chan bool
-	casDownloaders chan bool
-	rpcTimeouts    RPCTimeouts
-	creds          credentials.PerRPCCredentials
+	RegularMode os.FileMode
+	// UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
+	UtilizeLocality UtilizeLocality
+	serverCaps      *repb.ServerCapabilities
+	useBatchOps     UseBatchOps
+	casUploaders    chan bool
+	casDownloaders  chan bool
+	casUploadLocks  sync.Map
+	casUploadErrors sync.Map
+	rpcTimeouts     RPCTimeouts
+	creds           credentials.PerRPCCredentials
 }
 
 const (
@@ -129,6 +134,13 @@ type ChunkMaxSize int
 // Apply sets the client's maximal chunk size s.
 func (s ChunkMaxSize) Apply(c *Client) {
 	c.ChunkMaxSize = s
+}
+
+// UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
+type UtilizeLocality bool
+
+func (s UtilizeLocality) Apply(c *Client) {
+	c.UtilizeLocality = s
 }
 
 // MaxBatchDigests is maximum amount of digests to batch in batched operations.
