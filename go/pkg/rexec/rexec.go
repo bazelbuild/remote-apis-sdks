@@ -110,10 +110,10 @@ func (ec *Context) setOutputMetadata() {
 }
 
 func (ec *Context) downloadResults(execRoot string, downloadOutputs bool) *command.Result {
+	ec.setOutputMetadata()
 	if !downloadOutputs {
 		return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 	}
-	ec.setOutputMetadata()
 	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
 	if err := ec.downloadStream(ec.resPb.StdoutRaw, ec.resPb.StdoutDigest, ec.oe.WriteOut); err != nil {
