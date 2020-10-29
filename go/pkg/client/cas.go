@@ -27,6 +27,9 @@ import (
 	log "github.com/golang/glog"
 )
 
+// DefaultCompressedBytestreamThreshold is the default threshold for transferring blobs compressed on ByteStream.Write RPCs.
+const DefaultCompressedBytestreamThreshold = 1024
+
 const logInterval = 25
 
 type requestMetadata struct {
@@ -858,6 +861,13 @@ func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
 	return fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
 }
 
+// ResourceNameCompressedWrite generates a valid write resource name.
+// TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
+// that gets merged in.
+func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) string {
+	return fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
+}
+
 // GetDirectoryTree returns the entire directory tree rooted at the given digest (which must target
 // a Directory stored in the CAS).
 func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result []*repb.Directory, err error) {
@@ -1376,4 +1386,15 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 		}
 	}
 	return nil
+}
+
+func (c *Client) shouldCompress(sizeBytes int64) bool {
+	return int64(c.CompressedBytestreamThreshold) >= 0 && int64(c.CompressedBytestreamThreshold) <= sizeBytes
+}
+
+func (c *Client) writeRscName(dg digest.Digest) string {
+	if c.shouldCompress(dg.Size) {
+		return c.ResourceNameCompressedWrite(dg.Hash, dg.Size)
+	}
+	return c.ResourceNameWrite(dg.Hash, dg.Size)
 }

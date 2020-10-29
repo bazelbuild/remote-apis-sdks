@@ -17,6 +17,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pborman/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -130,19 +131,29 @@ func (f *Writer) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	}
 
 	path := strings.Split(req.ResourceName, "/")
-	if len(path) != 6 || path[0] != "instance" || path[1] != "uploads" || path[3] != "blobs" {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+	if (len(path) != 6 && len(path) != 7) || path[0] != "instance" || path[1] != "uploads" || (path[3] != "blobs" && path[3] != "compressed-blobs") {
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
-	size, err := strconv.ParseInt(path[5], 10, 64)
+	// indexOffset for all 4+ paths - `compressed-blobs` paths have one more element.
+	indexOffset := 0
+	if path[3] == "compressed-blobs" {
+		indexOffset = 1
+		// TODO(rubensf): Change this to all the possible compressors in https://github.com/bazelbuild/remote-apis/pull/168.
+		if path[4] != "zstd" {
+			return status.Error(codes.InvalidArgument, "test fake expected valid compressor, eg zstd")
+		}
+	}
+
+	size, err := strconv.ParseInt(path[5+indexOffset], 10, 64)
 	if err != nil {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
-	dg, e := digest.New(path[4], size)
+	dg, e := digest.New(path[4+indexOffset], size)
 	if e != nil {
-		return status.Error(codes.InvalidArgument, "test fake expected valid digest as part of resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+		return status.Error(codes.InvalidArgument, "test fake expected valid digest as part of resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
 	if uuid.Parse(path[2]) == nil {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
 
 	res := req.ResourceName
@@ -182,7 +193,22 @@ func (f *Writer) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 		return status.Errorf(codes.InvalidArgument, "reached end of stream before the client finished writing")
 	}
 
-	f.Buf = buf.Bytes()
+	if path[3] == "compressed-blobs" {
+		if path[4] != "zstd" {
+			return status.Errorf(codes.InvalidArgument, "%s compressor isn't supported", path[4])
+		}
+		decoder, err := zstd.NewReader(nil)
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed to initialize internal decoder: %v", err)
+		}
+		f.Buf, err = decoder.DecodeAll(buf.Bytes(), nil)
+		if err != nil {
+			return status.Errorf(codes.InvalidArgument, "served bytes can't be decompressed: %v", err)
+		}
+	} else {
+		f.Buf = buf.Bytes()
+	}
+
 	cDg := digest.NewFromBlob(f.Buf)
 	if dg != cDg {
 		return status.Errorf(codes.InvalidArgument, "mismatched digest: received %s, computed %s", dg, cDg)
@@ -217,16 +243,20 @@ type CAS struct {
 	writeReqs         int
 	concReqs          int
 	maxConcReqs       int
+	decoder           *zstd.Decoder
 }
 
 // NewCAS returns a new empty fake CAS.
-func NewCAS() *CAS {
+func NewCAS() (*CAS, error) {
 	c := &CAS{
 		BatchSize:        client.DefaultMaxBatchSize,
 		PerDigestBlockFn: make(map[digest.Digest]func()),
 	}
 	c.Clear()
-	return c
+
+	var err error
+	c.decoder, err = zstd.NewReader(nil)
+	return c, err
 }
 
 // Clear removes all results from the cache.
@@ -497,19 +527,28 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	}
 
 	path := strings.Split(req.ResourceName, "/")
-	if len(path) != 6 || path[0] != "instance" || path[1] != "uploads" || path[3] != "blobs" {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+	if (len(path) != 6 && len(path) != 7) || path[0] != "instance" || path[1] != "uploads" || (path[3] != "blobs" && path[3] != "compressed-blobs") {
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
-	size, err := strconv.ParseInt(path[5], 10, 64)
-	if err != nil {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+	// indexOffset for all 4+ paths - `compressed-blobs` paths have one more element.
+	indexOffset := 0
+	if path[3] == "compressed-blobs" {
+		indexOffset = 1
+		// TODO(rubensf): Change this to all the possible compressors in https://github.com/bazelbuild/remote-apis/pull/168.
+		if path[4] != "zstd" {
+			return status.Error(codes.InvalidArgument, "test fake expected valid compressor, eg zstd")
+		}
 	}
-	dg, err := digest.New(path[4], size)
+	size, err := strconv.ParseInt(path[5+indexOffset], 10, 64)
 	if err != nil {
-		return status.Error(codes.InvalidArgument, "test fake expected a valid digest as part of the resource name: \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
+	}
+	dg, err := digest.New(path[4+indexOffset], size)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, "test fake expected a valid digest as part of the resource name: \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
 	if uuid.Parse(path[2]) == nil {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
 
 	f.maybeSleep()
@@ -563,11 +602,23 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 		return status.Errorf(codes.InvalidArgument, "reached end of stream before the client finished writing")
 	}
 
+	uncompressedBuf := buf.Bytes()
+	if path[3] == "compressed-blobs" {
+		if path[4] != "zstd" {
+			return status.Errorf(codes.InvalidArgument, "%s compressor isn't supported", path[4])
+		}
+		var err error
+		uncompressedBuf, err = f.decoder.DecodeAll(buf.Bytes(), nil)
+		if err != nil {
+			return status.Errorf(codes.InvalidArgument, "served bytes can't be decompressed: %v", err)
+		}
+	}
+
 	f.mu.Lock()
-	f.blobs[dg] = buf.Bytes()
+	f.blobs[dg] = uncompressedBuf
 	f.writes[dg]++
 	f.mu.Unlock()
-	cDg := digest.NewFromBlob(buf.Bytes())
+	cDg := digest.NewFromBlob(uncompressedBuf)
 	if dg != cDg {
 		return status.Errorf(codes.InvalidArgument, "mismatched digest: received %s, computed %s", dg, cDg)
 	}
