@@ -37,6 +37,10 @@ func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chun
 				return err
 			}
 			if chunk.Offset == 0 {
+				// Notice that the digest in the chunker might be misleading.
+				// Specifically, for compressed blob uploads, the resource
+				// name should include the uncompressed digest - while chunker
+				// should be including the compressed digest.
 				req.ResourceName = name
 			}
 			req.WriteOffset = chunk.Offset

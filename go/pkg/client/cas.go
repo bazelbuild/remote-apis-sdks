@@ -25,6 +25,9 @@ import (
 	log "github.com/golang/glog"
 )
 
+// DefaultCompressedBytestreamThreshold is the default threshold for transferring blobs compressed on ByteStream.Write RPCs.
+const DefaultCompressedBytestreamThreshold = 1024
+
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
 // Returns a slice of the missing digests.
@@ -87,8 +90,12 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 			} else {
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 				ch := chunkers[batch[0]]
-				dg := ch.Digest()
-				if err := c.WriteChunked(eCtx, c.ResourceNameWrite(dg.Hash, dg.Size), ch); err != nil {
+				var rscName string
+				var err error
+				if rscName, err = c.maybeCompressBlob(ch); err != nil {
+					return err
+				}
+				if err = c.WriteChunked(eCtx, rscName, ch); err != nil {
 					return err
 				}
 			}
@@ -135,7 +142,26 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
 	ch := chunker.NewFromBlob(blob, int(c.ChunkMaxSize))
 	dg := ch.Digest()
-	return dg, c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
+
+	name, err := c.maybeCompressBlob(ch)
+	if err != nil {
+		return dg, err
+	}
+
+	return dg, c.WriteChunked(ctx, name, ch)
+}
+
+// maybeCompressBlob will, depending on the client configuration, set the blobs to be
+// read compressed. It returns the appropriate resource name.
+func (c *Client) maybeCompressBlob(ch *chunker.Chunker) (string, error) {
+	dg := ch.Digest()
+	if c.CompressedBytestreamThreshold < 0 || int64(c.CompressedBytestreamThreshold) > ch.Digest().Size {
+		return c.ResourceNameWrite(dg.Hash, dg.Size), nil
+	}
+	if err := chunker.CompressChunker(ch); err != nil {
+		return "", err
+	}
+	return c.ResourceNameCompressedWrite(dg.Hash, dg.Size), nil
 }
 
 // BatchWriteBlobs uploads a number of blobs to the CAS. They must collectively be below the
@@ -512,6 +538,13 @@ func (c *Client) resourceNameRead(hash string, sizeBytes int64) string {
 // ResourceNameWrite generates a valid write resource name.
 func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
 	return fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
+}
+
+// ResourceNameCompressedWrite generates a valid write resource name.
+// TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
+// that gets merged in.
+func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) string {
+	return fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
 }
 
 // GetDirectoryTree returns the entire directory tree rooted at the given digest (which must target

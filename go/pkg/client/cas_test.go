@@ -284,7 +284,7 @@ func TestWrite(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+		testFunc := func(t *testing.T) {
 			gotDg, err := c.WriteBlob(ctx, tc.blob)
 			if err != nil {
 				t.Errorf("c.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
@@ -299,7 +299,13 @@ func TestWrite(t *testing.T) {
 			if dg != gotDg {
 				t.Errorf("c.WriteBlob(ctx, blob) had diff on digest returned (want %s, got %s)", dg, gotDg)
 			}
-		})
+		}
+
+		// Harder to write in a for loop since it -1/0 isn't an intuitive "enabled/disabled"
+		c.CompressedBytestreamThreshold = -1
+		t.Run(tc.name+" - no compression", testFunc)
+		c.CompressedBytestreamThreshold = 0
+		t.Run(tc.name+" - with compression", testFunc)
 	}
 }
 
@@ -442,7 +448,7 @@ func TestUpload(t *testing.T) {
 		t.Run(fmt.Sprintf("UsingBatch:%t", ub), func(t *testing.T) {
 			ub.Apply(c)
 			for _, tc := range tests {
-				t.Run(tc.name, func(t *testing.T) {
+				testFunc := func(t *testing.T) {
 					fake.Clear()
 					if tc.concurrency > 0 {
 						tc.concurrency.Apply(c)
@@ -467,12 +473,9 @@ func TestUpload(t *testing.T) {
 					for _, dg := range missing {
 						missingSet[dg] = struct{}{}
 					}
-					for _, ch := range input {
+					for i, ch := range input {
 						dg := ch.Digest()
-						blob, err := ch.FullData()
-						if err != nil {
-							t.Errorf("ch.FullData() returned an error: %v", err)
-						}
+						blob := tc.input[i]
 						if present[dg] {
 							if fake.BlobWrites(dg) > 0 {
 								t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
@@ -485,7 +488,7 @@ func TestUpload(t *testing.T) {
 						if gotBlob, ok := fake.Get(dg); !ok {
 							t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
 						} else if !bytes.Equal(blob, gotBlob) {
-							t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
+							t.Errorf("blob digest %s had diff on uploaded blob: want %s, got %s", dg, blob, gotBlob)
 						}
 						if _, ok := missingSet[dg]; !ok {
 							t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
@@ -494,7 +497,13 @@ func TestUpload(t *testing.T) {
 					if fake.MaxConcurrency() > defaultCASConcurrency {
 						t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
 					}
-				})
+				}
+
+				// Harder to write in a for loop since it -1/0 isn't an intuitive "enabled/disabled"
+				c.CompressedBytestreamThreshold = -1
+				t.Run(tc.name+" - no compression", testFunc)
+				c.CompressedBytestreamThreshold = 0
+				t.Run(tc.name+" - with compression", testFunc)
 			}
 		})
 	}
