@@ -215,7 +215,7 @@ func TestTool_UploadBlob(t *testing.T) {
 	cas := e.Server.CAS
 
 	tmpFile := path.Join(t.TempDir(), "blob")
-	if err := ioutil.WriteFile(tmpFile, []byte("Hello, World!"), 777); err != nil {
+	if err := ioutil.WriteFile(tmpFile, []byte("Hello, World!"), 0777); err != nil {
 		t.Fatalf("Could not create temp blob: %v", err)
 	}
 
