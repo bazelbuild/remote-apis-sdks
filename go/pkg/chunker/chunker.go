@@ -22,9 +22,11 @@ var IOBufferSize = 10 * 1024 * 1024
 // ErrEOF is returned when Next is called when HasNext is false.
 var ErrEOF = errors.New("ErrEOF")
 
-// Compressor for full blobs. It is *only* thread-safe for EncodeAll calls and
-// should not be used for streamed compression.
-var fullCompressor, _ = zstd.NewWriter(nil)
+// Compressor for full blobs
+// It is *only* thread-safe for EncodeAll calls and should not be used for streamed compression.
+// While we avoid sending 0 len blobs, we do want to create zero len compressed blobs if
+// necessary.
+var fullCompressor, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
 
 type UploadEntry struct {
 	digest   digest.Digest
@@ -81,9 +83,6 @@ type Chunker struct {
 }
 
 func New(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, error) {
-	if compressed {
-		return nil, errors.New("compression is not supported yet")
-	}
 	if chunkSize < 1 {
 		chunkSize = DefaultChunkSize
 	}

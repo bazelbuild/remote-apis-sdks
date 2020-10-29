@@ -41,7 +41,10 @@ type Server struct {
 
 // NewServer creates a server that is ready to accept requests.
 func NewServer(t *testing.T) (s *Server, err error) {
-	cas := NewCAS()
+	cas, err := NewCAS()
+	if err != nil {
+		return nil, err
+	}
 	ac := NewActionCache()
 	s = &Server{Exec: NewExec(t, ac, cas), CAS: cas, ActionCache: ac}
 	s.listener, err = net.Listen("tcp", ":0")
