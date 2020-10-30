@@ -331,7 +331,7 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 				ExecRoot:    e.ExecRoot,
 			}
 			opt := &command.ExecutionOptions{AcceptCached: true, DownloadOutputs: false}
-			e.Set(cmd, opt, tc.wantRes, fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output"}, fakes.ExecutionCacheHit(tc.cached))
+			e.Set(cmd, opt, tc.wantRes, fakes.StdOut("stdout"), fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output"}, fakes.ExecutionCacheHit(tc.cached))
 			oe := outerr.NewRecordingOutErr()
 
 			res, _ := e.Client.Run(context.Background(), cmd, opt, oe)
@@ -339,11 +339,11 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 			if diff := cmp.Diff(tc.wantRes, res, cmp.Comparer(proto.Equal), cmp.Comparer(equalError)); diff != "" {
 				t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 			}
-			if len(oe.Stdout()) != 0 {
-				t.Errorf("Run() gave unexpected stdout: %v", oe.Stdout())
+			if string(oe.Stdout()) != "stdout" {
+				t.Errorf("Run() stdout = %v, want 'stdout'", string(oe.Stdout()))
 			}
-			if len(oe.Stderr()) != 0 {
-				t.Errorf("Run() gave unexpected stderr: %v", oe.Stderr())
+			if string(oe.Stderr()) != "stderr" {
+				t.Errorf("Run() stderr = %v, want 'stder'", string(oe.Stderr()))
 			}
 			path := filepath.Join(e.ExecRoot, "a/b/out")
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -454,11 +454,11 @@ func TestDownloadResults(t *testing.T) {
 	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
 		t.Errorf("expected output file %s to not be downloaded, but it was", outPath)
 	}
-	if len(oe.Stdout()) != 0 {
-		t.Errorf("GetCachedResult() gave unexpected stdout: %v", oe.Stdout())
+	if string(oe.Stdout()) != "stdout" {
+		t.Errorf("DownloadResults() stdout = %v, want 'stdout'", string(oe.Stdout()))
 	}
-	if len(oe.Stderr()) != 0 {
-		t.Errorf("GetCachedResult() gave unexpected stderr: %v", oe.Stderr())
+	if string(oe.Stderr()) != "stderr" {
+		t.Errorf("DownloadResults() stderr = %v, want 'stder'", string(oe.Stderr()))
 	}
 	ec.DownloadResults(e.ExecRoot)
 	contents, err := ioutil.ReadFile(outPath)
@@ -467,11 +467,5 @@ func TestDownloadResults(t *testing.T) {
 	}
 	if !bytes.Equal(contents, outBlob) {
 		t.Errorf("expected %s to contain %q, got %v", outPath, string(outBlob), contents)
-	}
-	if string(oe.Stdout()) != "stdout" {
-		t.Errorf("DownloadResults() stdout = %v, want 'stdout'", string(oe.Stdout()))
-	}
-	if string(oe.Stderr()) != "stderr" {
-		t.Errorf("DownloadResults() stderr = %v, want 'stder'", string(oe.Stderr()))
 	}
 }
