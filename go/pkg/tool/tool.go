@@ -93,7 +93,7 @@ func (c *Client) ReexecuteAction(ctx context.Context, actionDigest, inputRoot st
 		}
 		cmd.Timeout = tm
 	}
-	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true}
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
 	res, _ := client.Run(ctx, cmd, opt, oe)
 	switch res.Status {
 	case command.NonZeroExitResultStatus:

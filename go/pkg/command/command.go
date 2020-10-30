@@ -262,6 +262,9 @@ type ExecutionOptions struct {
 
 	// Download command outputs after execution. Defaults to true.
 	DownloadOutputs bool
+
+	// Download command stdout and stderr. Defaults to true.
+	DownloadOutErr bool
 }
 
 // DefaultExecutionOptions returns the recommended ExecutionOptions.
@@ -270,6 +273,7 @@ func DefaultExecutionOptions() *ExecutionOptions {
 		AcceptCached:    true,
 		DoNotCache:      false,
 		DownloadOutputs: true,
+		DownloadOutErr:  true,
 	}
 }
 

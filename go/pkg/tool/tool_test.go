@@ -121,7 +121,7 @@ func TestTool_ReexecuteAction(t *testing.T) {
 		t.Fatalf("failed creating input file: %v", err)
 	}
 	out := "output"
-	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true}
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
 	_, acDg := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
 		fakes.StdOut("stdout"), fakes.StdErr("stderr"))
 
