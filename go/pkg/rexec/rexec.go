@@ -111,21 +111,25 @@ func (ec *Context) setOutputMetadata() {
 
 func (ec *Context) downloadResults(execRoot string, downloadOutputs bool) *command.Result {
 	ec.setOutputMetadata()
-	if !downloadOutputs {
-		return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
-	}
-	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
-	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
 	if err := ec.downloadStream(ec.resPb.StdoutRaw, ec.resPb.StdoutDigest, ec.oe.WriteOut); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
 	if err := ec.downloadStream(ec.resPb.StderrRaw, ec.resPb.StderrDigest, ec.oe.WriteErr); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
+	if downloadOutputs {
+		return ec.downloadOutputs(execRoot)
+	}
+	// TODO(olaola): save output stats onto metadata here.
+	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
+}
+
+func (ec *Context) downloadOutputs(execRoot string) *command.Result {
+	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
+	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
 	if err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, execRoot, ec.client.FileMetadataCache); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
-	// TODO(olaola): save output stats onto metadata here.
 	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
@@ -326,7 +330,7 @@ func (ec *Context) ExecuteRemotely() {
 // DownloadResults downloads the result of the command in the context to the specified directory.
 func (ec *Context) DownloadResults(execRoot string) {
 	st := ec.Result.Status
-	ec.Result = ec.downloadResults(execRoot, true)
+	ec.Result = ec.downloadOutputs(execRoot)
 	if ec.Result.Err == nil {
 		ec.Result.Status = st
 	}
