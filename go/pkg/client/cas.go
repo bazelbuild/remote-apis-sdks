@@ -974,9 +974,11 @@ func copyFile(srcExecRoot, dstExecRoot, from, to string, mode os.FileMode) error
 type downloadRequest struct {
 	digest   digest.Digest
 	execRoot string
-	output   *TreeOutput
-	meta     *requestMetadata
-	wait     chan<- error
+	// TODO(olaola): use channels for cancellations instead of embedding download context.
+	context context.Context
+	output  *TreeOutput
+	meta    *requestMetadata
+	wait    chan<- error
 }
 
 func (c *Client) downloadProcessor() {
@@ -1142,7 +1144,14 @@ func (c *Client) download(data []*downloadRequest) {
 			if len(batch) > 1 {
 				c.downloadBatch(ctx, batch, reqs)
 			} else {
-				c.downloadSingle(ctx, batch[0], reqs)
+				rs := reqs[batch[0]]
+				downloadCtx := ctx
+				if len(rs) == 1 {
+					// We have only one download request for this digest.
+					// Download on same context as the issuing request, to support proper cancellation.
+					downloadCtx = rs[0].context
+				}
+				c.downloadSingle(downloadCtx, batch[0], reqs)
 			}
 		}()
 	}
@@ -1260,6 +1269,7 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 	for dg, out := range outputs {
 		r := &downloadRequest{
 			digest:   dg,
+			context:  ctx,
 			execRoot: execRoot,
 			output:   out,
 			meta:     meta,
