@@ -18,17 +18,36 @@ const (
 	remoteHeadersKey = "build.bazel.remote.execution.v2.requestmetadata-bin"
 )
 
+// GetContextMetadata parses the metadata from the given context, if it exists.
+// If metadata does not exist, empty values are returned.
+func GetContextMetadata(ctx context.Context) (toolName, actionID, invocationID string, err error) {
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		return "", "", "", nil
+	}
+	vs := md.Get(remoteHeadersKey)
+	if len(vs) == 0 {
+		return "", "", "", nil
+	}
+	buf := []byte(vs[0])
+	meta := &repb.RequestMetadata{}
+	if err := proto.Unmarshal(buf, meta); err != nil {
+		return "", "", "", err
+	}
+	return meta.ToolDetails.GetToolName(), meta.ActionId, meta.ToolInvocationId, nil
+}
+
 // ContextWithMetadata attaches metadata to the passed-in context, returning a new
 // context. This function should be called in every test method after a context is created. It uses
 // the already created context to generate a new one containing the metadata header.
 func ContextWithMetadata(ctx context.Context, toolName, actionID, invocationID string) (context.Context, error) {
 	if actionID == "" {
 		actionID = uuid.New()
-		log.Infof("Generated action_id %s for %s", actionID, toolName)
+		log.V(2).Infof("Generated action_id %s for %s", actionID, toolName)
 	}
 	if invocationID == "" {
 		invocationID = uuid.New()
-		log.Infof("Generated invocation_id %s for %s %s", invocationID, toolName, actionID)
+		log.V(2).Infof("Generated invocation_id %s for %s %s", invocationID, toolName, actionID)
 	}
 
 	meta := &repb.RequestMetadata{

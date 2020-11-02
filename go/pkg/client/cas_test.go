@@ -6,10 +6,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
@@ -20,7 +23,10 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
@@ -29,6 +35,7 @@ import (
 const (
 	instance              = "instance"
 	defaultCASConcurrency = 50
+	reqMaxSleepDuration   = 5 * time.Millisecond
 )
 
 func TestSplitEndpoints(t *testing.T) {
@@ -375,14 +382,239 @@ func TestMissingBlobs(t *testing.T) {
 	}
 }
 
-func TestUpload(t *testing.T) {
-	ctx := context.Background()
-	e, cleanup := fakes.NewTestEnv(t)
-	defer cleanup()
-	fake := e.Server.CAS
-	c := e.Client.GrpcClient
-	client.CASConcurrency(defaultCASConcurrency).Apply(c)
+func TestUploadConcurrent(t *testing.T) {
+	blobs := make([][]byte, 50)
+	for i := range blobs {
+		blobs[i] = []byte(fmt.Sprint(i))
+	}
+	type testCase struct {
+		name string
+		// Whether to use batching.
+		batching client.UseBatchOps
+		// Whether to use background CAS ops.
+		unified client.UnifiedCASOps
+		// The batch size.
+		maxBatchDigests client.MaxBatchDigests
+		// The CAS concurrency for uploading the blobs.
+		concurrency client.CASConcurrency
+	}
+	var tests []testCase
+	for _, ub := range []client.UseBatchOps{false, true} {
+		for _, cb := range []client.UnifiedCASOps{false, true} {
+			for _, conc := range []client.CASConcurrency{3, 100} {
+				tc := testCase{
+					name:            fmt.Sprintf("batch:%t,unified:%t,conc:%d", ub, cb, conc),
+					batching:        ub,
+					unified:         cb,
+					maxBatchDigests: client.MaxBatchDigests(9),
+					concurrency:     conc,
+				}
+				tests = append(tests, tc)
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			fake.ReqSleepDuration = reqMaxSleepDuration
+			fake.ReqSleepRandomize = true
+			c := e.Client.GrpcClient
+			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency, tc.unified} {
+				opt.Apply(c)
+			}
 
+			eg, eCtx := errgroup.WithContext(ctx)
+			for i := 0; i < 100; i++ {
+				eg.Go(func() error {
+					var input []*chunker.Chunker
+					for _, blob := range append(blobs, blobs...) {
+						input = append(input, chunker.NewFromBlob(blob, 10))
+					}
+					if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
+					}
+					return nil
+				})
+			}
+			if err := eg.Wait(); err != nil {
+				t.Error(err)
+			}
+			// Verify everything was written exactly once.
+			for i, blob := range blobs {
+				dg := digest.NewFromBlob(blob)
+				if tc.unified {
+					if fake.BlobWrites(dg) != 1 {
+						t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
+					}
+					if fake.BlobMissingReqs(dg) != 1 {
+						t.Errorf("wanted 1 missing request for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestUploadConcurrentBatch(t *testing.T) {
+	blobs := make([][]byte, 100)
+	for i := range blobs {
+		blobs[i] = []byte(fmt.Sprint(i))
+	}
+	ctx := context.Background()
+	for _, uo := range []client.UnifiedCASOps{false, true} {
+		t.Run(fmt.Sprintf("unified:%t", uo), func(t *testing.T) {
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			fake.ReqSleepDuration = reqMaxSleepDuration
+			fake.ReqSleepRandomize = true
+			c := e.Client.GrpcClient
+			c.MaxBatchDigests = 50
+
+			eg, eCtx := errgroup.WithContext(ctx)
+			for i := 0; i < 10; i++ {
+				i := i
+				eg.Go(func() error {
+					var input []*chunker.Chunker
+					// Upload 15 digests in a sliding window.
+					for j := i * 10; j < i*10+15 && j < len(blobs); j++ {
+						input = append(input, chunker.NewFromBlob(blobs[j], 10))
+						// Twice to have the same upload in same call, in addition to between calls.
+						input = append(input, chunker.NewFromBlob(blobs[j], 10))
+					}
+					if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
+					}
+					return nil
+				})
+			}
+			if err := eg.Wait(); err != nil {
+				t.Error(err)
+			}
+			// Verify everything was written exactly once.
+			for i, blob := range blobs {
+				dg := digest.NewFromBlob(blob)
+				if c.UnifiedCASOps {
+					if fake.BlobWrites(dg) != 1 {
+						t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
+					}
+					if fake.BlobMissingReqs(dg) != 1 {
+						t.Errorf("wanted 1 missing requests for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
+					}
+				}
+				expectedReqs := 10
+				if c.UnifiedCASOps {
+					// All the 100 digests will be batched into two batches, together.
+					expectedReqs = 2
+				}
+				if fake.BatchReqs() != expectedReqs {
+					t.Errorf("%d requests were made to BatchUpdateBlobs, wanted %v", fake.BatchReqs(), expectedReqs)
+				}
+			}
+		})
+	}
+}
+
+func TestUploadConcurrentCancel(t *testing.T) {
+	blobs := make([][]byte, 50)
+	for i := range blobs {
+		blobs[i] = []byte(fmt.Sprint(i))
+	}
+	type testCase struct {
+		name string
+		// Whether to use batching.
+		batching client.UseBatchOps
+		// Whether to use background CAS ops.
+		unified client.UnifiedCASOps
+		// The batch size.
+		maxBatchDigests client.MaxBatchDigests
+		// The CAS concurrency for uploading the blobs.
+		concurrency client.CASConcurrency
+	}
+	var tests []testCase
+	for _, ub := range []client.UseBatchOps{false, true} {
+		for _, uo := range []client.UnifiedCASOps{false, true} {
+			for _, conc := range []client.CASConcurrency{3, 20} {
+				tc := testCase{
+					name:            fmt.Sprintf("batch:%t,unified:%t,conc:%d", ub, uo, conc),
+					batching:        ub,
+					unified:         uo,
+					maxBatchDigests: client.MaxBatchDigests(9),
+					concurrency:     conc,
+				}
+				tests = append(tests, tc)
+			}
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			fake.ReqSleepDuration = reqMaxSleepDuration
+			fake.ReqSleepRandomize = true
+			c := e.Client.GrpcClient
+			client.CASConcurrency(defaultCASConcurrency).Apply(c)
+			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency, tc.unified} {
+				opt.Apply(c)
+			}
+
+			eg, eCtx := errgroup.WithContext(ctx)
+			eg.Go(func() error {
+				var input []*chunker.Chunker
+				for _, blob := range blobs {
+					input = append(input, chunker.NewFromBlob(blob, 10))
+					input = append(input, chunker.NewFromBlob(blob, 10))
+				}
+				if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
+				}
+				return nil
+			})
+			cCtx, cancel := context.WithCancel(eCtx)
+			for i := 0; i < 50; i++ {
+				eg.Go(func() error {
+					var input []*chunker.Chunker
+					for _, blob := range blobs {
+						input = append(input, chunker.NewFromBlob(blob, 10))
+						input = append(input, chunker.NewFromBlob(blob, 10))
+					}
+					// Verify that we got a context cancellation error.
+					if _, err := c.UploadIfMissing(cCtx, input...); err != context.Canceled {
+						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context canceled", err)
+					}
+					return nil
+				})
+			}
+			eg.Go(func() error {
+				time.Sleep(time.Duration(20*rand.Float32()) * time.Microsecond)
+				cancel()
+				return nil
+			})
+			if err := eg.Wait(); err != nil {
+				t.Error(err)
+			}
+			if tc.unified {
+				// Verify everything was written exactly once, despite the context being canceled.
+				for i, blob := range blobs {
+					dg := digest.NewFromBlob(blob)
+					if fake.BlobWrites(dg) != 1 {
+						t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
+					}
+					if fake.BlobMissingReqs(dg) != 1 {
+						t.Errorf("wanted 1 missing request for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestUpload(t *testing.T) {
 	chunkSize := 5
 	var twoThousandBlobs [][]byte
 	var thousandBlobs [][]byte
@@ -439,78 +671,77 @@ func TestUpload(t *testing.T) {
 	}
 
 	for _, ub := range []client.UseBatchOps{false, true} {
-		t.Run(fmt.Sprintf("UsingBatch:%t", ub), func(t *testing.T) {
-			ub.Apply(c)
-			for _, tc := range tests {
-				t.Run(tc.name, func(t *testing.T) {
-					fake.Clear()
-					if tc.concurrency > 0 {
-						tc.concurrency.Apply(c)
-					}
+		for _, uo := range []client.UnifiedCASOps{false, true} {
+			t.Run(fmt.Sprintf("UsingBatch:%t,UnifiedCASOps:%t", ub, uo), func(t *testing.T) {
+				for _, tc := range tests {
+					t.Run(tc.name, func(t *testing.T) {
+						ctx := context.Background()
+						e, cleanup := fakes.NewTestEnv(t)
+						defer cleanup()
+						fake := e.Server.CAS
+						c := e.Client.GrpcClient
+						client.CASConcurrency(defaultCASConcurrency).Apply(c)
+						ub.Apply(c)
+						uo.Apply(c)
+						if tc.concurrency > 0 {
+							tc.concurrency.Apply(c)
+						}
 
-					present := make(map[digest.Digest]bool)
-					for _, blob := range tc.present {
-						fake.Put(blob)
-						present[digest.NewFromBlob(blob)] = true
-					}
-					var input []*chunker.Chunker
-					for _, blob := range tc.input {
-						input = append(input, chunker.NewFromBlob(blob, chunkSize))
-					}
+						present := make(map[digest.Digest]bool)
+						for _, blob := range tc.present {
+							fake.Put(blob)
+							present[digest.NewFromBlob(blob)] = true
+						}
+						var input []*chunker.Chunker
+						for _, blob := range tc.input {
+							input = append(input, chunker.NewFromBlob(blob, chunkSize))
+						}
 
-					missing, err := c.UploadIfMissing(ctx, input...)
-					if err != nil {
-						t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
-					}
-
-					missingSet := make(map[digest.Digest]struct{})
-					for _, dg := range missing {
-						missingSet[dg] = struct{}{}
-					}
-					for _, ch := range input {
-						dg := ch.Digest()
-						blob, err := ch.FullData()
+						missing, err := c.UploadIfMissing(ctx, input...)
 						if err != nil {
-							t.Errorf("ch.FullData() returned an error: %v", err)
+							t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 						}
-						if present[dg] {
-							if fake.BlobWrites(dg) > 0 {
-								t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
+
+						missingSet := make(map[digest.Digest]struct{})
+						for _, dg := range missing {
+							missingSet[dg] = struct{}{}
+						}
+						for _, ch := range input {
+							dg := ch.Digest()
+							blob, err := ch.FullData()
+							if err != nil {
+								t.Errorf("ch.FullData() returned an error: %v", err)
 							}
-							if _, ok := missingSet[dg]; ok {
-								t.Errorf("Stats said that blob %v with digest %s was missing in the CAS", blob, dg)
+							if present[dg] {
+								if fake.BlobWrites(dg) > 0 {
+									t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
+								}
+								if _, ok := missingSet[dg]; ok {
+									t.Errorf("Stats said that blob %v with digest %s was missing in the CAS", blob, dg)
+								}
+								continue
 							}
-							continue
+							if gotBlob, ok := fake.Get(dg); !ok {
+								t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
+							} else if !bytes.Equal(blob, gotBlob) {
+								t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
+							}
+							if _, ok := missingSet[dg]; !ok {
+								t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
+							}
 						}
-						if gotBlob, ok := fake.Get(dg); !ok {
-							t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
-						} else if !bytes.Equal(blob, gotBlob) {
-							t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
+						if fake.MaxConcurrency() > defaultCASConcurrency {
+							t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
 						}
-						if _, ok := missingSet[dg]; !ok {
-							t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
-						}
-					}
-					if fake.MaxConcurrency() > defaultCASConcurrency {
-						t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
-					}
-				})
-			}
-		})
+					})
+				}
+			})
+		}
 	}
 }
 
 func TestWriteBlobsBatching(t *testing.T) {
 	ctx := context.Background()
-	e, cleanup := fakes.NewTestEnv(t)
-	defer cleanup()
-	fake := e.Server.CAS
-	c := e.Client.GrpcClient
-	c.MaxBatchSize = 500
-	c.MaxBatchDigests = 4
-	// Each batch request frame overhead is 13 bytes.
-	// A per-blob overhead is 74 bytes.
-
 	tests := []struct {
 		name      string
 		sizes     []int
@@ -551,7 +782,15 @@ func TestWriteBlobsBatching(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fake.Clear()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			c := e.Client.GrpcClient
+			c.MaxBatchSize = 500
+			c.MaxBatchDigests = 4
+			// Each batch request frame overhead is 13 bytes.
+			// A per-blob overhead is 74 bytes.
+
 			blobs := make(map[digest.Digest][]byte)
 			for i, sz := range tc.sizes {
 				blob := make([]byte, int(sz))
@@ -907,6 +1146,32 @@ func TestDownloadDirectory(t *testing.T) {
 	}
 }
 
+func TestDownloadActionOutputsErrors(t *testing.T) {
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	c := e.Client.GrpcClient
+
+	ar := &repb.ActionResult{}
+	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "foo", Digest: digest.NewFromBlob([]byte("foo")).ToProto()})
+	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "bar", Digest: digest.NewFromBlob([]byte("bar")).ToProto()})
+	execRoot, err := ioutil.TempDir("", "DownloadOuts")
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(execRoot)
+
+	for _, ub := range []client.UseBatchOps{false, true} {
+		ub.Apply(c)
+		t.Run(fmt.Sprintf("%sUsingBatch:%t", t.Name(), ub), func(t *testing.T) {
+			err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found") {
+				t.Errorf("expected 'not found' error in DownloadActionOutputs, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestDownloadActionOutputsBatching(t *testing.T) {
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
@@ -1031,54 +1296,196 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 
 func TestDownloadActionOutputsConcurrency(t *testing.T) {
 	ctx := context.Background()
-	e, cleanup := fakes.NewTestEnv(t)
-	defer cleanup()
-	fake := e.Server.CAS
-	c := e.Client.GrpcClient
-	client.CASConcurrency(defaultCASConcurrency).Apply(c)
-
-	blobs := make(map[digest.Digest][]byte)
+	type testBlob struct {
+		digest digest.Digest
+		blob   []byte
+	}
+	blobs := make([]*testBlob, 1000)
 	for i := 0; i < 1000; i++ {
-		var buf = new(bytes.Buffer)
-		binary.Write(buf, binary.LittleEndian, i)
-		blob := buf.Bytes()
-		blobs[digest.NewFromBlob(blob)] = blob
+		blob := []byte(fmt.Sprint(i))
+		blobs[i] = &testBlob{
+			digest: digest.NewFromBlob(blob),
+			blob:   blob,
+		}
 	}
 
 	for _, ub := range []client.UseBatchOps{false, true} {
-		t.Run(fmt.Sprintf("%sUsingBatch:%t", t.Name(), ub), func(t *testing.T) {
-			ub.Apply(c)
-			fake.Clear()
+		for _, uo := range []client.UnifiedCASOps{false, true} {
+			t.Run(fmt.Sprintf("%sUsingBatch:%t,UnifiedCASOps:%t", t.Name(), ub, uo), func(t *testing.T) {
+				e, cleanup := fakes.NewTestEnv(t)
+				defer cleanup()
+				fake := e.Server.CAS
+				fake.ReqSleepDuration = reqMaxSleepDuration
+				fake.ReqSleepRandomize = true
+				c := e.Client.GrpcClient
+				client.CASConcurrency(defaultCASConcurrency).Apply(c)
+				client.MaxBatchDigests(300).Apply(c)
+				ub.Apply(c)
+				uo.Apply(c)
+				for _, b := range blobs {
+					fake.Put(b.blob)
+				}
+
+				eg, eCtx := errgroup.WithContext(ctx)
+				for i := 0; i < 100; i++ {
+					i := i
+					eg.Go(func() error {
+						var input []*testBlob
+						ar := &repb.ActionResult{}
+						// Download 15 digests in a sliding window.
+						for j := i * 10; j < i*10+15 && j < len(blobs); j++ {
+							input = append(input, blobs[j])
+						}
+						for _, i := range input {
+							name := fmt.Sprintf("foo_%s", i.digest)
+							dgPb := i.digest.ToProto()
+							ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dgPb})
+							ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name + "_copy", Digest: dgPb})
+						}
+
+						execRoot := t.TempDir()
+						if err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
+							return fmt.Errorf("error in DownloadActionOutputs: %s", err)
+						}
+						for _, i := range input {
+							name := filepath.Join(execRoot, fmt.Sprintf("foo_%s", i.digest))
+							for _, path := range []string{name, name + "_copy"} {
+								contents, err := ioutil.ReadFile(path)
+								if err != nil {
+									return fmt.Errorf("error reading from %s: %v", path, err)
+								}
+								if !bytes.Equal(contents, i.blob) {
+									return fmt.Errorf("expected %s to contain %v, got %v", path, contents, i.blob)
+								}
+							}
+						}
+						return nil
+					})
+				}
+				if err := eg.Wait(); err != nil {
+					t.Error(err)
+				}
+				if fake.MaxConcurrency() > defaultCASConcurrency {
+					t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
+				}
+				if ub {
+					if uo {
+						// Check that we batch requests from different Actions.
+						if fake.BatchReqs() > 50 {
+							t.Errorf("%d requests were made to BatchReadBlobs, wanted <= 50", fake.BatchReqs())
+						}
+					} else {
+						if fake.BatchReqs() != 100 {
+							t.Errorf("%d requests were made to BatchReadBlobs, wanted 100", fake.BatchReqs())
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
+	ctx := context.Background()
+	type testBlob struct {
+		digest digest.Digest
+		blob   []byte
+	}
+	blobs := make([]*testBlob, 20)
+	for i := 0; i < len(blobs); i++ {
+		blob := []byte(fmt.Sprint(i))
+		blobs[i] = &testBlob{
+			digest: digest.NewFromBlob(blob),
+			blob:   blob,
+		}
+	}
+	problemBlob := make([]byte, 2000) // Will not be batched.
+	problemDg := digest.NewFromBlob(problemBlob)
+
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	fake.ReqSleepDuration = reqMaxSleepDuration
+	fake.ReqSleepRandomize = true
+	wait := make(chan bool)
+	fake.PerDigestBlockFn[problemDg] = func() {
+		<-wait
+	}
+	c := e.Client.GrpcClient
+	client.MaxBatchSize(1000).Apply(c)
+	for _, b := range blobs {
+		fake.Put(b.blob)
+	}
+	fake.Put(problemBlob)
+
+	// Start downloading the problem digest.
+	pg, pCtx := errgroup.WithContext(ctx)
+	pg.Go(func() error {
+		name := fmt.Sprintf("problem_%s", problemDg)
+		dgPb := problemDg.ToProto()
+		ar := &repb.ActionResult{}
+		ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dgPb})
+		ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name + "_copy", Digest: dgPb})
+
+		execRoot := t.TempDir()
+		if err := c.DownloadActionOutputs(pCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
+			return fmt.Errorf("error in DownloadActionOutputs: %s", err)
+		}
+		for _, path := range []string{name, name + "_copy"} {
+			contents, err := ioutil.ReadFile(filepath.Join(execRoot, path))
+			if err != nil {
+				return fmt.Errorf("error reading from %s: %v", path, err)
+			}
+			if !bytes.Equal(contents, problemBlob) {
+				return fmt.Errorf("expected %s to contain %v, got %v", path, problemBlob, contents)
+			}
+		}
+		return nil
+	})
+	// Download a bunch of fast-downloading blobs.
+	eg, eCtx := errgroup.WithContext(ctx)
+	for i := 0; i < 100; i++ {
+		i := i
+		eg.Go(func() error {
+			var input []*testBlob
 			ar := &repb.ActionResult{}
-			for dg, blob := range blobs {
-				fake.Put(blob)
-				name := fmt.Sprintf("foo_%s", dg)
-				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dg.ToProto()})
+			// Download 15 digests in a sliding window.
+			for j := i * 10; j < i*10+15 && j < len(blobs); j++ {
+				input = append(input, blobs[j])
+			}
+			for _, i := range input {
+				name := fmt.Sprintf("foo_%s", i.digest)
+				dgPb := i.digest.ToProto()
+				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dgPb})
+				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name + "_copy", Digest: dgPb})
 			}
 
-			execRoot, err := ioutil.TempDir("", "DownloadOuts")
-			if err != nil {
-				t.Fatalf("failed to make temp dir: %v", err)
+			execRoot := t.TempDir()
+			if err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
+				return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 			}
-			defer os.RemoveAll(execRoot)
-			err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
-			if err != nil {
-				t.Errorf("error in DownloadActionOutputs: %s", err)
-			}
-			for dg, data := range blobs {
-				path := filepath.Join(execRoot, fmt.Sprintf("foo_%s", dg))
-				contents, err := ioutil.ReadFile(path)
-				if err != nil {
-					t.Errorf("error reading from %s: %v", path, err)
-				}
-				if !bytes.Equal(contents, data) {
-					t.Errorf("expected %s to contain %v, got %v", path, contents, data)
+			for _, i := range input {
+				name := filepath.Join(execRoot, fmt.Sprintf("foo_%s", i.digest))
+				for _, path := range []string{name, name + "_copy"} {
+					contents, err := ioutil.ReadFile(path)
+					if err != nil {
+						return fmt.Errorf("error reading from %s: %v", path, err)
+					}
+					if !bytes.Equal(contents, i.blob) {
+						return fmt.Errorf("expected %s to contain %v, got %v", path, i.blob, contents)
+					}
 				}
 			}
-			if fake.MaxConcurrency() > defaultCASConcurrency {
-				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
-			}
+			return nil
 		})
+	}
+	if err := eg.Wait(); err != nil {
+		t.Error(err)
+	}
+	// Now let the problem digest download finish.
+	close(wait)
+	if err := pg.Wait(); err != nil {
+		t.Error(err)
 	}
 }
 
