@@ -67,6 +67,10 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 // recursively), and loads their contents into the provided map.
 func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache) error {
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
+	normPath, err := getRelPath(execRoot, absPath)
+	if err != nil {
+		return err
+	}
 	meta := cache.Get(absPath)
 	t := command.FileInputType
 	if smd := meta.Symlink; smd != nil && smd.IsDangling {
@@ -82,7 +86,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return nil
 	}
 	if t == command.FileInputType {
-		fs[path] = &fileSysNode{
+		fs[normPath] = &fileSysNode{
 			file: &fileNode{
 				chunker:      chunker.NewFromFile(absPath, meta.Digest, chunkSize),
 				isExecutable: meta.IsExecutable,
@@ -97,11 +101,11 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 
 	if len(files) == 0 {
-		fs[path] = &fileSysNode{emptyDirectoryMarker: true}
+		fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
 		return nil
 	}
 	for _, f := range files {
-		if e := loadFiles(execRoot, excl, filepath.Join(path, f.Name()), fs, chunkSize, cache); e != nil {
+		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, chunkSize, cache); e != nil {
 			return e
 		}
 	}
@@ -116,11 +120,17 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, chunk
 		if i.Path == "" {
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
 		}
+		path := i.Path
+		absPath := filepath.Clean(filepath.Join(execRoot, path))
+		normPath, err := getRelPath(execRoot, absPath)
+		if err != nil {
+			return digest.Empty, nil, nil, err
+		}
 		if i.IsEmptyDirectory {
-			fs[i.Path] = &fileSysNode{emptyDirectoryMarker: true}
+			fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
 			continue
 		}
-		fs[i.Path] = &fileSysNode{
+		fs[normPath] = &fileSysNode{
 			file: &fileNode{
 				chunker:      chunker.NewFromBlob(i.Contents, chunkSize),
 				isExecutable: i.IsExecutable,
@@ -150,7 +160,7 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, chunk
 func buildTree(files map[string]*fileSysNode) *treeNode {
 	root := &treeNode{}
 	for name, fn := range files {
-		segs := strings.Split(filepath.Clean(name), string(filepath.Separator))
+		segs := strings.Split(name, string(filepath.Separator))
 		// The last segment is the filename, so split it off.
 		segs, base := segs[0:len(segs)-1], segs[len(segs)-1]
 
@@ -341,6 +351,14 @@ func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, child
 	return root, children, files, nil
 }
 
+func getRelPath(base, path string) (string, error) {
+	rel, err := filepath.Rel(base, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("path %v is not under %v", path, base)
+	}
+	return rel, nil
+}
+
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
 // The paths have to be relative to execRoot.
 // It also populates the remote ActionResult, packaging output directories as trees where required.
@@ -349,9 +367,9 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, chunkSi
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {
 		absPath := filepath.Clean(filepath.Join(execRoot, path))
-		normPath, err := filepath.Rel(execRoot, absPath)
+		normPath, err := getRelPath(execRoot, absPath)
 		if err != nil {
-			return nil, nil, fmt.Errorf("path %v is not under exec root %v: %v", path, execRoot, err)
+			return nil, nil, err
 		}
 		meta := cache.Get(absPath)
 		if meta.Err != nil {
