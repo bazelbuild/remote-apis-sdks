@@ -18,6 +18,19 @@ const (
 	remoteHeadersKey = "build.bazel.remote.execution.v2.requestmetadata-bin"
 )
 
+// LogContextInfof(ctx, x, ...) is equivalent to log.V(x).Infof(...) except it
+// also logs context metadata, if available.
+func LogContextInfof(ctx context.Context, v log.Level, format string, args ...interface{}) {
+	if log.V(v) {
+		_, actionID, _, _ := GetContextMetadata(ctx)
+		if actionID != "" {
+			format = "%s: " + format
+			args = append([]interface{}{actionID}, args...)
+		}
+		log.V(v).Infof(format, args...)
+	}
+}
+
 // GetContextMetadata parses the metadata from the given context, if it exists.
 // If metadata does not exist, empty values are returned.
 func GetContextMetadata(ctx context.Context) (toolName, actionID, invocationID string, err error) {

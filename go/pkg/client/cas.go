@@ -231,14 +231,14 @@ func (c *Client) upload(reqs []*uploadRequest) {
 		updateAndNotify(newStates[dg], nil, false)
 	}
 
-	log.V(2).Infof("%d new items to store", len(missing))
+	LogContextInfof(ctx, log.Level(2), "%d new items to store", len(missing))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
-		batches = c.makeBatches(missing, true)
+		batches = c.makeBatches(ctx, missing, true)
 	} else {
-		log.V(2).Info("Uploading them individually")
+		LogContextInfof(ctx, log.Level(2), "Uploading them individually")
 		for i := range missing {
-			log.V(3).Infof("Creating single batch of blob %s", missing[i])
+			LogContextInfof(ctx, log.Level(3), "Creating single batch of blob %s", missing[i])
 			batches = append(batches, missing[i:i+1])
 		}
 	}
@@ -250,10 +250,10 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				defer c.casUploaders.Release(1)
 			}
 			if i%logInterval == 0 {
-				log.V(2).Infof("%d batches left to store", len(batches)-i)
+				LogContextInfof(ctx, log.Level(2), "%d batches left to store", len(batches)-i)
 			}
 			if len(batch) > 1 {
-				log.V(3).Infof("Uploading batch of %d blobs", len(batch))
+				LogContextInfof(ctx, log.Level(3), "Uploading batch of %d blobs", len(batch))
 				bchMap := make(map[digest.Digest][]byte)
 				for _, dg := range batch {
 					st := newStates[dg]
@@ -269,6 +269,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 					updateAndNotify(newStates[dg], err, true)
 				}
 			} else {
+				LogContextInfof(ctx, log.Level(3), "Uploading single blob with digest %s", batch[0])
 				st := newStates[batch[0]]
 				st.mu.Lock()
 				if len(st.clients) == 0 { // Already cancelled.
@@ -306,14 +307,14 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker)
 	if err != nil {
 		return nil, err
 	}
-	log.V(2).Infof("%d items to store", len(missing))
+	LogContextInfof(ctx, log.Level(2), "%d items to store", len(missing))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
-		batches = c.makeBatches(missing, true)
+		batches = c.makeBatches(ctx, missing, true)
 	} else {
-		log.V(2).Info("Uploading them individually")
+		LogContextInfof(ctx, log.Level(2), "Uploading them individually")
 		for i := range missing {
-			log.V(3).Infof("Creating single batch of blob %s", missing[i])
+			LogContextInfof(ctx, log.Level(3), "Creating single batch of blob %s", missing[i])
 			batches = append(batches, missing[i:i+1])
 		}
 	}
@@ -327,10 +328,10 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker)
 			}
 			defer c.casUploaders.Release(1)
 			if i%logInterval == 0 {
-				log.V(2).Infof("%d batches left to store", len(batches)-i)
+				LogContextInfof(ctx, log.Level(2), "%d batches left to store", len(batches)-i)
 			}
 			if len(batch) > 1 {
-				log.V(3).Infof("Uploading batch of %d blobs", len(batch))
+				LogContextInfof(ctx, log.Level(3), "Uploading batch of %d blobs", len(batch))
 				bchMap := make(map[digest.Digest][]byte)
 				for _, dg := range batch {
 					data, err := chunkers[dg].FullData()
@@ -343,7 +344,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker)
 					return err
 				}
 			} else {
-				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
+				LogContextInfof(ctx, log.Level(3), "Uploading single blob with digest %s", batch[0])
 				ch := chunkers[batch[0]]
 				dg := ch.Digest()
 				if err := c.WriteChunked(eCtx, c.ResourceNameWrite(dg.Hash, dg.Size), ch); err != nil {
@@ -357,11 +358,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker)
 		})
 	}
 
-	log.V(2).Info("Waiting for remaining jobs")
+	LogContextInfof(ctx, log.Level(2), "Waiting for remaining jobs")
 	err = eg.Wait()
-	log.V(2).Info("Done")
+	LogContextInfof(ctx, log.Level(2), "Done")
 	if err != nil {
-		log.V(2).Infof("Upload error: %v", err)
+		LogContextInfof(ctx, log.Level(2), "Upload error: %v", err)
 	}
 
 	return missing, err
@@ -385,7 +386,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 		return c.uploadNonUnified(ctx, data...)
 	}
 	uploads := len(data)
-	log.V(2).Infof("Request to upload %d blobs", uploads)
+	LogContextInfof(ctx, log.Level(2), "Request to upload %d blobs", uploads)
 
 	if uploads == 0 {
 		return nil, nil
@@ -411,7 +412,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 		reqs = append(reqs, req)
 		select {
 		case <-ctx.Done():
-			log.V(2).Infof("Upload canceled")
+			LogContextInfof(ctx, log.Level(2), "Upload canceled")
 			c.cancelPendingRequests(reqs)
 			return nil, ctx.Err()
 		case c.casUploadRequests <- req:
@@ -617,9 +618,9 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 // The input list is sorted in-place; additionally, any blob bigger than the maximum will be put in
 // a batch of its own and the caller will need to ensure that it is uploaded with Write, not batch
 // operations.
-func (c *Client) makeBatches(dgs []digest.Digest, optimizeSize bool) [][]digest.Digest {
+func (c *Client) makeBatches(ctx context.Context, dgs []digest.Digest, optimizeSize bool) [][]digest.Digest {
 	var batches [][]digest.Digest
-	log.V(2).Infof("Batching %d digests", len(dgs))
+	LogContextInfof(ctx, log.Level(2), "Batching %d digests", len(dgs))
 	if optimizeSize {
 		sort.Slice(dgs, func(i, j int) bool {
 			return dgs[i].Size < dgs[j].Size
@@ -648,10 +649,10 @@ func (c *Client) makeBatches(dgs []digest.Digest, optimizeSize bool) [][]digest.
 				nextSize = marshalledRequestSize(dgs[0])
 			}
 		}
-		log.V(3).Infof("Created batch of %d blobs with total size %d", len(batch), sz)
+		LogContextInfof(ctx, log.Level(3), "Created batch of %d blobs with total size %d", len(batch), sz)
 		batches = append(batches, batch)
 	}
-	log.V(2).Infof("%d batches created", len(batches))
+	LogContextInfof(ctx, log.Level(2), "%d batches created", len(batches))
 	return batches
 }
 
@@ -786,10 +787,10 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 			batch = append(batch, ds[i])
 		}
 		ds = ds[batchSize:]
-		log.V(3).Infof("Created query batch of %d blobs", len(batch))
+		LogContextInfof(ctx, log.Level(3), "Created query batch of %d blobs", len(batch))
 		batches = append(batches, batch)
 	}
-	log.V(3).Infof("%d query batches created", len(batches))
+	LogContextInfof(ctx, log.Level(3), "%d query batches created", len(batches))
 
 	eg, eCtx := errgroup.WithContext(ctx)
 	for i, batch := range batches {
@@ -800,7 +801,7 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 			}
 			defer c.casUploaders.Release(1)
 			if i%logInterval == 0 {
-				log.V(3).Infof("%d missing batches left to query", len(batches)-i)
+				LogContextInfof(ctx, log.Level(3), "%d missing batches left to query", len(batches)-i)
 			}
 			var batchPb []*repb.Digest
 			for _, dg := range batch {
@@ -825,9 +826,9 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 			return nil
 		})
 	}
-	log.V(3).Info("Waiting for remaining query jobs")
+	LogContextInfof(ctx, log.Level(3), "Waiting for remaining query jobs")
 	err := eg.Wait()
-	log.V(3).Info("Done")
+	LogContextInfof(ctx, log.Level(3), "Done")
 	return missing, err
 }
 
@@ -1085,7 +1086,7 @@ func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequ
 }
 
 func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest) {
-	log.V(3).Infof("Downloading batch of %d files", len(batch))
+	LogContextInfof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 	bchMap, err := c.BatchDownloadBlobs(ctx, batch)
 	if err != nil {
 		afterDownload(batch, reqs, err)
@@ -1114,7 +1115,7 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	r := rs[0]
 	rs = rs[1:]
 	path := filepath.Join(r.execRoot, r.output.Path)
-	log.V(3).Infof("Downloading single file with digest %s to %s", r.output.Digest, path)
+	LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
 	if _, err := c.ReadBlobToFile(ctx, r.output.Digest, path); err != nil {
 		return err
 	}
@@ -1168,17 +1169,6 @@ func (c *Client) download(data []*downloadRequest) {
 			dgs = append(dgs, dg)
 		}
 	}
-	log.V(2).Infof("%d digests to download (%d reqs)", len(dgs), len(reqs))
-	var batches [][]digest.Digest
-	if c.useBatchOps {
-		batches = c.makeBatches(dgs, !bool(c.UtilizeLocality))
-	} else {
-		log.V(2).Info("Downloading them individually")
-		for i := range dgs {
-			log.V(3).Infof("Creating single batch of blob %s", dgs[i])
-			batches = append(batches, dgs[i:i+1])
-		}
-	}
 
 	unifiedMeta := getUnifiedMetadata(metas)
 	var err error
@@ -1190,6 +1180,19 @@ func (c *Client) download(data []*downloadRequest) {
 		afterDownload(dgs, reqs, err)
 		return
 	}
+
+	LogContextInfof(ctx, log.Level(2), "%d digests to download (%d reqs)", len(dgs), len(reqs))
+	var batches [][]digest.Digest
+	if c.useBatchOps {
+		batches = c.makeBatches(ctx, dgs, !bool(c.UtilizeLocality))
+	} else {
+		LogContextInfof(ctx, log.Level(2), "Downloading them individually")
+		for i := range dgs {
+			LogContextInfof(ctx, log.Level(3), "Creating single batch of blob %s", dgs[i])
+			batches = append(batches, dgs[i:i+1])
+		}
+	}
+
 	for i, batch := range batches {
 		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
 		go func() {
@@ -1197,7 +1200,7 @@ func (c *Client) download(data []*downloadRequest) {
 				defer c.casDownloaders.Release(1)
 			}
 			if i%logInterval == 0 {
-				log.V(2).Infof("%d batches left to download", len(batches)-i)
+				LogContextInfof(ctx, log.Level(2), "%d batches left to download", len(batches)-i)
 			}
 			if len(batch) > 1 {
 				c.downloadBatch(ctx, batch, reqs)
@@ -1240,14 +1243,14 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 		}
 	}
 
-	log.V(2).Infof("%d items to download", len(dgs))
+	LogContextInfof(ctx, log.Level(2), "%d items to download", len(dgs))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
-		batches = c.makeBatches(dgs, !bool(c.UtilizeLocality))
+		batches = c.makeBatches(ctx, dgs, !bool(c.UtilizeLocality))
 	} else {
-		log.V(2).Info("Downloading them individually")
+		LogContextInfof(ctx, log.Level(2), "Downloading them individually")
 		for i := range dgs {
-			log.V(3).Infof("Creating single batch of blob %s", dgs[i])
+			LogContextInfof(ctx, log.Level(3), "Creating single batch of blob %s", dgs[i])
 			batches = append(batches, dgs[i:i+1])
 		}
 	}
@@ -1261,10 +1264,10 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 			}
 			defer c.casDownloaders.Release(1)
 			if i%logInterval == 0 {
-				log.V(2).Infof("%d batches left to download", len(batches)-i)
+				LogContextInfof(ctx, log.Level(2), "%d batches left to download", len(batches)-i)
 			}
 			if len(batch) > 1 {
-				log.V(3).Infof("Downloading batch of %d files", len(batch))
+				LogContextInfof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 				bchMap, err := c.BatchDownloadBlobs(eCtx, batch)
 				if err != nil {
 					return err
@@ -1282,7 +1285,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 			} else {
 				out := outputs[batch[0]]
 				path := filepath.Join(execRoot, out.Path)
-				log.V(3).Infof("Downloading single file with digest %s to %s", out.Digest, path)
+				LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
 				if _, err := c.ReadBlobToFile(ctx, out.Digest, path); err != nil {
 					return err
 				}
@@ -1299,9 +1302,9 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 		})
 	}
 
-	log.V(3).Info("Waiting for remaining jobs")
+	LogContextInfof(ctx, log.Level(3), "Waiting for remaining jobs")
 	err := eg.Wait()
-	log.V(3).Info("Done")
+	LogContextInfof(ctx, log.Level(3), "Done")
 	return err
 }
 
@@ -1335,7 +1338,7 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 		}
 		select {
 		case <-ctx.Done():
-			log.V(2).Infof("Download canceled")
+			LogContextInfof(ctx, log.Level(2), "Download canceled")
 			return ctx.Err()
 		case c.casDownloadRequests <- r:
 			continue
@@ -1346,7 +1349,7 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 	for count > 0 {
 		select {
 		case <-ctx.Done():
-			log.V(2).Infof("Download canceled")
+			LogContextInfof(ctx, log.Level(2), "Download canceled")
 			return ctx.Err()
 		case err := <-wait:
 			if err != nil {
