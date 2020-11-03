@@ -517,6 +517,50 @@ func TestUploadConcurrentBatch(t *testing.T) {
 	}
 }
 
+func TestUploadCancel(t *testing.T) {
+	ctx := context.Background()
+	blob := []byte{1, 2, 3}
+	dg := digest.NewFromBlob(blob)
+	for _, uo := range []client.UnifiedCASOps{false, true} {
+		t.Run(fmt.Sprintf("unified:%t", uo), func(t *testing.T) {
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			wait := make(chan bool)
+			fake.PerDigestBlockFn[dg] = func() {
+				<-wait
+			}
+			c := e.Client.GrpcClient
+			uo.Apply(c)
+			client.UseBatchOps(false).Apply(c)
+
+			cCtx, cancel := context.WithCancel(ctx)
+			eg, _ := errgroup.WithContext(cCtx)
+			ch := chunker.NewFromBlob(blob, 3)
+			eg.Go(func() error {
+				if _, err := c.UploadIfMissing(cCtx, ch); err != context.Canceled {
+					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context.Canceled", err)
+				}
+				return nil
+			})
+			eg.Go(func() error {
+				time.Sleep(60 * time.Millisecond) // Enough time to trigger upload cycle.
+				cancel()
+				time.Sleep(10 * time.Millisecond)
+				return nil
+			})
+			if err := eg.Wait(); err != nil {
+				t.Error(err)
+			}
+			// Verify that nothing was written.
+			if fake.BlobWrites(ch.Digest()) != 0 {
+				t.Errorf("Blob was written, expected cancellation.")
+			}
+			close(wait)
+		})
+	}
+}
+
 func TestUploadConcurrentCancel(t *testing.T) {
 	blobs := make([][]byte, 50)
 	for i := range blobs {

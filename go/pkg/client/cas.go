@@ -35,9 +35,10 @@ type requestMetadata struct {
 }
 
 type uploadRequest struct {
-	c    *chunker.Chunker
-	meta *requestMetadata
-	wait chan<- *uploadResponse
+	c      *chunker.Chunker
+	meta   *requestMetadata
+	wait   chan<- *uploadResponse
+	cancel bool
 }
 
 type uploadResponse struct {
@@ -50,13 +51,14 @@ type uploadState struct {
 	data *chunker.Chunker
 	err  error
 
-	// mu protects clients. The field needs protection since it is updated by upload
+	// mu protects clients anc cancel. The fields need protection since they are updated by upload
 	// whenever new clients join, and iterated on by updateAndNotify in the end of each upload.
 	// It does NOT protect data or error, because they do not need protection -
 	// they are only modified when a state object is created, and by updateAndNotify which is called
 	// exactly once for a given state object (this is the whole point of the algorithm).
 	mu      sync.Mutex
 	clients []chan<- *uploadResponse
+	cancel  func()
 }
 
 func (c *Client) findBlobState(ctx context.Context, dgs []digest.Digest) (missing []digest.Digest, present []digest.Digest, err error) {
@@ -90,10 +92,40 @@ func (c *Client) uploadProcessor() {
 				}
 				return
 			}
-			buffer = append(buffer, req)
-			if len(buffer) >= casChanBufferSize {
-				c.upload(buffer)
-				buffer = nil
+			if !req.cancel {
+				buffer = append(buffer, req)
+				if len(buffer) >= casChanBufferSize {
+					c.upload(buffer)
+					buffer = nil
+				}
+				continue
+			}
+			// Cancellation request.
+			var newBuffer []*uploadRequest
+			for _, r := range buffer {
+				if r.c != req.c || r.wait != req.wait {
+					newBuffer = append(newBuffer, r)
+				}
+			}
+			buffer = newBuffer
+			st, ok := c.casUploads[req.c.Digest()]
+			if ok {
+				st.mu.Lock()
+				var remainingClients []chan<- *uploadResponse
+				for _, w := range st.clients {
+					if w != req.wait {
+						remainingClients = append(remainingClients, w)
+					}
+				}
+				st.clients = remainingClients
+				if len(st.clients) == 0 {
+					log.V(3).Infof("Cancelling Write %v", req.c.Digest())
+					if st.cancel != nil {
+						st.cancel()
+					}
+					delete(c.casUploads, req.c.Digest())
+				}
+				st.mu.Unlock()
 			}
 		case <-ticker.C:
 			if buffer != nil {
@@ -237,11 +269,20 @@ func (c *Client) upload(reqs []*uploadRequest) {
 					updateAndNotify(newStates[dg], err, true)
 				}
 			} else {
-				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 				st := newStates[batch[0]]
+				st.mu.Lock()
+				if len(st.clients) == 0 { // Already cancelled.
+					log.V(3).Infof("Blob upload for digest %s was canceled", batch[0])
+					st.mu.Unlock()
+					return
+				}
+				cCtx, cancel := context.WithCancel(ctx)
+				st.cancel = cancel
+				st.mu.Unlock()
 				ch := st.data
 				dg := ch.Digest()
-				err := c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
+				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
+				err := c.WriteChunked(cCtx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
 				updateAndNotify(st, err, true)
 			}
 		}()
@@ -319,8 +360,21 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker)
 	log.V(2).Info("Waiting for remaining jobs")
 	err = eg.Wait()
 	log.V(2).Info("Done")
+	if err != nil {
+		log.V(2).Infof("Upload error: %v", err)
+	}
 
 	return missing, err
+}
+
+func (c *Client) cancelPendingRequests(reqs []*uploadRequest) {
+	for _, req := range reqs {
+		c.casUploadRequests <- &uploadRequest{
+			cancel: true,
+			c:      req.c,
+			wait:   req.wait,
+		}
+	}
 }
 
 // UploadIfMissing stores a number of uploadable items.
@@ -347,15 +401,18 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	}
 	wait := make(chan *uploadResponse, uploads)
 	var missing []digest.Digest
+	var reqs []*uploadRequest
 	for _, ch := range data {
 		req := &uploadRequest{
 			c:    ch,
 			meta: meta,
 			wait: wait,
 		}
+		reqs = append(reqs, req)
 		select {
 		case <-ctx.Done():
 			log.V(2).Infof("Upload canceled")
+			c.cancelPendingRequests(reqs)
 			return nil, ctx.Err()
 		case c.casUploadRequests <- req:
 			continue
@@ -364,6 +421,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	for uploads > 0 {
 		select {
 		case <-ctx.Done():
+			c.cancelPendingRequests(reqs)
 			return nil, ctx.Err()
 		case resp := <-wait:
 			if resp.err != nil {
