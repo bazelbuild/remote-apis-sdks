@@ -281,40 +281,6 @@ func TestChunkerErrors_ErrEOF(t *testing.T) {
 	}
 }
 
-func TestChunkerErrors_ShortRead(t *testing.T) {
-	execRoot, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
-	blob := []byte("123")
-	path := filepath.Join(execRoot, "file")
-	if err := ioutil.WriteFile(path, blob, 0777); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-	dg := digest.NewFromBlob([]byte("1234")) // We digest a blob that is longer than the actual one.
-	IOBufferSize = 10
-	// The error will be returned immediately, because the first buffer read will be shorter than expected.
-	c := NewFromFile(path, dg, 2)
-	got, err := c.Next()
-	if err == nil {
-		t.Errorf("c.Next() gave %v, %v, expecting _, error", got, err)
-	}
-
-	IOBufferSize = 3
-	// This time the error will be not be returned immediately, because the first buffer read will
-	// return the expected 3 bytes, and only the second one will be shorter than expected.
-	c = NewFromFile(path, dg, 2)
-	_, err = c.Next()
-	if err != nil {
-		t.Errorf("c.Next() gave error %v, expecting next chunk \"12\"", err)
-	}
-	got, err = c.Next()
-	if err == nil {
-		t.Errorf("c.Next() gave %v, %v, expecting _, error", got, err)
-	}
-}
-
 func TestChunkerResetOptimization_SmallFile(t *testing.T) {
 	// Files smaller than IOBufferSize are loaded into memory once and not re-read on Reset.
 	execRoot, err := ioutil.TempDir("", t.Name())
@@ -330,7 +296,7 @@ func TestChunkerResetOptimization_SmallFile(t *testing.T) {
 	}
 	dg := digest.NewFromBlob(blob)
 	IOBufferSize = 10
-	c := NewFromFile(path, dg, 3)
+	c := NewFromFile(path, dg, 4)
 	got, err := c.Next()
 	if err != nil {
 		t.Errorf("c.Next() gave error %v", err)
