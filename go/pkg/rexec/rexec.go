@@ -116,7 +116,6 @@ func (ec *Context) downloadOutErr() *command.Result {
 	if err := ec.downloadStream(ec.resPb.StderrRaw, ec.resPb.StderrDigest, ec.oe.WriteErr); err != nil {
 		return command.NewRemoteErrorResult(err)
 	}
-	// TODO(olaola): save output stats onto metadata here.
 	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
@@ -203,7 +202,7 @@ func (ec *Context) GetCachedResult() {
 		if ec.opt.DownloadOutErr {
 			ec.Result = ec.downloadOutErr()
 		}
-		if ec.opt.DownloadOutputs {
+		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
 			ec.Result = ec.downloadOutputs(ec.cmd.ExecRoot)
 		}
 		if ec.Result.Err == nil {
@@ -317,7 +316,7 @@ func (ec *Context) ExecuteRemotely() {
 		if ec.opt.DownloadOutErr {
 			ec.Result = ec.downloadOutErr()
 		}
-		if ec.opt.DownloadOutputs {
+		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
 			ec.Result = ec.downloadOutputs(ec.cmd.ExecRoot)
 		}
 		if resp.CachedResult && ec.Result.Err == nil {
