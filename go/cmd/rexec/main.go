@@ -48,6 +48,7 @@ func initFlags(cmd *command.Command, opt *command.ExecutionOptions) {
 	flag.BoolVar(&opt.AcceptCached, "accept_cached", true, "Boolean indicating whether to accept remote cache hits.")
 	flag.BoolVar(&opt.DoNotCache, "do_not_cache", false, "Boolean indicating whether to skip caching the command result remotely.")
 	flag.BoolVar(&opt.DownloadOutputs, "download_outputs", true, "Boolean indicating whether to download outputs after the command is executed.")
+	flag.BoolVar(&opt.DownloadOutErr, "download_outerr", true, "Boolean indicating whether to download stdout and stderr after the command is executed.")
 }
 
 func main() {
