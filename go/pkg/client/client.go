@@ -505,8 +505,6 @@ func (d RPCTimeouts) Apply(c *Client) {
 var DefaultRPCTimeouts = map[string]time.Duration{
 	"default":          20 * time.Second,
 	"GetCapabilities":  5 * time.Second,
-	"Read":             time.Minute,
-	"Write":            time.Minute,
 	"BatchUpdateBlobs": time.Minute,
 	"BatchReadBlobs":   time.Minute,
 	"GetTree":          time.Minute,

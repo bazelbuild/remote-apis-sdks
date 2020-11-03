@@ -20,9 +20,7 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 
 // WriteChunked uploads chunked data with a given resource name to the CAS.
 func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chunker) error {
-	cancelCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	closure := func(ctx context.Context) error {
+	closure := func() error {
 		ch.Reset() // Retry by starting the stream from the beginning.
 		// TODO(olaola): implement resumable uploads.
 
@@ -44,7 +42,7 @@ func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chun
 			if !ch.HasNext() {
 				req.FinishWrite = true
 			}
-			err = stream.Send(req)
+			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })
 			if err == io.EOF {
 				break
 			}
@@ -57,7 +55,7 @@ func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chun
 		}
 		return nil
 	}
-	return c.Retrier.Do(cancelCtx, func() error { return c.CallWithTimeout(cancelCtx, "Write", closure) })
+	return c.Retrier.Do(ctx, closure)
 }
 
 // ReadBytes fetches a resource's contents into a byte slice.
@@ -95,9 +93,7 @@ func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int
 // stream. The limit must be non-negative, although offset+limit may exceed the length of the
 // stream.
 func (c *Client) readStreamed(ctx context.Context, name string, offset, limit int64, w io.Writer) (n int64, e error) {
-	cancelCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	closure := func(ctx context.Context) error {
+	closure := func() error {
 		stream, err := c.Read(ctx, &bspb.ReadRequest{
 			ResourceName: name,
 			ReadOffset:   offset + n,
@@ -108,7 +104,12 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 		}
 
 		for {
-			resp, err := stream.Recv()
+			var resp *bspb.ReadResponse
+			err := c.CallWithTimeout(ctx, "Read", func(_ context.Context) error {
+				r, err := stream.Recv()
+				resp = r
+				return err
+			})
 			if err == io.EOF {
 				break
 			}
@@ -135,6 +136,6 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 		}
 		return nil
 	}
-	e = c.Retrier.Do(cancelCtx, func() error { return c.CallWithTimeout(cancelCtx, "Read", closure) })
+	e = c.Retrier.Do(ctx, closure)
 	return n, e
 }
