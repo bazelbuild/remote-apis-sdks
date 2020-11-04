@@ -112,7 +112,7 @@ func (c *Chunker) ChunkSize() int {
 // TODO(olaola): implement Seek(offset) when we have resumable uploads.
 func (c *Chunker) Reset() {
 	if c.r != nil {
-		c.r.Seek(0)
+		c.r.SeekOffset(0)
 	}
 	c.offset = 0
 	c.reachedEOF = false

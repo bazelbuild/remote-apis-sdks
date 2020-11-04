@@ -82,7 +82,7 @@ func TestFileReaderSeeks(t *testing.T) {
 				t.Errorf("Read() = incorrect result, diff(-wang, +got): %v", diff)
 			}
 
-			r.Seek(tc.seekOffset)
+			r.SeekOffset(tc.seekOffset)
 			if _, err := r.Read(data); err == nil {
 				t.Errorf("Read() = should have err'd on unitialized reader")
 			}
@@ -115,7 +115,7 @@ func TestFileReaderSeeksPastOffset(t *testing.T) {
 
 	r := NewFileReadSeeker(path, 10)
 	// Past Offset
-	r.Seek(10)
+	r.SeekOffset(10)
 	if err := r.Initialize(); err != nil {
 		t.Fatalf("Failed to initialize reader: %v", err)
 	}
