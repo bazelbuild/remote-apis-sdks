@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/reader"
 	"github.com/golang/protobuf/proto"
 )
 
@@ -24,7 +25,7 @@ var ErrEOF = errors.New("ErrEOF")
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
 type Chunker struct {
 	chunkSize int
-	reader    ReadSeeker
+	r         reader.ReadSeeker
 	// An optional cache of the full data. It will be present in these cases:
 	// * The Chunker was initialized from a []byte.
 	// * Chunker.FullData was called at least once.
@@ -66,7 +67,7 @@ func NewFromFile(path string, dg digest.Digest, chunkSize int) *Chunker {
 		chunkSize = IOBufferSize
 	}
 	return &Chunker{
-		reader:    NewFileReadSeeker(path, IOBufferSize),
+		r:         reader.NewFileReadSeeker(path, IOBufferSize),
 		chunkSize: chunkSize,
 		digest:    dg,
 		path:      path,
@@ -110,8 +111,8 @@ func (c *Chunker) ChunkSize() int {
 // Useful for upload retries.
 // TODO(olaola): implement Seek(offset) when we have resumable uploads.
 func (c *Chunker) Reset() {
-	if c.reader != nil {
-		c.reader.Seek(0)
+	if c.r != nil {
+		c.r.Seek(0)
 	}
 	c.offset = 0
 	c.reachedEOF = false
@@ -125,14 +126,14 @@ func (c *Chunker) FullData() ([]byte, error) {
 		return c.contents, nil
 	}
 	var err error
-	if !c.reader.IsInitialized() {
-		err = c.reader.Initialize()
+	if !c.r.IsInitialized() {
+		err = c.r.Initialize()
 	}
 	if err != nil {
 		return nil, err
 	}
 	// Cache contents so that the next call to FullData() doesn't result in file read.
-	c.contents, err = ioutil.ReadAll(c.reader)
+	c.contents, err = ioutil.ReadAll(c.r)
 	return c.contents, err
 }
 
@@ -172,8 +173,8 @@ func (c *Chunker) Next() (*Chunk, error) {
 		}
 		data = c.contents[c.offset:endRead]
 	} else {
-		if !c.reader.IsInitialized() {
-			err := c.reader.Initialize()
+		if !c.r.IsInitialized() {
+			err := c.r.Initialize()
 			if err != nil {
 				return nil, err
 			}
@@ -182,7 +183,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 		// We don't need to check the amount of bytes read, as ReadFull will yell if
 		// it's diff than len(data).
 		data = make([]byte, c.chunkSize)
-		n, err := io.ReadFull(c.reader, data)
+		n, err := io.ReadFull(c.r, data)
 		data = data[:n]
 		switch err {
 		case io.ErrUnexpectedEOF:
