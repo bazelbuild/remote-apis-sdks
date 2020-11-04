@@ -1,4 +1,4 @@
-package chunker
+package reader
 
 import (
 	"io"
