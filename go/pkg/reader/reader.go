@@ -16,7 +16,7 @@ type Initializable interface {
 type ReadSeeker interface {
 	io.Reader
 	Initializable
-	Seek(offset int64)
+	SeekOffset(offset int64)
 }
 
 type fileSeeker struct {
@@ -53,7 +53,7 @@ func (fio *fileSeeker) Read(p []byte) (int, error) {
 
 // Seek is a simplified version of io.Seeker. It only supports offsets from the
 // beginning of the file, and it errors lazily at the next Initialize.
-func (fio *fileSeeker) Seek(offset int64) {
+func (fio *fileSeeker) SeekOffset(offset int64) {
 	fio.seekOffset = offset
 	fio.initialized = false
 	fio.reader = nil
