@@ -50,6 +50,12 @@ type TreeStats struct {
 	// TODO(olaola): number of FileMetadata cache hits/misses go here.
 }
 
+// TreeSymlinkOpts controls how symlinks are handled when constructing a tree.
+type TreeSymlinkOpts struct {
+	ConvertToFiles       bool
+	AllowDanglingSymlink bool
+}
+
 // shouldIgnore returns whether a given input should be excluded based on the given InputExclusions,
 func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusion) bool {
 	for _, r := range excl {
@@ -65,7 +71,7 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, config TreeSymlinkOpts) error {
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	normPath, err := getRelPath(execRoot, absPath)
 	if err != nil {
@@ -105,7 +111,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return nil
 	}
 	for _, f := range files {
-		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, chunkSize, cache); e != nil {
+		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, chunkSize, cache, config); e != nil {
 			return e
 		}
 	}
@@ -141,7 +147,7 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, chunk
 		if i == "" {
 			return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
 		}
-		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache); e != nil {
+		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache, c.TreeSymlinkOpts); e != nil {
 			return digest.Empty, nil, nil, e
 		}
 	}
@@ -387,7 +393,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, chunkSi
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, nil, "", fs, chunkSize, cache); e != nil {
+		if e := loadFiles(absPath, nil, "", fs, chunkSize, cache, c.TreeSymlinkOpts); e != nil {
 			return nil, nil, e
 		}
 		ft := buildTree(fs)

@@ -85,7 +85,9 @@ type Client struct {
 	// UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
 	UtilizeLocality UtilizeLocality
 	// UnifiedCASOps specifies whether the client uploads/downloads files in the background
-	UnifiedCASOps       UnifiedCASOps
+	UnifiedCASOps UnifiedCASOps
+	// TreeSymlinkOpts controls how symlinks are handled when constructing a tree.
+	TreeSymlinkOpts     TreeSymlinkOpts
 	serverCaps          *repb.ServerCapabilities
 	useBatchOps         UseBatchOps
 	casConcurrency      int64
