@@ -9,6 +9,7 @@ go_library(
         "//go/pkg/digest:go_default_library",
         "//go/pkg/reader:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
+        "@com_github_klauspost_compress//zstd:go_default_library",
     ],
 )
 
