@@ -69,13 +69,9 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return nil
 	}
 	if meta.Err != nil {
-		e, ok := meta.Err.(*filemetadata.FileError)
-		if !ok {
-			return meta.Err
-		}
-		if !e.IsDirectory {
-			return meta.Err
-		}
+		return meta.Err
+	}
+	if meta.IsDirectory {
 		t = command.DirectoryInputType
 	}
 	if shouldIgnore(absPath, t, excl) {
@@ -350,22 +346,18 @@ func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cach
 			return nil, nil, fmt.Errorf("path %v is not under exec root %v: %v", path, execRoot, err)
 		}
 		meta := cache.Get(absPath)
-		if meta.Err == nil {
+		if meta.Err != nil {
+			if e, ok := meta.Err.(*filemetadata.FileError); ok && e.IsNotFound {
+				continue // Ignore missing outputs.
+			}
+			return nil, nil, meta.Err
+		}
+		if !meta.IsDirectory {
 			// A regular file.
 			ch := chunker.NewFromFile(absPath, meta.Digest, chunkSize)
 			outs[meta.Digest] = ch
 			resPb.OutputFiles = append(resPb.OutputFiles, &repb.OutputFile{Path: normPath, Digest: meta.Digest.ToProto(), IsExecutable: meta.IsExecutable})
 			continue
-		}
-		e, ok := meta.Err.(*filemetadata.FileError)
-		if !ok {
-			return nil, nil, meta.Err
-		}
-		if e.IsNotFound {
-			continue // Ignore missing outputs.
-		}
-		if !e.IsDirectory {
-			return nil, nil, meta.Err
 		}
 		// A directory.
 		fs := make(map[string]*fileNode)

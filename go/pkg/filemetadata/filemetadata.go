@@ -2,7 +2,6 @@
 package filemetadata
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -18,15 +17,15 @@ type SymlinkMetadata struct {
 type Metadata struct {
 	Digest       digest.Digest
 	IsExecutable bool
+	IsDirectory  bool
 	Err          error
 	Symlink      *SymlinkMetadata
 }
 
 // FileError is the error returned by the Compute function.
 type FileError struct {
-	IsDirectory bool
-	IsNotFound  bool
-	Err         error
+	IsNotFound bool
+	Err        error
 }
 
 // Error returns the error message.
@@ -49,14 +48,13 @@ func Compute(filename string) *Metadata {
 	file, err := os.Stat(filename)
 	if isSym, _ := isSymlink(filename); isSym {
 		md.Symlink = &SymlinkMetadata{}
-		if dest, rlErr := os.Readlink(filename); rlErr != nil {
+		dest, rlErr := os.Readlink(filename)
+		if rlErr != nil {
 			md.Err = &FileError{Err: rlErr}
 			return md
-		} else {
-			// If Readlink was OK, we set Target, even if this could be a dangling symlink.
-			md.Symlink.Target = dest
 		}
-
+		// If Readlink was OK, we set Target, even if this could be a dangling symlink.
+		md.Symlink.Target = dest
 		if err != nil {
 			md.Err = &FileError{Err: err}
 			md.Symlink.IsDangling = true
@@ -75,7 +73,7 @@ func Compute(filename string) *Metadata {
 	mode := file.Mode()
 	md.IsExecutable = (mode & 0100) != 0
 	if mode.IsDir() {
-		md.Err = &FileError{IsDirectory: true, Err: fmt.Errorf("%s is a directory", filename)}
+		md.IsDirectory = true
 		return md
 	}
 	md.Digest, md.Err = digest.NewFromFile(filename)
