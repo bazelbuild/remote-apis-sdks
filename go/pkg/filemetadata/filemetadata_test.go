@@ -59,8 +59,11 @@ func TestComputeDirectory(t *testing.T) {
 		t.Fatalf("Failed to create temp directory")
 	}
 	got := Compute(tmpDir)
-	if fe, ok := got.Err.(*FileError); !ok || !fe.IsDirectory {
-		t.Errorf("Compute(%v).Err = %v, want FileError{IsDirectory:true}", tmpDir, got.Err)
+	if got.Err != nil {
+		t.Errorf("Compute(%v).Err = %v, expected nil", tmpDir, got.Err)
+	}
+	if !got.IsDirectory {
+		t.Errorf("Compute(%v).IsDirectory = false, want true", tmpDir)
 	}
 	if got.Digest != digest.Empty {
 		t.Errorf("Compute(%v).Digest = %v, want %v", tmpDir, got.Digest, digest.Empty)
@@ -146,8 +149,11 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 	}
 
 	got := Compute(symlinkPath)
-	if fe, ok := got.Err.(*FileError); !ok || !fe.IsDirectory {
-		t.Errorf("Compute(%v).Err = %v, want FileError{IsDirectory:true}", symlinkPath, got.Err)
+	if got.Err != nil {
+		t.Errorf("Compute(%v).Err = %v, expected nil", symlinkPath, got.Err)
+	}
+	if !got.IsDirectory {
+		t.Errorf("Compute(%v).IsDirectory = false, want true", symlinkPath)
 	}
 }
 
