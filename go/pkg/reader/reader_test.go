@@ -9,6 +9,7 @@ import (
 )
 
 func TestFileReaderSeeks(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		IOBuffSize   int
@@ -37,6 +38,7 @@ func TestFileReaderSeeks(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			path, err := test_util.CreateFile(t, false, tc.blob)
 			if err != nil {
 				t.Fatalf("Failed to make temp file: %v", err)
@@ -91,6 +93,7 @@ func TestFileReaderSeeks(t *testing.T) {
 }
 
 func TestFileReaderSeeksPastOffset(t *testing.T) {
+	t.Parallel()
 	path, err := test_util.CreateFile(t, false, "12345")
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
