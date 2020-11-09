@@ -10,6 +10,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/reader"
 	"github.com/golang/protobuf/proto"
+	"github.com/klauspost/compress/zstd"
 )
 
 // DefaultChunkSize is the default chunk size for ByteStream.Write RPCs.
@@ -20,6 +21,9 @@ var IOBufferSize = 10 * 1024 * 1024
 
 // ErrEOF is returned when Next is called when HasNext is false.
 var ErrEOF = errors.New("ErrEOF")
+
+// Compressor for full blobs
+var fullCompressor *zstd.Encoder
 
 type UploadEntry struct {
 	digest   digest.Digest
@@ -71,7 +75,6 @@ type Chunker struct {
 	path       string
 	offset     int64
 	reachedEOF bool
-
 	ue         *UploadEntry
 	compressed bool
 }
@@ -106,15 +109,31 @@ func New(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, error) {
 }
 
 func chunkerFromBlob(blob []byte, compressed bool) *Chunker {
-	contents := make([]byte, len(blob))
-	copy(contents, blob)
+	var contents []byte
+	if compressed {
+		contents = fullCompressor.EncodeAll(blob, nil)
+	} else {
+		contents = make([]byte, len(blob))
+		copy(contents, blob)
+	}
+
 	return &Chunker{
 		contents: contents,
 	}
 }
 
 func chunkerFromFile(path string, compressed bool) (*Chunker, error) {
-	r := reader.NewFileReadSeeker(path, IOBufferSize)
+	var r reader.ReadSeeker
+	if compressed {
+		var err error
+		r, err = reader.NewCompressedFileSeeker(path, IOBufferSize)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		r = reader.NewFileReadSeeker(path, IOBufferSize)
+	}
+
 	return &Chunker{
 		r:    r,
 		path: path,
@@ -145,6 +164,7 @@ func (c *Chunker) ChunkSize() int {
 // TODO(olaola): implement Seek(offset) when we have resumable uploads.
 func (c *Chunker) Reset() {
 	if c.r != nil {
+		// We're ignoring the error here, as not to change the fn signature.
 		c.r.SeekOffset(0)
 	}
 	c.offset = 0
