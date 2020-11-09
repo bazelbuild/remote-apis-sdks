@@ -32,7 +32,7 @@ type fileNode struct {
 }
 
 type fileSysNode struct {
-	file                 *fileNode
+	File                 *fileNode
 	EmptyDirectoryMarker bool
 }
 
@@ -83,7 +83,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 	if t == command.FileInputType {
 		fs[path] = &fileSysNode{
-			file: &fileNode{
+			File: &fileNode{
 				Chunker:      chunker.NewFromFile(absPath, meta.Digest, chunkSize),
 				IsExecutable: meta.IsExecutable,
 			},
@@ -121,7 +121,7 @@ func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, ca
 			continue
 		}
 		fs[i.Path] = &fileSysNode{
-			file: &fileNode{
+			File: &fileNode{
 				Chunker:      chunker.NewFromBlob(i.Contents, chunkSize),
 				IsExecutable: i.IsExecutable,
 			},
@@ -177,7 +177,7 @@ func buildTree(files map[string]*fileSysNode) *treeNode {
 		if node.Files == nil {
 			node.Files = make(map[string]*fileNode)
 		}
-		node.Files[base] = fn.file
+		node.Files[base] = fn.File
 	}
 	return root
 }
