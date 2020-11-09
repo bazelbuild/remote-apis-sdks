@@ -22,18 +22,18 @@ import (
 // tree later. It corresponds roughly to a *repb.Directory, but with pointers, not digests, used to
 // refer to other nodes.
 type treeNode struct {
-	Files map[string]*fileNode
-	Dirs  map[string]*treeNode
+	files map[string]*fileNode
+	dirs  map[string]*treeNode
 }
 
 type fileNode struct {
-	Chunker      *chunker.Chunker
-	IsExecutable bool
+	chunker      *chunker.Chunker
+	isExecutable bool
 }
 
 type fileSysNode struct {
-	File                 *fileNode
-	EmptyDirectoryMarker bool
+	file                 *fileNode
+	emptyDirectoryMarker bool
 }
 
 // Stats contains various stats/metadata of the constructed Merkle tree.
@@ -83,9 +83,9 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 	if t == command.FileInputType {
 		fs[path] = &fileSysNode{
-			File: &fileNode{
-				Chunker:      chunker.NewFromFile(absPath, meta.Digest, chunkSize),
-				IsExecutable: meta.IsExecutable,
+			file: &fileNode{
+				chunker:      chunker.NewFromFile(absPath, meta.Digest, chunkSize),
+				isExecutable: meta.IsExecutable,
 			},
 		}
 		return nil
@@ -97,7 +97,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 
 	if len(files) == 0 {
-		fs[path] = &fileSysNode{EmptyDirectoryMarker: true}
+		fs[path] = &fileSysNode{emptyDirectoryMarker: true}
 		return nil
 	}
 	for _, f := range files {
@@ -117,13 +117,13 @@ func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, ca
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
 		}
 		if i.IsEmptyDirectory {
-			fs[i.Path] = &fileSysNode{EmptyDirectoryMarker: true}
+			fs[i.Path] = &fileSysNode{emptyDirectoryMarker: true}
 			continue
 		}
 		fs[i.Path] = &fileSysNode{
-			File: &fileNode{
-				Chunker:      chunker.NewFromBlob(i.Contents, chunkSize),
-				IsExecutable: i.IsExecutable,
+			file: &fileNode{
+				chunker:      chunker.NewFromBlob(i.Contents, chunkSize),
+				isExecutable: i.IsExecutable,
 			},
 		}
 	}
@@ -156,28 +156,28 @@ func buildTree(files map[string]*fileSysNode) *treeNode {
 
 		node := root
 		for _, s := range segs {
-			if node.Dirs == nil {
-				node.Dirs = make(map[string]*treeNode)
+			if node.dirs == nil {
+				node.dirs = make(map[string]*treeNode)
 			}
-			child := node.Dirs[s]
+			child := node.dirs[s]
 			if child == nil {
 				child = &treeNode{}
-				node.Dirs[s] = child
+				node.dirs[s] = child
 			}
 			node = child
 		}
 
-		if fn.EmptyDirectoryMarker {
-			if node.Dirs == nil {
-				node.Dirs = make(map[string]*treeNode)
+		if fn.emptyDirectoryMarker {
+			if node.dirs == nil {
+				node.dirs = make(map[string]*treeNode)
 			}
-			node.Dirs[base] = &treeNode{}
+			node.dirs[base] = &treeNode{}
 			continue
 		}
-		if node.Files == nil {
-			node.Files = make(map[string]*fileNode)
+		if node.files == nil {
+			node.files = make(map[string]*fileNode)
 		}
-		node.Files[base] = fn.File
+		node.files[base] = fn.file
 	}
 	return root
 }
@@ -186,7 +186,7 @@ func packageTree(t *treeNode, chunkSize int, stats *Stats) (root digest.Digest, 
 	dir := &repb.Directory{}
 	blobs = make(map[digest.Digest]*chunker.Chunker)
 
-	for name, child := range t.Dirs {
+	for name, child := range t.dirs {
 		dg, childBlobs, err := packageTree(child, chunkSize, stats)
 		if err != nil {
 			return digest.Empty, nil, err
@@ -198,10 +198,10 @@ func packageTree(t *treeNode, chunkSize int, stats *Stats) (root digest.Digest, 
 	}
 	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
 
-	for name, fn := range t.Files {
-		dg := fn.Chunker.Digest()
-		dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.IsExecutable})
-		blobs[dg] = fn.Chunker
+	for name, fn := range t.files {
+		dg := fn.chunker.Digest()
+		dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.isExecutable})
+		blobs[dg] = fn.chunker
 		stats.InputFiles++
 		stats.TotalInputBytes += dg.Size
 	}
@@ -311,7 +311,7 @@ func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, child
 	children = make(map[digest.Digest]*repb.Directory)
 	files = make(map[digest.Digest]*chunker.Chunker)
 
-	for name, child := range t.Dirs {
+	for name, child := range t.dirs {
 		chRoot, chDirs, childFiles, err := packageDirectories(child, chunkSize)
 		if err != nil {
 			return nil, nil, nil, err
@@ -332,10 +332,10 @@ func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, child
 	}
 	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
 
-	for name, fn := range t.Files {
-		dg := fn.Chunker.Digest()
-		root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.IsExecutable})
-		files[dg] = fn.Chunker
+	for name, fn := range t.files {
+		dg := fn.chunker.Digest()
+		root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.isExecutable})
+		files[dg] = fn.chunker
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
 	return root, children, files, nil
