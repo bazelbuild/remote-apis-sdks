@@ -2,39 +2,18 @@ package reader
 
 import (
 	"io"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"testing"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/test_util"
 	"github.com/google/go-cmp/cmp"
 )
-
-func setTmpFile(t *testing.T, content []byte) (string, func()) {
-	t.Helper()
-	execRoot, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-
-	path := filepath.Join(execRoot, "file")
-	if err := ioutil.WriteFile(path, content, 0777); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	clean := func() {
-		os.RemoveAll(execRoot)
-	}
-
-	return path, clean
-}
 
 func TestFileReaderSeeks(t *testing.T) {
 	tests := []struct {
 		name         string
 		IOBuffSize   int
 		dataBuffSize int
-		blob         []byte
+		blob         string
 		seekOffset   int64
 		wantResetErr error
 	}{
@@ -42,7 +21,7 @@ func TestFileReaderSeeks(t *testing.T) {
 			name:         "Smaller data buffer",
 			IOBuffSize:   10,
 			dataBuffSize: 3,
-			blob:         []byte("1234567"),
+			blob:         "1234567",
 			seekOffset:   2,
 			wantResetErr: nil,
 		},
@@ -50,7 +29,7 @@ func TestFileReaderSeeks(t *testing.T) {
 			name:         "Smaller io buffer",
 			IOBuffSize:   1,
 			dataBuffSize: 3,
-			blob:         []byte("1234567"),
+			blob:         "1234567",
 			seekOffset:   2,
 			wantResetErr: nil,
 		},
@@ -58,8 +37,10 @@ func TestFileReaderSeeks(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			path, clean := setTmpFile(t, tc.blob)
-			defer clean()
+			path, err := test_util.CreateFile(t, false, tc.blob)
+			if err != nil {
+				t.Fatalf("Failed to make temp file: %v", err)
+			}
 
 			data := make([]byte, tc.dataBuffSize)
 
@@ -78,7 +59,7 @@ func TestFileReaderSeeks(t *testing.T) {
 			if err != nil {
 				t.Errorf("Read() = %v err, expected nil", err)
 			}
-			if diff := cmp.Diff(data, tc.blob[:tc.dataBuffSize]); diff != "" {
+			if diff := cmp.Diff(string(data), tc.blob[:tc.dataBuffSize]); diff != "" {
 				t.Errorf("Read() = incorrect result, diff(-want, +got): %v", diff)
 			}
 
@@ -101,7 +82,7 @@ func TestFileReaderSeeks(t *testing.T) {
 			if endRead > len(tc.blob) {
 				endRead = len(tc.blob)
 			}
-			if diff := cmp.Diff(data, tc.blob[tc.seekOffset:endRead]); diff != "" {
+			if diff := cmp.Diff(string(data), tc.blob[tc.seekOffset:endRead]); diff != "" {
 				t.Errorf("Read() = incorrect result, diff(-want, +got): %v", diff)
 			}
 		})
@@ -110,8 +91,10 @@ func TestFileReaderSeeks(t *testing.T) {
 }
 
 func TestFileReaderSeeksPastOffset(t *testing.T) {
-	path, clean := setTmpFile(t, []byte("12345"))
-	defer clean()
+	path, err := test_util.CreateFile(t, false, "12345")
+	if err != nil {
+		t.Fatalf("Failed to make temp file: %v", err)
+	}
 
 	r := NewFileReadSeeker(path, 10)
 	// Past Offset
