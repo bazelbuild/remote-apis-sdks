@@ -10,6 +10,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/reader"
 	"github.com/golang/protobuf/proto"
+	"github.com/klauspost/compress/zstd"
 )
 
 // DefaultChunkSize is the default chunk size for ByteStream.Write RPCs.
@@ -20,6 +21,9 @@ var IOBufferSize = 10 * 1024 * 1024
 
 // ErrEOF is returned when Next is called when HasNext is false.
 var ErrEOF = errors.New("ErrEOF")
+
+// Compressor for full blobs
+var fullCompressor *zstd.Encoder
 
 // Chunker can be used to chunk an input into uploadable-size byte slices.
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
@@ -38,6 +42,7 @@ type Chunker struct {
 	offset     int64
 	reachedEOF bool
 	path       string
+	compressed bool
 }
 
 // NewFromBlob initializes a Chunker from the provided bytes buffer.
@@ -60,6 +65,27 @@ func NewFromBlob(blob []byte, chunkSize int) *Chunker {
 // any time. This means that late errors due to mismatch of digest and
 // contents are possible.
 func NewFromFile(path string, dg digest.Digest, chunkSize int) *Chunker {
+	c := NewFromReader(reader.NewFileReadSeeker(path, IOBufferSize), dg, chunkSize)
+	c.path = path
+	return c
+}
+
+// NewCompressedFromFile is similar to NewFromFile, except that it'll compress
+// the contents of the file using zstd compression.
+func NewCompressedFromFile(path string, dg digest.Digest, chunkSize int) (*Chunker, error) {
+	r, err := reader.NewCompressedFileSeeker(path, IOBufferSize)
+	if err != nil {
+		return nil, err
+	}
+	c := NewFromReader(r, dg, chunkSize)
+	c.path = path
+	return c, nil
+}
+
+// NewFromReader is similar to NewFromFile, except that it'll take in any
+// arbitrary reader.ReadSeeker. Note that the digest is still for convenience,
+// rather than being actual used by the Chunker.
+func NewFromReader(r reader.ReadSeeker, dg digest.Digest, chunkSize int) *Chunker {
 	if chunkSize < 1 {
 		chunkSize = DefaultChunkSize
 	}
@@ -67,11 +93,44 @@ func NewFromFile(path string, dg digest.Digest, chunkSize int) *Chunker {
 		chunkSize = IOBufferSize
 	}
 	return &Chunker{
-		r:         reader.NewFileReadSeeker(path, IOBufferSize),
+		r:         r,
 		chunkSize: chunkSize,
 		digest:    dg,
-		path:      path,
 	}
+}
+
+// CompressChunker will, if possible, modify the chunker so it'll return compressed
+// reads instead. This is irreversible.
+func CompressChunker(ch *Chunker) error {
+	var err error
+	if fullCompressor == nil {
+		fullCompressor, err = zstd.NewWriter(nil)
+		if err != nil {
+			return err
+		}
+	}
+
+	if ch.compressed {
+		return nil
+	}
+
+	if ch.contents != nil {
+		ch.contents = fullCompressor.EncodeAll(ch.contents, nil)
+		ch.compressed = true
+		return nil
+	}
+
+	if ch.r != nil {
+		cmpR, err := reader.NewCompressedSeeker(ch.r)
+		if err != nil {
+			return err
+		}
+		ch.r = cmpR
+		ch.compressed = true
+		return nil
+	}
+
+	return errors.New("Provided Chunker is invalid")
 }
 
 // NewFromProto initializes a Chunker from the marshalled proto message.
@@ -112,6 +171,7 @@ func (c *Chunker) ChunkSize() int {
 // TODO(olaola): implement Seek(offset) when we have resumable uploads.
 func (c *Chunker) Reset() {
 	if c.r != nil {
+		// We're ignoring the error here, as not to change the fn signature.
 		c.r.SeekOffset(0)
 	}
 	c.offset = 0
