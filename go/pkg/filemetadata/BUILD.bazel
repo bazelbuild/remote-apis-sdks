@@ -30,12 +30,13 @@ go_test(
     deps = [
         "//go/pkg/cache:go_default_library",
         "//go/pkg/digest:go_default_library",
+        "//go/pkg/test_util:go_default_library",
         "@com_github_google_go_cmp//cmp:go_default_library",
         "@com_github_google_go_cmp//cmp/cmpopts:go_default_library",
     ],
 )
 
 config_setting(
-   name = "windows",
-   constraint_values = ["@platforms//os:windows"],
+    name = "windows",
+    constraint_values = ["@platforms//os:windows"],
 )

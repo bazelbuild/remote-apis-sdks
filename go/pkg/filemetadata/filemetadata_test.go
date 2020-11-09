@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/test_util"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -32,7 +33,7 @@ func TestComputeFiles(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			filename, err := createFile(t, tc.executable, tc.contents)
+			filename, err := test_util.CreateFile(t, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
@@ -151,32 +152,9 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 	}
 }
 
-func createFile(t *testing.T, executable bool, contents string) (string, error) {
-	t.Helper()
-	perm := os.FileMode(0666)
-	if executable {
-		perm = os.FileMode(0766)
-	}
-	tmpFile, err := ioutil.TempFile(os.TempDir(), "")
-	if err != nil {
-		return "", err
-	}
-	if err := tmpFile.Chmod(perm); err != nil {
-		return "", err
-	}
-	if err := tmpFile.Close(); err != nil {
-		return "", err
-	}
-	filename := tmpFile.Name()
-	if err = ioutil.WriteFile(filename, []byte(contents), os.ModeTemporary); err != nil {
-		return "", err
-	}
-	return filename, nil
-}
-
 func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, contents string) (string, error) {
 	t.Helper()
-	targetPath, err := createFile(t, executable, contents)
+	targetPath, err := test_util.CreateFile(t, executable, contents)
 	if err != nil {
 		return "", err
 	}
