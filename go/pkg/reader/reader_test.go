@@ -79,7 +79,7 @@ func TestFileReaderSeeks(t *testing.T) {
 				t.Errorf("Read() = %v err, expected nil", err)
 			}
 			if diff := cmp.Diff(data, tc.blob[:tc.dataBuffSize]); diff != "" {
-				t.Errorf("Read() = incorrect result, diff(-wang, +got): %v", diff)
+				t.Errorf("Read() = incorrect result, diff(-want, +got): %v", diff)
 			}
 
 			r.SeekOffset(tc.seekOffset)
