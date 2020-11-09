@@ -1,11 +1,13 @@
 package reader
 
 import (
+	"bytes"
 	"io"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestFileReaderSeeks(t *testing.T) {
@@ -110,5 +112,75 @@ func TestFileReaderSeeksPastOffset(t *testing.T) {
 	data := make([]byte, 1)
 	if _, err := r.Read(data); err == nil {
 		t.Errorf("Expected err, got nil")
+	}
+}
+
+func TestCompressedReader(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		blob string
+	}{
+		{
+			name: "basic",
+			blob: "12345",
+		},
+		{
+			name: "looong",
+			blob: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
+		},
+		{
+			name: "empty blob",
+			blob: "",
+		},
+	}
+
+	for _, tc := range tests {
+		name := tc.name
+		blob := tc.blob
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path, err := testutil.CreateFile(t, false, blob)
+			if err != nil {
+				t.Fatalf("Failed to initialize temp file: %v", err)
+			}
+
+			buf := bytes.NewBuffer(nil)
+			encd, err := zstd.NewWriter(buf)
+			if err != nil {
+				t.Fatalf("Failed to initialize compressor: %v", err)
+			}
+			if _, err = encd.Write([]byte(blob)); err != nil {
+				t.Fatalf("Failed to compress data: %v", err)
+			}
+			if err = encd.Close(); err != nil {
+				t.Fatalf("Failed to finish compressing data: %v", err)
+			}
+			compressedData := buf.Bytes()
+
+			r, err := NewCompressedFileSeeker(path, 10)
+			if err != nil {
+				t.Fatalf("Failed to initialize compressor reader: %v", err)
+			}
+			if err := r.Initialize(); err != nil {
+				t.Fatalf("Failed to initialize reader: %v", err)
+			}
+
+			// It is theoretically possible for the compressed data to be
+			// larger than the original
+			data := make([]byte, len(blob)+100)
+			var n, m int
+			for err = nil; err == nil; m, err = r.Read(data[n:]) {
+				n += m
+			}
+			if err != io.EOF {
+				t.Errorf("Expected err, got nil")
+			}
+
+			if diff := cmp.Diff(compressedData[:n], data[:n]); diff != "" {
+				t.Errorf("Read() = incorrect result, diff(-want, +got): %v", diff)
+			}
+		})
 	}
 }
