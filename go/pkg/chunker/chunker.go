@@ -185,17 +185,13 @@ func (c *Chunker) Next() (*Chunk, error) {
 		data = make([]byte, c.chunkSize)
 		n, err := io.ReadFull(c.r, data)
 		data = data[:n]
-		switch err {
-		case io.ErrUnexpectedEOF:
-			// Cache the contents to avoid further IO for small files.
+		// Cache the contents to avoid further IO for small files.
+		if err == io.ErrUnexpectedEOF || err == io.EOF {
 			if c.offset == 0 {
 				c.contents = data
 			}
-			fallthrough
-		case io.EOF:
 			c.reachedEOF = true
-		case nil:
-		default:
+		} else if err != nil {
 			return nil, err
 		}
 	}
