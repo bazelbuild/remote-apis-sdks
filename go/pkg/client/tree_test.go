@@ -547,7 +547,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
-			desc: "Allow dangling symlink",
+			desc: "Dangling symlink is preserved",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "invalidSym", isSymlink: true, symlinkTarget: "fooDir/invalid"},
@@ -573,8 +573,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size,
 			},
 			treeOpts: &client.TreeSymlinkOpts{
-				Preserved:            true,
-				AllowDanglingSymlink: true,
+				Preserved: true,
 			},
 		},
 		{
@@ -1030,7 +1029,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			}
 			gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, cache)
 			if err != nil {
-				t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
+				t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
 			}
 			for _, ch := range inputs {
 				blob, err := ch.FullData()

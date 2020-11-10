@@ -62,8 +62,7 @@ type TreeStats struct {
 type TreeSymlinkOpts struct {
 	// By default, a symlink is converted into its targeted file.
 	// If true, preserve the symlink.
-	Preserved            bool
-	AllowDanglingSymlink bool
+	Preserved bool
 }
 
 // shouldIgnore returns whether a given input should be excluded based on the given InputExclusions,
@@ -88,16 +87,18 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return err
 	}
 	meta := cache.Get(absPath)
-	t := command.FileInputType
 	isSymlink := meta.Symlink != nil
-	isDanglingSymlink := isSymlink && meta.Symlink.IsDangling
-	if isDanglingSymlink {
-		if !(opts.Preserved && opts.AllowDanglingSymlink) {
+	if isSymlink && meta.Symlink.IsDangling {
+		if !opts.Preserved {
 			return nil
 		}
+		// Right now we never treat a dangling symlink as an error. If we
+		// choose not to preserve the symlink, it is simply skipped. Otherwise
+		// we will create a corresponding symlink node in the tree.
 	} else if meta.Err != nil {
 		return meta.Err
 	}
+	t := command.FileInputType
 	if isSymlink && opts.Preserved {
 		t = command.SymlinkInputType
 	} else if meta.IsDirectory {
