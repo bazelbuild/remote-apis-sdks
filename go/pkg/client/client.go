@@ -173,7 +173,9 @@ func (s UnifiedCASOps) Apply(c *Client) {
 }
 
 func (o *TreeSymlinkOpts) Apply(c *Client) {
-	c.TreeSymlinkOpts = *o
+	if o != nil {
+		c.TreeSymlinkOpts = *o
+	}
 }
 
 // MaxBatchDigests is maximum amount of digests to batch in batched operations.

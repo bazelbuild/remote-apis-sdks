@@ -1024,9 +1024,8 @@ func TestComputeMerkleTree(t *testing.T) {
 
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
-			if tc.treeOpts != nil {
-				tc.treeOpts.Apply(e.Client.GrpcClient)
-			}
+			tc.treeOpts.Apply(e.Client.GrpcClient)
+
 			gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, cache)
 			if err != nil {
 				t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
