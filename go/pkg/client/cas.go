@@ -16,7 +16,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
 	"golang.org/x/sync/errgroup"
@@ -819,23 +818,23 @@ func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result [
 
 // FlattenActionOutputs collects and flattens all the outputs of an action.
 // It downloads the output directory metadata, if required, but not the leaf file blobs.
-func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult) (map[string]*tree.Output, error) {
-	outs := make(map[string]*tree.Output)
+func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult) (map[string]*TreeOutput, error) {
+	outs := make(map[string]*TreeOutput)
 	for _, file := range ar.OutputFiles {
-		outs[file.Path] = &tree.Output{
+		outs[file.Path] = &TreeOutput{
 			Path:         file.Path,
 			Digest:       digest.NewFromProtoUnvalidated(file.Digest),
 			IsExecutable: file.IsExecutable,
 		}
 	}
 	for _, sm := range ar.OutputFileSymlinks {
-		outs[sm.Path] = &tree.Output{
+		outs[sm.Path] = &TreeOutput{
 			Path:          sm.Path,
 			SymlinkTarget: sm.Target,
 		}
 	}
 	for _, sm := range ar.OutputDirectorySymlinks {
-		outs[sm.Path] = &tree.Output{
+		outs[sm.Path] = &TreeOutput{
 			Path:          sm.Path,
 			SymlinkTarget: sm.Target,
 		}
@@ -845,7 +844,7 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 		if err := c.ReadProto(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest), t); err != nil {
 			return nil, err
 		}
-		dirouts, err := tree.FlattenTree(t, dir.Path)
+		dirouts, err := c.FlattenTree(t, dir.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -857,7 +856,7 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 }
 
 // DownloadDirectory downloads the entire directory of given digest.
-func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) (map[string]*tree.Output, error) {
+func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) (map[string]*TreeOutput, error) {
 	dir := &repb.Directory{}
 	if err := c.ReadProto(ctx, d, dir); err != nil {
 		return nil, fmt.Errorf("digest %v cannot be mapped to a directory proto: %v", d, err)
@@ -868,7 +867,7 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoo
 		return nil, err
 	}
 
-	outputs, err := tree.FlattenTree(&repb.Tree{
+	outputs, err := c.FlattenTree(&repb.Tree{
 		Root:     dir,
 		Children: dirs,
 	}, "")
@@ -894,9 +893,9 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	return c.downloadOutputs(ctx, outs, execRoot, cache)
 }
 
-func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*tree.Output, execRoot string, cache filemetadata.Cache) error {
-	var symlinks, copies []*tree.Output
-	downloads := make(map[digest.Digest]*tree.Output)
+func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutput, execRoot string, cache filemetadata.Cache) error {
+	var symlinks, copies []*TreeOutput
+	downloads := make(map[digest.Digest]*TreeOutput)
 	for _, out := range outs {
 		path := filepath.Join(execRoot, out.Path)
 		if out.IsEmptyDirectory {
@@ -975,7 +974,7 @@ func copyFile(srcExecRoot, dstExecRoot, from, to string, mode os.FileMode) error
 type downloadRequest struct {
 	digest   digest.Digest
 	execRoot string
-	output   *tree.Output
+	output   *TreeOutput
 	meta     *requestMetadata
 	wait     chan<- error
 }
@@ -1091,7 +1090,7 @@ func (c *Client) download(data []*downloadRequest) {
 	var dgs []digest.Digest
 
 	if bool(c.useBatchOps) && bool(c.UtilizeLocality) {
-		paths := make([]*tree.Output, 0, len(data))
+		paths := make([]*TreeOutput, 0, len(data))
 		for _, r := range data {
 			paths = append(paths, r.output)
 		}
@@ -1151,11 +1150,11 @@ func (c *Client) download(data []*downloadRequest) {
 
 // This is a legacy function used only when UnifiedCASOps=false.
 // It will be removed when UnifiedCASOps=true is stable.
-func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
+func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) error {
 	var dgs []digest.Digest
 
 	if bool(c.useBatchOps) && bool(c.UtilizeLocality) {
-		paths := make([]*tree.Output, 0, len(outputs))
+		paths := make([]*TreeOutput, 0, len(outputs))
 		for _, output := range outputs {
 			paths = append(paths, output)
 		}
@@ -1240,7 +1239,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 }
 
 // DownloadFiles downloads the output files under |execRoot|.
-func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*tree.Output) error {
+func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) error {
 	if !c.UnifiedCASOps {
 		return c.downloadNonUnified(ctx, execRoot, outputs)
 	}
