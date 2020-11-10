@@ -357,6 +357,7 @@ func TestComputeMerkleTree(t *testing.T) {
 		wantCacheCalls  map[string]int
 		// The expected wantStats.TotalInputBytes is calculated by adding the marshalled rootDir size.
 		wantStats *client.TreeStats
+		treeOpts  *client.TreeSymlinkOpts
 	}{
 		{
 			desc:            "Empty directory",
@@ -491,6 +492,35 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "File is symlink (preserved)",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "fooSym", isSymlink: true, symlinkTarget: "fooDir/foo"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir", "fooSym"},
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDgPb}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "fooSym", Target: "fooDir/foo"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"fooSym":     1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2,
+				InputFiles:       1,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved: true,
+			},
+		},
+		{
 			desc: "File invalid symlink",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
@@ -514,6 +544,37 @@ func TestComputeMerkleTree(t *testing.T) {
 				InputDirectories: 2,
 				InputFiles:       2,
 				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size,
+			},
+		},
+		{
+			desc: "Allow dangling symlink",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "invalidSym", isSymlink: true, symlinkTarget: "fooDir/invalid"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir", "invalidSym"},
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDgPb}},
+				Files:       nil,
+				Symlinks:    []*repb.SymlinkNode{{Name: "invalidSym", Target: "fooDir/invalid"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"invalidSym": 1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2,
+				InputFiles:       1,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved:            true,
+				AllowDanglingSymlink: true,
 			},
 		},
 		{
@@ -568,6 +629,66 @@ func TestComputeMerkleTree(t *testing.T) {
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
+			},
+		},
+		{
+			desc: "Directory is symlink (preserved)",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "fooSymDir", isSymlink: true, symlinkTarget: "fooDir"},
+			},
+			spec: &command.InputSpec{
+				// Without specifying the actual directory "fooDir", we will not
+				// delve into "fooSymDir". Therefore rootDir only contains a
+				// single symlink.
+				Inputs: []string{"fooSymDir"},
+			},
+			rootDir: &repb.Directory{
+				Symlinks: []*repb.SymlinkNode{{Name: "fooSymDir", Target: "fooDir"}},
+			},
+			additionalBlobs: [][]byte{},
+			wantCacheCalls: map[string]int{
+				"fooSymDir": 1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 1,
+				InputFiles:       0,
+				InputSymlinks:    1,
+				TotalInputBytes:  0,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved: true,
+			},
+		},
+		{
+			desc: "Directory is symlink (preserved + traversed)",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "fooSymDir", isSymlink: true, symlinkTarget: "fooDir"},
+			},
+			spec: &command.InputSpec{
+				// The actual directory "fooDir" is listed here, so its content
+				// will be traversed and reflected in the root.
+				Inputs: []string{"fooDir", "fooSymDir"},
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDgPb}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "fooSymDir", Target: "fooDir"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"fooSymDir":  1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2,
+				InputFiles:       1,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved: true,
 			},
 		},
 		{
@@ -904,7 +1025,9 @@ func TestComputeMerkleTree(t *testing.T) {
 
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
-
+			if tc.treeOpts != nil {
+				tc.treeOpts.Apply(e.Client.GrpcClient)
+			}
 			gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, cache)
 			if err != nil {
 				t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)

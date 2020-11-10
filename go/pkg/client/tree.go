@@ -22,8 +22,9 @@ import (
 // tree later. It corresponds roughly to a *repb.Directory, but with pointers, not digests, used to
 // refer to other nodes.
 type treeNode struct {
-	files map[string]*fileNode
-	dirs  map[string]*treeNode
+	files    map[string]*fileNode
+	dirs     map[string]*treeNode
+	symlinks map[string]*symlinkNode
 }
 
 type fileNode struct {
@@ -31,9 +32,14 @@ type fileNode struct {
 	isExecutable bool
 }
 
+type symlinkNode struct {
+	target string
+}
+
 type fileSysNode struct {
 	file                 *fileNode
 	emptyDirectoryMarker bool
+	symlink              *symlinkNode
 }
 
 // TreeStats contains various stats/metadata of the constructed Merkle tree.
@@ -45,6 +51,8 @@ type TreeStats struct {
 	InputFiles int
 	// The total number of input directories.
 	InputDirectories int
+	// The total number of input symlinks
+	InputSymlinks int
 	// The overall number of bytes from all the inputs.
 	TotalInputBytes int64
 	// TODO(olaola): number of FileMetadata cache hits/misses go here.
@@ -52,7 +60,9 @@ type TreeStats struct {
 
 // TreeSymlinkOpts controls how symlinks are handled when constructing a tree.
 type TreeSymlinkOpts struct {
-	ConvertToFiles       bool
+	// By default, a symlink is converted into its targeted file.
+	// If true, preserve the symlink.
+	Preserved            bool
 	AllowDanglingSymlink bool
 }
 
@@ -71,7 +81,7 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, config TreeSymlinkOpts) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, opts TreeSymlinkOpts) error {
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	normPath, err := getRelPath(execRoot, absPath)
 	if err != nil {
@@ -79,13 +89,18 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 	meta := cache.Get(absPath)
 	t := command.FileInputType
-	if smd := meta.Symlink; smd != nil && smd.IsDangling {
-		return nil
-	}
-	if meta.Err != nil {
+	isSymlink := meta.Symlink != nil
+	isDanglingSymlink := isSymlink && meta.Symlink.IsDangling
+	if isDanglingSymlink {
+		if !(opts.Preserved && opts.AllowDanglingSymlink) {
+			return nil
+		}
+	} else if meta.Err != nil {
 		return meta.Err
 	}
-	if meta.IsDirectory {
+	if isSymlink && opts.Preserved {
+		t = command.SymlinkInputType
+	} else if meta.IsDirectory {
 		t = command.DirectoryInputType
 	}
 	if shouldIgnore(absPath, t, excl) {
@@ -98,6 +113,16 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 				isExecutable: meta.IsExecutable,
 			},
 		}
+		return nil
+	} else if t == command.SymlinkInputType {
+		fs[path] = &fileSysNode{
+			// TODO: How to handle a target with absolute path?
+			symlink: &symlinkNode{target: meta.Symlink.Target},
+		}
+		// NOTE: The target is not followed. It is the users' responsibility
+		// to explicitly list the target in their InputSpec. Also note that if
+		// a directory containing the target is specified, the entirety of that
+		// directory will be followed.
 		return nil
 	}
 	// Directory
@@ -190,10 +215,17 @@ func buildTree(files map[string]*fileSysNode) *treeNode {
 			node.dirs[base] = &treeNode{}
 			continue
 		}
-		if node.files == nil {
-			node.files = make(map[string]*fileNode)
+		if fn.file != nil {
+			if node.files == nil {
+				node.files = make(map[string]*fileNode)
+			}
+			node.files[base] = fn.file
+		} else {
+			if node.symlinks == nil {
+				node.symlinks = make(map[string]*symlinkNode)
+			}
+			node.symlinks[base] = fn.symlink
 		}
-		node.files[base] = fn.file
 	}
 	return root
 }
@@ -222,6 +254,12 @@ func packageTree(t *treeNode, chunkSize int, stats *TreeStats) (root digest.Dige
 		stats.TotalInputBytes += dg.Size
 	}
 	sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
+
+	for name, sn := range t.symlinks {
+		dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: sn.target})
+		stats.InputSymlinks++
+	}
+	sort.Slice(dir.Symlinks, func(i, j int) bool { return dir.Symlinks[i].Name < dir.Symlinks[j].Name })
 
 	ch, err := chunker.NewFromProto(dir, chunkSize)
 	if err != nil {

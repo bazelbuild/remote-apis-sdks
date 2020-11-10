@@ -172,6 +172,10 @@ func (s UnifiedCASOps) Apply(c *Client) {
 	c.UnifiedCASOps = s
 }
 
+func (o *TreeSymlinkOpts) Apply(c *Client) {
+	c.TreeSymlinkOpts = *o
+}
+
 // MaxBatchDigests is maximum amount of digests to batch in batched operations.
 type MaxBatchDigests int
 

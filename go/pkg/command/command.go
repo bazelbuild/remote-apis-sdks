@@ -31,6 +31,9 @@ const (
 
 	// FileInputType means only files match.
 	FileInputType
+
+	// SymlinkInputType means only symlink match.
+	SymlinkInputType
 )
 
 var inputTypes = [...]string{"UnspecifiedInputType", "DirectoryInputType", "FileInputType"}
