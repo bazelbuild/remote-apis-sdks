@@ -23,7 +23,7 @@ var IOBufferSize = 10 * 1024 * 1024
 var ErrEOF = errors.New("ErrEOF")
 
 // Compressor for full blobs
-var fullCompressor *zstd.Encoder
+var fullCompressor, _ = zstd.NewWriter(nil)
 
 type UploadEntry struct {
 	digest   digest.Digest
@@ -118,7 +118,8 @@ func chunkerFromBlob(blob []byte, compressed bool) *Chunker {
 	}
 
 	return &Chunker{
-		contents: contents,
+		contents:   contents,
+		compressed: compressed,
 	}
 }
 
@@ -135,14 +136,15 @@ func chunkerFromFile(path string, compressed bool) (*Chunker, error) {
 	}
 
 	return &Chunker{
-		r:    r,
-		path: path,
+		r:          r,
+		path:       path,
+		compressed: compressed,
 	}, nil
 }
 
 // String returns an identifiable representation of the Chunker.
 func (c *Chunker) String() string {
-	size := fmt.Sprintf("<%d bytes>", c.ue.digest.Size)
+	size := fmt.Sprintf("<%d bytes> | <compressed: %v>", c.ue.digest.Size, c.compressed)
 	if c.path == "" {
 		return size
 	}
