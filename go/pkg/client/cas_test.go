@@ -20,7 +20,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"golang.org/x/sync/errgroup"
@@ -884,15 +883,15 @@ func TestFlattenActionOutputs(t *testing.T) {
 	if err != nil {
 		t.Errorf("error in FlattenActionOutputs: %s", err)
 	}
-	wantOutputs := map[string]*tree.Output{
-		"dir/a/b/foo": &tree.Output{Digest: fooDigest, IsExecutable: true},
-		"dir/a/bar":   &tree.Output{Digest: barDigest},
-		"dir/b/foo":   &tree.Output{Digest: fooDigest, IsExecutable: true},
-		"dir2/b/foo":  &tree.Output{Digest: fooDigest, IsExecutable: true},
-		"dir2/bar":    &tree.Output{Digest: barDigest},
-		"foo":         &tree.Output{Digest: fooDigest},
-		"x/a":         &tree.Output{SymlinkTarget: "../dir/a"},
-		"x/bar":       &tree.Output{SymlinkTarget: "../dir/a/bar"},
+	wantOutputs := map[string]*client.TreeOutput{
+		"dir/a/b/foo": &client.TreeOutput{Digest: fooDigest, IsExecutable: true},
+		"dir/a/bar":   &client.TreeOutput{Digest: barDigest},
+		"dir/b/foo":   &client.TreeOutput{Digest: fooDigest, IsExecutable: true},
+		"dir2/b/foo":  &client.TreeOutput{Digest: fooDigest, IsExecutable: true},
+		"dir2/bar":    &client.TreeOutput{Digest: barDigest},
+		"foo":         &client.TreeOutput{Digest: fooDigest},
+		"x/a":         &client.TreeOutput{SymlinkTarget: "../dir/a"},
+		"x/bar":       &client.TreeOutput{SymlinkTarget: "../dir/a/bar"},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenActionOutputs gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))
@@ -1129,7 +1128,7 @@ func TestDownloadDirectory(t *testing.T) {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
 
-	if diff := cmp.Diff(outputs, map[string]*tree.Output{"foo": {
+	if diff := cmp.Diff(outputs, map[string]*client.TreeOutput{"foo": {
 		Digest:       fooDigest,
 		Path:         "foo",
 		IsExecutable: true,
@@ -1532,7 +1531,7 @@ func TestDownloadFiles(t *testing.T) {
 	}
 	defer os.RemoveAll(execRoot)
 
-	if err := c.DownloadFiles(ctx, execRoot, map[digest.Digest]*tree.Output{
+	if err := c.DownloadFiles(ctx, execRoot, map[digest.Digest]*client.TreeOutput{
 		fooDigest: {Digest: fooDigest, Path: "foo", IsExecutable: true},
 		barDigest: {Digest: barDigest, Path: "bar"},
 	}); err != nil {

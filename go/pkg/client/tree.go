@@ -1,5 +1,5 @@
 // Package tree provides functionality for constructing a Merkle tree of uploadable inputs.
-package tree
+package client
 
 import (
 	"errors"
@@ -36,11 +36,11 @@ type fileSysNode struct {
 	emptyDirectoryMarker bool
 }
 
-// Stats contains various stats/metadata of the constructed Merkle tree.
+// TreeStats contains various stats/metadata of the constructed Merkle tree.
 // Note that these stats count the overall input tree, even if some parts of it are not unique.
 // For example, if a file "foo" of 10 bytes occurs 5 times in the tree, it will be counted as 5
 // InputFiles and 50 TotalInputBytes.
-type Stats struct {
+type TreeStats struct {
 	// The total number of input files.
 	InputFiles int
 	// The total number of input directories.
@@ -109,8 +109,8 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 }
 
 // ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as Chunkers.
-func ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache filemetadata.Cache) (root digest.Digest, inputs []*chunker.Chunker, stats *Stats, err error) {
-	stats = &Stats{}
+func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache filemetadata.Cache) (root digest.Digest, inputs []*chunker.Chunker, stats *TreeStats, err error) {
+	stats = &TreeStats{}
 	fs := make(map[string]*fileSysNode)
 	for _, i := range is.VirtualInputs {
 		if i.Path == "" {
@@ -182,7 +182,7 @@ func buildTree(files map[string]*fileSysNode) *treeNode {
 	return root
 }
 
-func packageTree(t *treeNode, chunkSize int, stats *Stats) (root digest.Digest, blobs map[digest.Digest]*chunker.Chunker, err error) {
+func packageTree(t *treeNode, chunkSize int, stats *TreeStats) (root digest.Digest, blobs map[digest.Digest]*chunker.Chunker, err error) {
 	dir := &repb.Directory{}
 	blobs = make(map[digest.Digest]*chunker.Chunker)
 
@@ -218,8 +218,8 @@ func packageTree(t *treeNode, chunkSize int, stats *Stats) (root digest.Digest, 
 	return dg, blobs, nil
 }
 
-// Output represents a leaf output node in a nested directory structure (a file, a symlink, or an empty directory).
-type Output struct {
+// TreeOutput represents a leaf output node in a nested directory structure (a file, a symlink, or an empty directory).
+type TreeOutput struct {
 	Digest           digest.Digest
 	Path             string
 	IsExecutable     bool
@@ -230,7 +230,7 @@ type Output struct {
 // FlattenTree takes a Tree message and calculates the relative paths of all the files to
 // the tree root. Note that only files/symlinks/empty directories are included in the returned slice,
 // not the intermediate directories. Directories containing only other directories will be omitted.
-func FlattenTree(tree *repb.Tree, rootPath string) (map[string]*Output, error) {
+func (c *Client) FlattenTree(tree *repb.Tree, rootPath string) (map[string]*TreeOutput, error) {
 	root, err := digest.NewFromMessage(tree.Root)
 	if err != nil {
 		return nil, err
@@ -247,7 +247,7 @@ func FlattenTree(tree *repb.Tree, rootPath string) (map[string]*Output, error) {
 	return flattenTree(root, rootPath, dirs)
 }
 
-func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*repb.Directory) (map[string]*Output, error) {
+func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*repb.Directory) (map[string]*TreeOutput, error) {
 	// Create a queue of unprocessed directories, along with their flattened
 	// path names.
 	type queueElem struct {
@@ -257,8 +257,8 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 	queue := []*queueElem{}
 	queue = append(queue, &queueElem{d: root, p: rootPath})
 
-	// Process the queue, recording all flattened Outputs as we go.
-	flatFiles := make(map[string]*Output)
+	// Process the queue, recording all flattened TreeOutputs as we go.
+	flatFiles := make(map[string]*TreeOutput)
 	for len(queue) > 0 {
 		flatDir := queue[0]
 		queue = queue[1:]
@@ -270,7 +270,7 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 
 		// Check whether this is an empty directory.
 		if len(dir.Files)+len(dir.Directories)+len(dir.Symlinks) == 0 {
-			flatFiles[flatDir.p] = &Output{
+			flatFiles[flatDir.p] = &TreeOutput{
 				Path:             flatDir.p,
 				Digest:           digest.Empty,
 				IsEmptyDirectory: true,
@@ -279,7 +279,7 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 		}
 		// Add files to the set to return
 		for _, file := range dir.Files {
-			out := &Output{
+			out := &TreeOutput{
 				Path:         filepath.Join(flatDir.p, file.Name),
 				Digest:       digest.NewFromProtoUnvalidated(file.Digest),
 				IsExecutable: file.IsExecutable,
@@ -289,7 +289,7 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 
 		// Add symlinks to the set to return
 		for _, sm := range dir.Symlinks {
-			out := &Output{
+			out := &TreeOutput{
 				Path:          filepath.Join(flatDir.p, sm.Name),
 				SymlinkTarget: sm.Target,
 			}
@@ -344,7 +344,7 @@ func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, child
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
 // The paths have to be relative to execRoot.
 // It also populates the remote ActionResult, packaging output directories as trees where required.
-func ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cache filemetadata.Cache) (map[digest.Digest]*chunker.Chunker, *repb.ActionResult, error) {
+func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cache filemetadata.Cache) (map[digest.Digest]*chunker.Chunker, *repb.ActionResult, error) {
 	outs := make(map[digest.Digest]*chunker.Chunker)
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {

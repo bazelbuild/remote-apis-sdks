@@ -1,4 +1,4 @@
-package tree
+package client_test
 
 import (
 	"io/ioutil"
@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
@@ -200,7 +202,11 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 
 	gotBlobs := make(map[digest.Digest][]byte)
 	cache := newCallCountingMetadataCache(root, t)
-	gotRootDg, inputs, stats, err := ComputeMerkleTree(root, inputSpec, chunker.DefaultChunkSize, cache)
+
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+
+	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, chunker.DefaultChunkSize, cache)
 	if err != nil {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
@@ -239,7 +245,7 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 	if diff := cmp.Diff(wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("ComputeMerkleTree(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
 	}
-	wantStats := &Stats{
+	wantStats := &client.TreeStats{
 		InputDirectories: 6,
 		InputFiles:       1,
 		TotalInputBytes:  fileDg.Size + aDirDg.Size + bDirDg.Size + cDirDg.Size,
@@ -294,7 +300,11 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 
 	gotBlobs := make(map[digest.Digest][]byte)
 	cache := newCallCountingMetadataCache(root, t)
-	gotRootDg, inputs, stats, err := ComputeMerkleTree(root, inputSpec, chunker.DefaultChunkSize, cache)
+
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+
+	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, chunker.DefaultChunkSize, cache)
 	if err != nil {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
@@ -325,7 +335,7 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 	if len(cache.calls) != 0 {
 		t.Errorf("ComputeMerkleTree(...) gave diff on file metadata cache access (want 0, got %v)", cache.calls)
 	}
-	wantStats := &Stats{
+	wantStats := &client.TreeStats{
 		InputDirectories: 6,
 		TotalInputBytes:  aDirDg.Size + bDirDg.Size + cDirDg.Size,
 	}
@@ -346,7 +356,7 @@ func TestComputeMerkleTree(t *testing.T) {
 		additionalBlobs [][]byte
 		wantCacheCalls  map[string]int
 		// The expected wantStats.TotalInputBytes is calculated by adding the marshalled rootDir size.
-		wantStats *Stats
+		wantStats *client.TreeStats
 	}{
 		{
 			desc:            "Empty directory",
@@ -354,7 +364,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec:            &command.InputSpec{},
 			rootDir:         &repb.Directory{},
 			additionalBlobs: nil,
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 1,
 			},
 		},
@@ -373,7 +383,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"foo": 1,
 				"bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 1,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + barDg.Size,
@@ -399,7 +409,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"barDir":     1,
 				"barDir/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + barDg.Size + fooDirDg.Size + barDirDg.Size,
@@ -424,7 +434,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"fooDir/foo": 1,
 				"barDir/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + barDg.Size + fooDirDg.Size + barDirDg.Size,
@@ -449,7 +459,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"fooDir/foo": 1,
 				"foo":        1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 2,
 				InputFiles:       2,
 				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size,
@@ -474,7 +484,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"fooDir/foo": 1,
 				"foo":        1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 2,
 				InputFiles:       2,
 				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size,
@@ -500,7 +510,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"fooDir/foo": 1,
 				"foo":        1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 2,
 				InputFiles:       2,
 				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size,
@@ -527,7 +537,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"barDir":     1,
 				"barDir/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
@@ -554,7 +564,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"barDir":     1,
 				"barDir/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
@@ -582,7 +592,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"foobarDir/foo": 1,
 				"foobarDir/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       3,
 				TotalInputBytes:  2*fooDg.Size + fooDirDg.Size + barDg.Size + foobarDirDg.Size,
@@ -608,7 +618,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"fooDir2":     1,
 				"fooDir2/foo": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  2*fooDg.Size + 2*fooDirDg.Size,
@@ -633,7 +643,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"fooDir":     1,
 				"fooDir/foo": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 2,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + 2*fooDirDg.Size,
@@ -666,7 +676,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"barDir/bar":     1,
 				"barDir/bar.txt": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
@@ -696,7 +706,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"barDir":     1,
 				"barDir/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 2,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + barDg.Size + barDirDg.Size,
@@ -725,7 +735,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"barDir":     1,
 				"barDir/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 2,
 				InputFiles:       1,
 				TotalInputBytes:  barDg.Size + barDirDg.Size,
@@ -744,7 +754,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
@@ -774,7 +784,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"barDir":     1,
 				"barDir/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
@@ -793,7 +803,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
@@ -861,7 +871,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"k/bar": 1,
 				"l/bar": 1,
 			},
-			wantStats: &Stats{
+			wantStats: &client.TreeStats{
 				InputDirectories: 7,
 				InputFiles:       12,
 				TotalInputBytes:  12*fooDg.Size + 3*fooDirDg.Size + 3*barDirDg.Size,
@@ -891,7 +901,11 @@ func TestComputeMerkleTree(t *testing.T) {
 
 			gotBlobs := make(map[digest.Digest][]byte)
 			cache := newCallCountingMetadataCache(root, t)
-			gotRootDg, inputs, stats, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, cache)
+
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+
+			gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, cache)
 			if err != nil {
 				t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 			}
@@ -971,7 +985,10 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
 		t.Run(tc.desc, func(t *testing.T) {
-			if _, _, _, err := ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, filemetadata.NewNoopCache()); err == nil {
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+
+			if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, filemetadata.NewNoopCache()); err == nil {
 				t.Errorf("ComputeMerkleTree(%v) succeeded, want error", tc.spec)
 			}
 		})
@@ -1026,19 +1043,23 @@ func TestFlattenTreeRepeated(t *testing.T) {
 		Root:     root,
 		Children: []*repb.Directory{dirA, dirB, dirC},
 	}
-	outputs, err := FlattenTree(tree, "x")
+
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+
+	outputs, err := e.Client.GrpcClient.FlattenTree(tree, "x")
 	if err != nil {
 		t.Errorf("FlattenTree gave error %v", err)
 	}
-	wantOutputs := map[string]*Output{
-		"x/baz":     &Output{Digest: bazDigest},
-		"x/a/b/c":   &Output{IsEmptyDirectory: true, Digest: digest.Empty},
-		"x/a/b/foo": &Output{Digest: fooDigest},
-		"x/a/b/bar": &Output{Digest: barDigest, IsExecutable: true},
-		"x/b/c":     &Output{IsEmptyDirectory: true, Digest: digest.Empty},
-		"x/b/foo":   &Output{Digest: fooDigest},
-		"x/b/bar":   &Output{Digest: barDigest, IsExecutable: true},
-		"x/c":       &Output{IsEmptyDirectory: true, Digest: digest.Empty},
+	wantOutputs := map[string]*client.TreeOutput{
+		"x/baz":     &client.TreeOutput{Digest: bazDigest},
+		"x/a/b/c":   &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
+		"x/a/b/foo": &client.TreeOutput{Digest: fooDigest},
+		"x/a/b/bar": &client.TreeOutput{Digest: barDigest, IsExecutable: true},
+		"x/b/c":     &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
+		"x/b/foo":   &client.TreeOutput{Digest: fooDigest},
+		"x/b/bar":   &client.TreeOutput{Digest: barDigest, IsExecutable: true},
+		"x/c":       &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenTree gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))
@@ -1149,7 +1170,10 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 
 			gotBlobs := make(map[digest.Digest][]byte)
 			cache := newCallCountingMetadataCache(root, t)
-			chunkers, gotResult, err := ComputeOutputsToUpload(root, tc.paths, chunker.DefaultChunkSize, cache)
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+
+			chunkers, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.paths, chunker.DefaultChunkSize, cache)
 			if err != nil {
 				t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
@@ -1254,7 +1278,10 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 
 			gotBlobs := make(map[digest.Digest][]byte)
 			cache := newCallCountingMetadataCache(root, t)
-			chunkers, gotResult, err := ComputeOutputsToUpload(root, []string{"a/b/fooDir"}, chunker.DefaultChunkSize, cache)
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+
+			chunkers, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, []string{"a/b/fooDir"}, chunker.DefaultChunkSize, cache)
 			if err != nil {
 				t.Fatalf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}

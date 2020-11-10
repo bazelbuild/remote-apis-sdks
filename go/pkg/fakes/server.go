@@ -15,7 +15,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc"
@@ -160,7 +159,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		}
 	}
 
-	root, inputs, _, err := tree.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, int(e.Client.GrpcClient.ChunkMaxSize), e.Client.FileMetadataCache)
+	root, inputs, _, err := e.Client.GrpcClient.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, int(e.Client.GrpcClient.ChunkMaxSize), e.Client.FileMetadataCache)
 	if err != nil {
 		e.t.Fatalf("error building input tree in fake setup: %v", err)
 		return digest.Empty, digest.Empty

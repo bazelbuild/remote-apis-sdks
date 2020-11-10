@@ -19,7 +19,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/ptypes"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
@@ -407,7 +406,7 @@ func (c *Client) getInputTree(ctx context.Context, root *repb.Digest) (string, [
 
 func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, []string, error) {
 	var res bytes.Buffer
-	outputs, err := tree.FlattenTree(t, "")
+	outputs, err := c.GrpcClient.FlattenTree(t, "")
 	if err != nil {
 		return "", nil, err
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/tree"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
@@ -147,7 +146,7 @@ func (ec *Context) computeInputs() error {
 	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s %s> Command digest: %s", cmdID, executionID, cmdDg)
 	log.V(1).Infof("%s %s> Computing input Merkle tree...", cmdID, executionID)
-	root, blobs, stats, err := tree.ComputeMerkleTree(ec.cmd.ExecRoot, ec.cmd.InputSpec, chunkSize, ec.client.FileMetadataCache)
+	root, blobs, stats, err := ec.client.GrpcClient.ComputeMerkleTree(ec.cmd.ExecRoot, ec.cmd.InputSpec, chunkSize, ec.client.FileMetadataCache)
 	if err != nil {
 		return err
 	}
@@ -230,7 +229,7 @@ func (ec *Context) UpdateCachedResult() {
 	defer func() { ec.Metadata.EventTimes[command.EventUpdateCachedResult].To = time.Now() }()
 	chunkSize := int(ec.client.GrpcClient.ChunkMaxSize)
 	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
-	blobs, resPb, err := tree.ComputeOutputsToUpload(ec.cmd.ExecRoot, outPaths, chunkSize, ec.client.FileMetadataCache)
+	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, outPaths, chunkSize, ec.client.FileMetadataCache)
 	if err != nil {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
