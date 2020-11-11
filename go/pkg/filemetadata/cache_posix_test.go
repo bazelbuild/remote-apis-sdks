@@ -7,12 +7,13 @@ import (
 	"os"
 	"testing"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/test_util"
 	"github.com/google/go-cmp/cmp"
 )
 
 func TestExecutableCacheLoad(t *testing.T) {
 	c := NewSingleFlightCache()
-	filename, err := createFile(t, true, "")
+	filename, err := test_util.CreateFile(t, true, "")
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
