@@ -7,6 +7,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//go/pkg/digest:go_default_library",
+        "//go/pkg/reader:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
     ],
 )
