@@ -21,6 +21,7 @@ go_library(
         "@com_github_golang_glog//:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
         "@com_github_golang_protobuf//ptypes:go_default_library_gen",
+        "@com_github_klauspost_compress//zstd:go_default_library",
         "@com_github_pborman_uuid//:go_default_library",
         "@go_googleapis//google/bytestream:bytestream_go_proto",
         "@go_googleapis//google/longrunning:longrunning_go_proto",

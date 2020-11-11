@@ -100,3 +100,9 @@ def remote_apis_sdks_go_deps():
         commit = "09ad026a62f0561b7f7e276569eda11a6afc9773",
         importpath = "cloud.google.com/go",
     )
+    _maybe(
+        go_repository,
+        name = "com_github_klauspost_compress",
+        importpath = "github.com/klauspost/compress",
+        tag = "v1.11.2",
+    )
