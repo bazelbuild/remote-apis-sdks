@@ -217,7 +217,7 @@ func TestRead(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+		testFunc := func(t *testing.T) {
 			*fake = tc.fake
 			fake.Validate(t)
 
@@ -243,7 +243,17 @@ func TestRead(t *testing.T) {
 			if !bytes.Equal(want, got) {
 				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave diff: want %v, got %v", tc.offset, tc.limit, want, got)
 			}
-		})
+		}
+
+		// Harder to write in a for loop since it -1/0 isn't an intuitive "enabled/disabled"
+		c.CompressedBytestreamThreshold = -1
+		t.Run(tc.name+" - no compression", testFunc)
+		if tc.limit == 0 {
+			// Limit tests don't work well with compression, as the limit refers to the compressed bytes
+			// while offset, per spec, refers to uncompressed bytes.
+			c.CompressedBytestreamThreshold = 0
+			t.Run(tc.name+" - with compression", testFunc)
+		}
 	}
 }
 
