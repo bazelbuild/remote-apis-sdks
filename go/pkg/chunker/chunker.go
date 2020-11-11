@@ -2,13 +2,14 @@
 package chunker
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/reader"
 	"github.com/golang/protobuf/proto"
 )
 
@@ -25,19 +26,17 @@ var ErrEOF = errors.New("ErrEOF")
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
 type Chunker struct {
 	chunkSize int
-	r         reader.ReadSeeker
+	reader    *bufio.Reader
 	// An optional cache of the full data. It will be present in these cases:
 	// * The Chunker was initialized from a []byte.
 	// * Chunker.FullData was called at least once.
 	// * Next() was called and the read was less than IOBufferSize.
 	// Once contents are initialized, they are immutable.
-	contents []byte
-	// The digest carried here is for easy of data access *only*. It is never
-	// checked anywhere in the Chunker logic.
-	digest     digest.Digest
-	offset     int64
-	reachedEOF bool
-	path       string
+	contents    []byte
+	digest      digest.Digest
+	offset      int64
+	initialized bool
+	path        string
 }
 
 // NewFromBlob initializes a Chunker from the provided bytes buffer.
@@ -55,10 +54,9 @@ func NewFromBlob(blob []byte, chunkSize int) *Chunker {
 }
 
 // NewFromFile initializes a Chunker from the provided file.
-// The provided Digest does NOT have to match the contents of the file! It is
-// for informational purposes only. Chunker won't check Digest information at
-// any time. This means that late errors due to mismatch of digest and
-// contents are possible.
+// The provided Digest has to match the contents of the file! If the size of the actual contents is
+// shorter than the provided Digest size, the Chunker will error on Next(), but otherwise the
+// results are unspecified.
 func NewFromFile(path string, dg digest.Digest, chunkSize int) *Chunker {
 	if chunkSize < 1 {
 		chunkSize = DefaultChunkSize
@@ -67,7 +65,6 @@ func NewFromFile(path string, dg digest.Digest, chunkSize int) *Chunker {
 		chunkSize = IOBufferSize
 	}
 	return &Chunker{
-		r:         reader.NewFileReadSeeker(path, IOBufferSize),
 		chunkSize: chunkSize,
 		digest:    dg,
 		path:      path,
@@ -102,6 +99,10 @@ func (c *Chunker) Offset() int64 {
 	return c.offset
 }
 
+func (c *Chunker) bytesLeft() int64 {
+	return c.digest.Size - c.offset
+}
+
 // ChunkSize returns the maximum size of each chunk.
 func (c *Chunker) ChunkSize() int {
 	return c.chunkSize
@@ -111,11 +112,9 @@ func (c *Chunker) ChunkSize() int {
 // Useful for upload retries.
 // TODO(olaola): implement Seek(offset) when we have resumable uploads.
 func (c *Chunker) Reset() {
-	if c.r != nil {
-		c.r.SeekOffset(0)
-	}
+	c.reader = nil
 	c.offset = 0
-	c.reachedEOF = false
+	c.initialized = false
 }
 
 // FullData returns the overall (non-chunked) underlying data. The Chunker is Reset.
@@ -126,21 +125,15 @@ func (c *Chunker) FullData() ([]byte, error) {
 		return c.contents, nil
 	}
 	var err error
-	if !c.r.IsInitialized() {
-		err = c.r.Initialize()
-	}
-	if err != nil {
-		return nil, err
-	}
 	// Cache contents so that the next call to FullData() doesn't result in file read.
-	c.contents, err = ioutil.ReadAll(c.r)
+	c.contents, err = ioutil.ReadFile(c.path)
 	return c.contents, err
 }
 
 // HasNext returns whether a subsequent call to Next will return a valid chunk. Always true for a
 // newly created Chunker.
 func (c *Chunker) HasNext() bool {
-	return !c.reachedEOF
+	return !c.initialized || c.bytesLeft() > 0
 }
 
 // Chunk is a piece of a byte[] blob suitable for being uploaded.
@@ -156,50 +149,47 @@ func (c *Chunker) Next() (*Chunk, error) {
 	if !c.HasNext() {
 		return nil, ErrEOF
 	}
+	c.initialized = true
 	if c.digest.Size == 0 {
-		c.reachedEOF = true
 		return &Chunk{}, nil
 	}
-
-	var data []byte
-	if c.contents != nil {
-		// As long as we have data in memory, it's much more efficient to return
-		// a view slice than to copy it around. Contents are immutable so it's okay
-		// to return the slice.
-		endRead := int(c.offset) + c.chunkSize
-		if endRead >= len(c.contents) {
-			endRead = len(c.contents)
-			c.reachedEOF = true
-		}
-		data = c.contents[c.offset:endRead]
-	} else {
-		if !c.r.IsInitialized() {
-			err := c.r.Initialize()
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// We don't need to check the amount of bytes read, as ReadFull will yell if
-		// it's diff than len(data).
-		data = make([]byte, c.chunkSize)
-		n, err := io.ReadFull(c.r, data)
-		data = data[:n]
-		// Cache the contents to avoid further IO for small files.
-		if err == io.ErrUnexpectedEOF || err == io.EOF {
-			if c.offset == 0 {
-				c.contents = data
-			}
-			c.reachedEOF = true
-		} else if err != nil {
+	// Empty contents means we don't have the full data cache, and must read it from a file.
+	if c.contents == nil && c.reader == nil { // Need to initialize the reader.
+		f, err := os.Open(c.path)
+		if err != nil {
 			return nil, err
 		}
+		c.reader = bufio.NewReaderSize(f, IOBufferSize)
 	}
-
+	bytesLeft := c.bytesLeft()
+	bytesToSend := c.chunkSize
+	if bytesLeft < int64(bytesToSend) {
+		bytesToSend = int(bytesLeft)
+	}
+	var data []byte
+	if c.contents == nil { // Data is being read from a file rather than static contents cache.
+		if c.offset == 0 && c.digest.Size <= int64(IOBufferSize) {
+			data = make([]byte, c.digest.Size)
+			c.contents = data // Cache the contents to avoid Reads on future Resets.
+		} else {
+			data = make([]byte, bytesToSend)
+		}
+		n, err := io.ReadFull(c.reader, data)
+		if err != nil {
+			return nil, err
+		}
+		if n < bytesToSend {
+			return nil, fmt.Errorf("only read %d bytes from %s, expected %d", n, c.path, bytesToSend)
+		}
+	} else {
+		// Data is being read from the cache. Contents are immutable so it's okay to return a slice.
+		data = c.contents[c.offset : int(c.offset)+bytesToSend]
+	}
 	res := &Chunk{
 		Offset: c.offset,
-		Data:   data,
+		// Reading only up to bytesToSend in case contents contains the entire data.
+		Data: data[:bytesToSend],
 	}
-	c.offset += int64(len(data))
+	c.offset += int64(bytesToSend)
 	return res, nil
 }
