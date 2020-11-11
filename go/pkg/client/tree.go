@@ -93,13 +93,16 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 			return nil
 		}
 		// Right now we never treat a dangling symlink as an error. If we
-		// choose not to preserve the symlink, it is simply skipped. Otherwise
-		// we will create a corresponding symlink node in the tree.
+		// choose not to preserve the symlink, the path is simply skipped.
+		// Otherwise we will create a corresponding symlink node in the tree
+		// (even if the target does not exist).
 	} else if meta.Err != nil {
 		return meta.Err
 	}
 	t := command.FileInputType
 	if isSymlink && opts.Preserved {
+		// An implication of this is that, if a path is a symlink to a
+		// directory, then the symlink attribute takes precedence.
 		t = command.SymlinkInputType
 	} else if meta.IsDirectory {
 		t = command.DirectoryInputType
@@ -121,9 +124,8 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 			symlink: &symlinkNode{target: meta.Symlink.Target},
 		}
 		// NOTE: The target is not followed. It is the users' responsibility
-		// to explicitly list the target in their InputSpec. Also note that if
-		// a directory containing the target is specified, the entirety of that
-		// directory will be followed.
+		// to explicitly list the target in their InputSpec. This applies to
+		// symlinks to either a file or a directory.
 		return nil
 	}
 	// Directory
