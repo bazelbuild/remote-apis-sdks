@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
@@ -159,13 +160,17 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		}
 	}
 
-	root, inputs, _, err := e.Client.GrpcClient.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, int(e.Client.GrpcClient.ChunkMaxSize), e.Client.FileMetadataCache)
+	root, inputs, _, err := e.Client.GrpcClient.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, e.Client.FileMetadataCache)
 	if err != nil {
 		e.t.Fatalf("error building input tree in fake setup: %v", err)
 		return digest.Empty, digest.Empty
 	}
 	for _, inp := range inputs {
-		bytes, err := inp.FullData()
+		ch, err := chunker.NewFromUEntry(inp, false, int(e.Client.GrpcClient.ChunkMaxSize))
+		if err != nil {
+			e.t.Fatalf("error getting data from input entry: %v", err)
+		}
+		bytes, err := ch.FullData()
 		if err != nil {
 			e.t.Fatalf("error getting data from input chunker: %v", err)
 		}

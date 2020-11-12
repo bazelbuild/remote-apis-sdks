@@ -21,6 +21,41 @@ var IOBufferSize = 10 * 1024 * 1024
 // ErrEOF is returned when Next is called when HasNext is false.
 var ErrEOF = errors.New("ErrEOF")
 
+type UploadEntry struct {
+	digest   digest.Digest
+	contents []byte
+	path     string
+}
+
+// Digest returns the digest of the full data of this chunker.
+func (ue *UploadEntry) Digest() digest.Digest {
+	return ue.digest
+}
+
+func EntryFromBlob(blob []byte) *UploadEntry {
+	contents := make([]byte, len(blob))
+	copy(contents, blob)
+	return &UploadEntry{
+		contents: contents,
+		digest:   digest.NewFromBlob(blob),
+	}
+}
+
+func EntryFromProto(msg proto.Message) (*UploadEntry, error) {
+	blob, err := proto.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+	return EntryFromBlob(blob), nil
+}
+
+func EntryFromFile(dg digest.Digest, path string) *UploadEntry {
+	return &UploadEntry{
+		digest: dg,
+		path:   path,
+	}
+}
+
 // Chunker can be used to chunk an input into uploadable-size byte slices.
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
 type Chunker struct {
@@ -34,67 +69,64 @@ type Chunker struct {
 	contents []byte
 	// The digest carried here is for easy of data access *only*. It is never
 	// checked anywhere in the Chunker logic.
-	digest     digest.Digest
+	path       string
 	offset     int64
 	reachedEOF bool
-	path       string
+
+	ue         *UploadEntry
+	compressed bool
 }
 
-// NewFromBlob initializes a Chunker from the provided bytes buffer.
-func NewFromBlob(blob []byte, chunkSize int) *Chunker {
+func NewFromUEntry(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, error) {
+	if compressed {
+		return nil, errors.New("compression is not supported yet")
+	}
 	if chunkSize < 1 {
 		chunkSize = DefaultChunkSize
 	}
+	var c *Chunker
+	if ue.contents != nil {
+		c = chunkerFromBlob(ue.contents, compressed)
+	} else {
+		var err error
+		c, err = chunkerFromFile(ue.path, compressed)
+		if err != nil {
+			return nil, err
+		}
+
+		if chunkSize > IOBufferSize {
+			chunkSize = IOBufferSize
+		}
+	}
+
+	c.chunkSize = chunkSize
+	c.ue = ue
+	return c, nil
+}
+
+func chunkerFromBlob(blob []byte, compressed bool) *Chunker {
 	contents := make([]byte, len(blob))
 	copy(contents, blob)
 	return &Chunker{
-		contents:  contents,
-		chunkSize: chunkSize,
-		digest:    digest.NewFromBlob(blob),
+		contents: contents,
 	}
 }
 
-// NewFromFile initializes a Chunker from the provided file.
-// The provided Digest does NOT have to match the contents of the file! It is
-// for informational purposes only. Chunker won't check Digest information at
-// any time. This means that late errors due to mismatch of digest and
-// contents are possible.
-func NewFromFile(path string, dg digest.Digest, chunkSize int) *Chunker {
-	if chunkSize < 1 {
-		chunkSize = DefaultChunkSize
-	}
-	if chunkSize > IOBufferSize {
-		chunkSize = IOBufferSize
-	}
+func chunkerFromFile(path string, compressed bool) (*Chunker, error) {
+	r := reader.NewFileReadSeeker(path, IOBufferSize)
 	return &Chunker{
-		r:         reader.NewFileReadSeeker(path, IOBufferSize),
-		chunkSize: chunkSize,
-		digest:    dg,
-		path:      path,
-	}
-}
-
-// NewFromProto initializes a Chunker from the marshalled proto message.
-func NewFromProto(msg proto.Message, chunkSize int) (*Chunker, error) {
-	blob, err := proto.Marshal(msg)
-	if err != nil {
-		return nil, err
-	}
-	return NewFromBlob(blob, chunkSize), nil
+		r:    r,
+		path: path,
+	}, nil
 }
 
 // String returns an identifiable representation of the Chunker.
 func (c *Chunker) String() string {
-	size := fmt.Sprintf("<%d bytes>", c.digest.Size)
+	size := fmt.Sprintf("<%d bytes>", c.ue.digest.Size)
 	if c.path == "" {
 		return size
 	}
 	return fmt.Sprintf("%s: %s", size, c.path)
-}
-
-// Digest returns the digest of the full data of this chunker.
-func (c *Chunker) Digest() digest.Digest {
-	return c.digest
 }
 
 // Offset returns the current Chunker offset.
@@ -156,7 +188,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 	if !c.HasNext() {
 		return nil, ErrEOF
 	}
-	if c.digest.Size == 0 {
+	if c.ue.digest.Size == 0 {
 		c.reachedEOF = true
 		return &Chunk{}, nil
 	}

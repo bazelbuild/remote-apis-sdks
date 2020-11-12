@@ -35,7 +35,7 @@ type requestMetadata struct {
 }
 
 type uploadRequest struct {
-	c    *chunker.Chunker
+	ue   *chunker.UploadEntry
 	meta *requestMetadata
 	wait chan<- *uploadResponse
 }
@@ -47,8 +47,8 @@ type uploadResponse struct {
 }
 
 type uploadState struct {
-	data *chunker.Chunker
-	err  error
+	ue  *chunker.UploadEntry
+	err error
 
 	// mu protects clients. The field needs protection since it is updated by upload
 	// whenever new clients join, and iterated on by updateAndNotify in the end of each upload.
@@ -110,13 +110,13 @@ func updateAndNotify(st *uploadState, err error, missing bool) {
 	st.err = err
 	for i, cl := range st.clients {
 		cl <- &uploadResponse{
-			digest:  st.data.Digest(),
+			digest:  st.ue.Digest(),
 			missing: i == 0 && missing, // Only first client is reported the digest missing.
 			err:     err,
 		}
 	}
 	st.clients = nil
-	st.data = nil
+	st.ue = nil
 }
 
 func getUnifiedMetadata(metas []*requestMetadata) *requestMetadata {
@@ -154,7 +154,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 	var newUploads []digest.Digest
 	var metas []*requestMetadata
 	for _, req := range reqs {
-		dg := req.c.Digest()
+		dg := req.ue.Digest()
 		st, ok := c.casUploads[dg]
 		if ok {
 			st.mu.Lock()
@@ -167,7 +167,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 		} else {
 			st = &uploadState{
 				clients: []chan<- *uploadResponse{req.wait},
-				data:    req.c,
+				ue:      req.ue,
 			}
 			c.casUploads[dg] = st
 			newUploads = append(newUploads, dg)
@@ -225,7 +225,12 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				bchMap := make(map[digest.Digest][]byte)
 				for _, dg := range batch {
 					st := newStates[dg]
-					data, err := st.data.FullData()
+					ch, err := chunker.NewFromUEntry(st.ue, false, int(c.ChunkMaxSize))
+					if err != nil {
+						updateAndNotify(st, err, true)
+						continue
+					}
+					data, err := ch.FullData()
 					if err != nil {
 						updateAndNotify(st, err, true)
 						continue
@@ -239,9 +244,12 @@ func (c *Client) upload(reqs []*uploadRequest) {
 			} else {
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 				st := newStates[batch[0]]
-				ch := st.data
-				dg := ch.Digest()
-				err := c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
+				ch, err := chunker.NewFromUEntry(st.ue, false, int(c.ChunkMaxSize))
+				if err != nil {
+					updateAndNotify(st, err, true)
+				}
+				dg := st.ue.Digest()
+				err = c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
 				updateAndNotify(st, err, true)
 			}
 		}()
@@ -250,14 +258,18 @@ func (c *Client) upload(reqs []*uploadRequest) {
 
 // This function is only used when UnifiedCASOps is false. It will be removed
 // once UnifiedCASOps=true is stable.
-func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker) ([]digest.Digest, error) {
+func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.UploadEntry) ([]digest.Digest, error) {
 	var dgs []digest.Digest
 	chunkers := make(map[digest.Digest]*chunker.Chunker)
-	for _, c := range data {
-		dg := c.Digest()
+	for _, ue := range data {
+		dg := ue.Digest()
 		if _, ok := chunkers[dg]; !ok {
 			dgs = append(dgs, dg)
-			chunkers[dg] = c
+			ch, err := chunker.NewFromUEntry(ue, false, int(c.ChunkMaxSize))
+			if err != nil {
+				return nil, err
+			}
+			chunkers[dg] = ch
 		}
 	}
 
@@ -304,7 +316,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker)
 			} else {
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 				ch := chunkers[batch[0]]
-				dg := ch.Digest()
+				dg := batch[0]
 				if err := c.WriteChunked(eCtx, c.ResourceNameWrite(dg.Hash, dg.Size), ch); err != nil {
 					return err
 				}
@@ -326,7 +338,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.Chunker)
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
 // Returns a slice of the missing digests.
-func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) ([]digest.Digest, error) {
+func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.UploadEntry) ([]digest.Digest, error) {
 	if !c.UnifiedCASOps {
 		return c.uploadNonUnified(ctx, data...)
 	}
@@ -347,9 +359,9 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 	}
 	wait := make(chan *uploadResponse, uploads)
 	var missing []digest.Digest
-	for _, ch := range data {
+	for _, ue := range data {
 		req := &uploadRequest{
-			c:    ch,
+			ue:   ue,
 			meta: meta,
 			wait: wait,
 		}
@@ -386,11 +398,11 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.Chunker) 
 // * How to consistently distinguish in the API between should we use GetMissing or not?
 // * Should BatchWrite be a public method at all?
 func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
-	var chunkers []*chunker.Chunker
+	var uEntries []*chunker.UploadEntry
 	for _, blob := range blobs {
-		chunkers = append(chunkers, chunker.NewFromBlob(blob, int(c.ChunkMaxSize)))
+		uEntries = append(uEntries, chunker.EntryFromBlob(blob))
 	}
-	_, err := c.UploadIfMissing(ctx, chunkers...)
+	_, err := c.UploadIfMissing(ctx, uEntries...)
 	return err
 }
 
@@ -405,8 +417,12 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 
 // WriteBlob uploads a blob to the CAS.
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
-	ch := chunker.NewFromBlob(blob, int(c.ChunkMaxSize))
-	dg := ch.Digest()
+	ue := chunker.EntryFromBlob(blob)
+	dg := ue.Digest()
+	ch, err := chunker.NewFromUEntry(ue, false, int(c.ChunkMaxSize))
+	if err != nil {
+		return dg, err
+	}
 	return dg, c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
 }
 

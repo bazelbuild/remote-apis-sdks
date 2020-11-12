@@ -206,16 +206,20 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 
-	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, chunker.DefaultChunkSize, cache)
+	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, cache)
 	if err != nil {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
-	for _, ch := range inputs {
+	for _, ue := range inputs {
+		ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+		if err != nil {
+			t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+		}
 		blob, err := ch.FullData()
 		if err != nil {
 			t.Errorf("chunker %v FullData() returned error %v", ch, err)
 		}
-		gotBlobs[ch.Digest()] = blob
+		gotBlobs[ue.Digest()] = blob
 	}
 	if diff := cmp.Diff(aDirDg, gotRootDg); diff != "" {
 		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
@@ -304,16 +308,20 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 
-	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, chunker.DefaultChunkSize, cache)
+	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, cache)
 	if err != nil {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
-	for _, ch := range inputs {
+	for _, ue := range inputs {
+		ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+		if err != nil {
+			t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+		}
 		blob, err := ch.FullData()
 		if err != nil {
 			t.Errorf("chunker %v FullData() returned error %v", ch, err)
 		}
-		gotBlobs[ch.Digest()] = blob
+		gotBlobs[ue.Digest()] = blob
 	}
 	if diff := cmp.Diff(aDirDg, gotRootDg); diff != "" {
 		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
@@ -905,16 +913,20 @@ func TestComputeMerkleTree(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, cache)
+			gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, cache)
 			if err != nil {
 				t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 			}
-			for _, ch := range inputs {
+			for _, ue := range inputs {
+				ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+				if err != nil {
+					t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+				}
 				blob, err := ch.FullData()
 				if err != nil {
 					t.Errorf("chunker %v FullData() returned error %v", ch, err)
 				}
-				gotBlobs[ch.Digest()] = blob
+				gotBlobs[ue.Digest()] = blob
 			}
 			if diff := cmp.Diff(rootDg, gotRootDg); diff != "" {
 				t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
@@ -988,7 +1000,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, chunker.DefaultChunkSize, filemetadata.NewNoopCache()); err == nil {
+			if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, filemetadata.NewNoopCache()); err == nil {
 				t.Errorf("ComputeMerkleTree(%v) succeeded, want error", tc.spec)
 			}
 		})
@@ -1173,16 +1185,20 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			chunkers, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.paths, chunker.DefaultChunkSize, cache)
+			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.paths, cache)
 			if err != nil {
 				t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
-			for _, ch := range chunkers {
+			for _, ue := range inputs {
+				ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+				if err != nil {
+					t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+				}
 				blob, err := ch.FullData()
 				if err != nil {
 					t.Errorf("chunker %v FullData() returned error %v", ch, err)
 				}
-				gotBlobs[ch.Digest()] = blob
+				gotBlobs[ue.Digest()] = blob
 			}
 			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
@@ -1281,16 +1297,20 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			chunkers, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, []string{"a/b/fooDir"}, chunker.DefaultChunkSize, cache)
+			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, []string{"a/b/fooDir"}, cache)
 			if err != nil {
 				t.Fatalf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
-			for _, ch := range chunkers {
+			for _, ue := range inputs {
+				ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+				if err != nil {
+					t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+				}
 				blob, err := ch.FullData()
 				if err != nil {
 					t.Errorf("chunker %v FullData() returned error %v", ch, err)
 				}
-				gotBlobs[ch.Digest()] = blob
+				gotBlobs[ue.Digest()] = blob
 			}
 			if diff := cmp.Diff(tc.wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
