@@ -80,7 +80,10 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, opts TreeSymlinkOpts) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
+	if opts == nil {
+		opts = &TreeSymlinkOpts{}
+	}
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	normPath, err := getRelPath(execRoot, absPath)
 	if err != nil {

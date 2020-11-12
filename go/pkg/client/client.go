@@ -87,7 +87,7 @@ type Client struct {
 	// UnifiedCASOps specifies whether the client uploads/downloads files in the background
 	UnifiedCASOps UnifiedCASOps
 	// TreeSymlinkOpts controls how symlinks are handled when constructing a tree.
-	TreeSymlinkOpts     TreeSymlinkOpts
+	TreeSymlinkOpts     *TreeSymlinkOpts
 	serverCaps          *repb.ServerCapabilities
 	useBatchOps         UseBatchOps
 	casConcurrency      int64
@@ -173,9 +173,7 @@ func (s UnifiedCASOps) Apply(c *Client) {
 }
 
 func (o *TreeSymlinkOpts) Apply(c *Client) {
-	if o != nil {
-		c.TreeSymlinkOpts = *o
-	}
+	c.TreeSymlinkOpts = o
 }
 
 // MaxBatchDigests is maximum amount of digests to batch in batched operations.
