@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -78,6 +79,43 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 	return false
 }
 
+// getTargetRelPath returns the part of target that is relative to execRoot,
+// iff. target is under execRoot. Otherwise it returns an error.
+func getTargetRelPath(execRoot, symlink, target string) (string, error) {
+	if !filepath.IsAbs(target) {
+		target = filepath.Clean(filepath.Join(execRoot, target))
+	}
+	rel, err := filepath.Rel(execRoot, target)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("symlink=%q (target=%q) is not under execRoot=%q", symlink, target, execRoot)
+	}
+	return rel, nil
+}
+
+// preprocessSymlink returns two things: if the routine should continue, and if
+// there is an error to be reported back.
+func preprocessSymlink(execRoot, symlink string, meta *filemetadata.SymlinkMetadata, opts *TreeSymlinkOpts) (bool, error) {
+	if meta.IsDangling {
+		// For now, we do not treat a dangling symlink as an error. In the case
+		// where the symlink is not preserved (i.e. needs to be converted to a
+		// file), we simply ignore this path in the finalized tree.
+		return opts.Preserved, nil
+	}
+	if !opts.Preserved {
+		// We will convert the symlink to a normal file, so it doesn't matter
+		// where target is under execRoot or not.
+		return true, nil
+	}
+
+	if _, err := getTargetRelPath(execRoot, symlink, meta.Target); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
 func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
@@ -91,14 +129,14 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 	meta := cache.Get(absPath)
 	isSymlink := meta.Symlink != nil
-	if isSymlink && meta.Symlink.IsDangling {
-		if !opts.Preserved {
+	if isSymlink {
+		cont, err := preprocessSymlink(execRoot, path, meta.Symlink, opts)
+		if err != nil {
+			return err
+		}
+		if !cont {
 			return nil
 		}
-		// Right now we never treat a dangling symlink as an error. If we
-		// choose not to preserve the symlink, the path is simply skipped.
-		// Otherwise we will create a corresponding symlink node in the tree
-		// (even if the target does not exist).
 	} else if meta.Err != nil {
 		return meta.Err
 	}
@@ -123,13 +161,18 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return nil
 	} else if t == command.SymlinkInputType {
 		fs[path] = &fileSysNode{
-			// TODO: How to handle a target with absolute path?
 			symlink: &symlinkNode{target: meta.Symlink.Target},
 		}
-		// NOTE: The target is not followed. It is the users' responsibility
-		// to explicitly list the target in their InputSpec. This applies to
-		// symlinks to either a file or a directory.
-		return nil
+		if meta.Symlink.IsDangling {
+			return nil
+		}
+		// If we can proceed here, we've already verified that target is
+		// under execRoot, so this should never fail.
+		relTarget, err := getTargetRelPath(execRoot, path, meta.Symlink.Target)
+		if err != nil {
+			panic(fmt.Sprintf("Invalid target=%q err=%v", relTarget, err))
+		}
+		return loadFiles(execRoot, excl, relTarget, fs, chunkSize, cache, opts)
 	}
 	// Directory
 	files, err := ioutil.ReadDir(absPath)
