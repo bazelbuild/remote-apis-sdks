@@ -89,7 +89,11 @@ func TestChunkerFromBlob(t *testing.T) {
 	t.Parallel()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := NewFromBlob(tc.blob, tc.chunkSize)
+			ue := EntryFromBlob(tc.blob)
+			c, err := NewFromUEntry(ue, false, tc.chunkSize)
+			if err != nil {
+				t.Fatalf("Could not make chunker from UEntry: %v", err)
+			}
 			var gotChunks []*Chunk
 			for _, wantChunk := range tc.wantChunks {
 				if !c.HasNext() {
@@ -126,7 +130,11 @@ func TestChunkerFromFile(t *testing.T) {
 				}
 				dg := digest.NewFromBlob(tc.blob)
 				IOBufferSize = bufSize
-				c := NewFromFile(path, dg, tc.chunkSize)
+				ue := EntryFromFile(dg, path)
+				c, err := NewFromUEntry(ue, false, tc.chunkSize)
+				if err != nil {
+					t.Fatalf("Could not make chunker from UEntry: %v", err)
+				}
 				var gotChunks []*Chunk
 				for _, wantChunk := range tc.wantChunks {
 					if !c.HasNext() {
@@ -150,7 +158,11 @@ func TestChunkerFullData(t *testing.T) {
 	t.Parallel()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := NewFromBlob(tc.blob, tc.chunkSize)
+			ue := EntryFromBlob(tc.blob)
+			c, err := NewFromUEntry(ue, false, tc.chunkSize)
+			if err != nil {
+				t.Fatalf("Could not make chunker from UEntry: %v", err)
+			}
 			gotBlob, err := c.FullData()
 			if err != nil {
 				t.Errorf("c.FullData() gave error %v on blob %q", err, tc.blob)
@@ -167,7 +179,11 @@ func TestChunkerFromBlob_Reset(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			for reset := 1; reset < len(tc.wantChunks); reset++ {
-				c := NewFromBlob(tc.blob, tc.chunkSize)
+				ue := EntryFromBlob(tc.blob)
+				c, err := NewFromUEntry(ue, false, tc.chunkSize)
+				if err != nil {
+					t.Fatalf("Could not make chunker from UEntry: %v", err)
+				}
 				var gotChunks []*Chunk
 				for i, wantChunk := range tc.wantChunks {
 					if !c.HasNext() {
@@ -227,7 +243,11 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 				dg := digest.NewFromBlob(tc.blob)
 				IOBufferSize = bufSize
 				for reset := 1; reset < len(tc.wantChunks); reset++ {
-					c := NewFromFile(path, dg, tc.chunkSize)
+					ue := EntryFromFile(dg, path)
+					c, err := NewFromUEntry(ue, false, tc.chunkSize)
+					if err != nil {
+						t.Fatalf("Could not make chunker from UEntry: %v", err)
+					}
 					var gotChunks []*Chunk
 					for i, wantChunk := range tc.wantChunks {
 						if !c.HasNext() {
@@ -270,8 +290,14 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 }
 
 func TestChunkerErrors_ErrEOF(t *testing.T) {
-	c := NewFromBlob([]byte("12"), 2)
-	_, err := c.Next()
+	ue := EntryFromBlob([]byte("12"))
+	c, err := NewFromUEntry(ue, false, 2)
+	if err != nil {
+		t.Fatalf("Could not make chunker from UEntry: %v", err)
+	}
+	if err != nil {
+	}
+	_, err = c.Next()
 	if err != nil {
 		t.Errorf("c.Next() gave error %v, expecting next chunk \"12\"", err)
 	}
@@ -296,7 +322,11 @@ func TestChunkerResetOptimization_SmallFile(t *testing.T) {
 	}
 	dg := digest.NewFromBlob(blob)
 	IOBufferSize = 10
-	c := NewFromFile(path, dg, 4)
+	ue := EntryFromFile(dg, path)
+	c, err := NewFromUEntry(ue, false, 4)
+	if err != nil {
+		t.Fatalf("Could not make chunker from UEntry: %v", err)
+	}
 	got, err := c.Next()
 	if err != nil {
 		t.Errorf("c.Next() gave error %v", err)
@@ -335,7 +365,11 @@ func TestChunkerResetOptimization_FullData(t *testing.T) {
 	}
 	dg := digest.NewFromBlob(blob)
 	IOBufferSize = 5
-	c := NewFromFile(path, dg, 3)
+	ue := EntryFromFile(dg, path)
+	c, err := NewFromUEntry(ue, false, 3)
+	if err != nil {
+		t.Fatalf("Could not make chunker from UEntry: %v", err)
+	}
 	got, err := c.FullData()
 	if err != nil {
 		t.Errorf("c.FullData() gave error %v", err)

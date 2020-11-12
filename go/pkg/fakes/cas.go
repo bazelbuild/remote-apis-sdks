@@ -598,7 +598,12 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", dg)
 	}
 
-	ch := chunker.NewFromBlob(blob, 2*1024*1024)
+	f.maybeBlock(dg)
+	ue := chunker.EntryFromBlob(blob)
+	ch, err := chunker.NewFromUEntry(ue, false, 2*1024*1024)
+	if err != nil {
+		return status.Errorf(codes.Internal, "test fake failed to create chunker: %v", err)
+	}
 	resp := &bspb.ReadResponse{}
 	for ch.HasNext() {
 		chunk, err := ch.Next()

@@ -224,8 +224,8 @@ func (c *Client) UploadBlob(ctx context.Context, path string) error {
 	}
 
 	log.Infof("Uploading blob of %v from %v.", dg, path)
-	chunk := chunker.NewFromFile(path, dg, 0)
-	if _, err := c.GrpcClient.UploadIfMissing(ctx, chunk); err != nil {
+	ue := chunker.EntryFromFile(dg, path)
+	if _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
 		return err
 	}
 	return nil
