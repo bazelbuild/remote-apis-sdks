@@ -80,7 +80,7 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 }
 
 // getTargetRelPath returns the part of target that is relative to execRoot,
-// iff. target is under execRoot. Otherwise it returns an error.
+// iff target is under execRoot. Otherwise it returns an error.
 func getTargetRelPath(execRoot, symlink, target string) (string, error) {
 	if !filepath.IsAbs(target) {
 		target = filepath.Clean(filepath.Join(execRoot, target))
