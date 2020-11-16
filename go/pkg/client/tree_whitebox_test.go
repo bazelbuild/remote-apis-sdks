@@ -8,7 +8,7 @@ func TestGetTargetRelPath(t *testing.T) {
 	tests := []struct {
 		desc      string
 		target    string
-		isError   bool
+		wantErr   bool
 		relTarget string
 	}{
 		{
@@ -24,7 +24,7 @@ func TestGetTargetRelPath(t *testing.T) {
 		{
 			desc:    "relative target path escaping exec root",
 			target:  "../foo",
-			isError: true,
+			wantErr: true,
 		},
 		{
 			desc:      "absolute target path under exec root",
@@ -34,15 +34,15 @@ func TestGetTargetRelPath(t *testing.T) {
 		{
 			desc:    "absolute target path escaping exec root",
 			target:  "/another/dir/foo",
-			isError: true,
+			wantErr: true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
 			res, err := getTargetRelPath(execRoot, symlink, tc.target)
-			if (err != nil) != tc.isError {
-				t.Errorf("getTargetRelPath(target=%q) error: expected=%v got=%v", tc.target, tc.isError, err)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("getTargetRelPath(target=%q) error: expected=%v got=%v", tc.target, tc.wantErr, err)
 			}
 			if err == nil && res != tc.relTarget {
 				t.Errorf("getTargetRelPath(target=%q) result: expected=%v got=%v", tc.target, tc.relTarget, res)
