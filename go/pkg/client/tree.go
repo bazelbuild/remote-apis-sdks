@@ -64,6 +64,15 @@ type TreeSymlinkOpts struct {
 	// By default, a symlink is converted into its targeted file.
 	// If true, preserve the symlink.
 	Preserved bool
+	// If true, the symlink target (if not dangling) is followed.
+	FollowsTarget bool
+}
+
+// NewTreeSymlinkOpts returns a default NewTreeSymlinkOpts object.
+func NewTreeSymlinkOpts() *TreeSymlinkOpts {
+	return &TreeSymlinkOpts{
+		FollowsTarget: true,
+	}
 }
 
 // shouldIgnore returns whether a given input should be excluded based on the given InputExclusions,
@@ -120,7 +129,7 @@ func preprocessSymlink(execRoot, symlink string, meta *filemetadata.SymlinkMetad
 // recursively), and loads their contents into the provided map.
 func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
 	if opts == nil {
-		opts = &TreeSymlinkOpts{}
+		opts = NewTreeSymlinkOpts()
 	}
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	normPath, err := getRelPath(execRoot, absPath)
@@ -163,7 +172,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		fs[path] = &fileSysNode{
 			symlink: &symlinkNode{target: meta.Symlink.Target},
 		}
-		if meta.Symlink.IsDangling {
+		if meta.Symlink.IsDangling || !opts.FollowsTarget {
 			return nil
 		}
 		// If we can proceed here, we've already verified that target is
@@ -185,7 +194,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return nil
 	}
 	for _, f := range files {
-		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, chunkSize, cache, config); e != nil {
+		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, chunkSize, cache, opts); e != nil {
 			return e
 		}
 	}

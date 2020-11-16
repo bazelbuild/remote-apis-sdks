@@ -531,6 +531,33 @@ func TestComputeMerkleTree(t *testing.T) {
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size,
 			},
 			treeOpts: &client.TreeSymlinkOpts{
+				Preserved:     true,
+				FollowsTarget: true,
+			},
+		},
+		{
+			desc: "File relative symlink (preserved but not followed)",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "fooSym", isSymlink: true, symlinkTarget: "fooDir/foo"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooSym"},
+			},
+			rootDir: &repb.Directory{
+				Directories: nil,
+				Symlinks:    []*repb.SymlinkNode{{Name: "fooSym", Target: "fooDir/foo"}},
+			},
+			wantCacheCalls: map[string]int{
+				"fooSym": 1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 1,
+				InputFiles:       0,
+				InputSymlinks:    1,
+				TotalInputBytes:  0,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
 				Preserved: true,
 			},
 		},
@@ -560,7 +587,8 @@ func TestComputeMerkleTree(t *testing.T) {
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size,
 			},
 			treeOpts: &client.TreeSymlinkOpts{
-				Preserved: true,
+				Preserved:     true,
+				FollowsTarget: true,
 			},
 		},
 		{
@@ -702,7 +730,8 @@ func TestComputeMerkleTree(t *testing.T) {
 				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
 			},
 			treeOpts: &client.TreeSymlinkOpts{
-				Preserved: true,
+				Preserved:     true,
+				FollowsTarget: true,
 			},
 		},
 		{
@@ -734,7 +763,8 @@ func TestComputeMerkleTree(t *testing.T) {
 				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
 			},
 			treeOpts: &client.TreeSymlinkOpts{
-				Preserved: true,
+				Preserved:     true,
+				FollowsTarget: true,
 			},
 		},
 		{
