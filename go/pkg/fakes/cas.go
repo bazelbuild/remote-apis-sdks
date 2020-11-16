@@ -484,20 +484,6 @@ func (f *CAS) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressable
 
 // Write implements the corresponding RE API function.
 func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
-	f.maybeSleep()
-	f.mu.Lock()
-	f.writeReqs++
-	f.concReqs++
-	defer func() {
-		f.mu.Lock()
-		f.concReqs--
-		f.mu.Unlock()
-	}()
-	if f.concReqs > f.maxConcReqs {
-		f.maxConcReqs = f.concReqs
-	}
-	f.mu.Unlock()
-
 	off := int64(0)
 	buf := new(bytes.Buffer)
 
@@ -525,7 +511,20 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs/<hash>/<size>\"")
 	}
 
+	f.maybeSleep()
 	f.maybeBlock(dg)
+	f.mu.Lock()
+	f.writeReqs++
+	f.concReqs++
+	defer func() {
+		f.mu.Lock()
+		f.concReqs--
+		f.mu.Unlock()
+	}()
+	if f.concReqs > f.maxConcReqs {
+		f.maxConcReqs = f.concReqs
+	}
+	f.mu.Unlock()
 	res := req.ResourceName
 	done := false
 	for {
@@ -576,7 +575,6 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 
 // Read implements the corresponding RE API function.
 func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
-	f.maybeSleep()
 	if req.ReadOffset != 0 || req.ReadLimit != 0 {
 		return status.Error(codes.Unimplemented, "test fake does not implement read_offset or limit")
 	}
@@ -590,6 +588,8 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs/<hash>/<size>\"")
 	}
 	dg := digest.TestNew(path[2], int64(size))
+	f.maybeSleep()
+	f.maybeBlock(dg)
 	blob, ok := f.blobs[dg]
 	f.mu.Lock()
 	f.reads[dg]++
@@ -598,7 +598,6 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", dg)
 	}
 
-	f.maybeBlock(dg)
 	ch := chunker.NewFromBlob(blob, 2*1024*1024)
 	resp := &bspb.ReadResponse{}
 	for ch.HasNext() {

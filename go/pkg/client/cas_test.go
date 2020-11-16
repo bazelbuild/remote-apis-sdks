@@ -1550,3 +1550,48 @@ func TestDownloadFiles(t *testing.T) {
 		t.Errorf("foo mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestDownloadFilesCancel(t *testing.T) {
+	execRoot, err := ioutil.TempDir("", "DownloadOuts")
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(execRoot)
+
+	for _, uo := range []client.UnifiedCASOps{false, true} {
+		t.Run(fmt.Sprintf("UnifiedCASOps:%t", uo), func(t *testing.T) {
+			ctx := context.Background()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			fooDigest := fake.Put([]byte{1, 2, 3})
+			wait := make(chan bool)
+			fake.PerDigestBlockFn[fooDigest] = func() {
+				<-wait
+			}
+			c := e.Client.GrpcClient
+			uo.Apply(c)
+			eg, eCtx := errgroup.WithContext(ctx)
+			cCtx, cancel := context.WithCancel(eCtx)
+			eg.Go(func() error {
+				if err := c.DownloadFiles(cCtx, execRoot, map[digest.Digest]*client.TreeOutput{
+					fooDigest: {Digest: fooDigest, Path: "foo", IsExecutable: true},
+				}); err != context.Canceled {
+					return fmt.Errorf("Failed to run DownloadFiles: expected context.Canceled, got %v", err)
+				}
+				return nil
+			})
+			eg.Go(func() error {
+				cancel()
+				return nil
+			})
+			if err := eg.Wait(); err != nil {
+				t.Error(err)
+			}
+			if fake.BlobReads(fooDigest) != 0 {
+				t.Errorf("Expected no reads for foo since request is cancelled, got %v.", fake.BlobReads(fooDigest))
+			}
+			close(wait)
+		})
+	}
+}
