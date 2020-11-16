@@ -423,7 +423,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				{path: "barDir/bar", fileContents: barBlob},
 			},
 			spec: &command.InputSpec{
-				Inputs: []string{"fooDir/../fooDir/foo", "barDir//bar"},
+				Inputs: []string{"fooDir/../fooDir/foo", "//barDir//bar"},
 			},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
 				{Name: "barDir", Digest: barDirDgPb},
@@ -794,7 +794,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Normalizing virtual inputs paths",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "fooDir/../fooDir/foo", Contents: fooBlob, IsExecutable: true},
+					&command.VirtualInput{Path: "//fooDir/../fooDir/foo", Contents: fooBlob, IsExecutable: true},
 					&command.VirtualInput{Path: "barDir///bar", Contents: barBlob},
 				},
 			},
