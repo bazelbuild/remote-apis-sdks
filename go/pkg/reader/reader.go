@@ -103,7 +103,7 @@ func (fio *fileSeeker) Initialize() error {
 type compressedSeeker struct {
 	fs   ReadSeeker
 	encd *zstd.Encoder
-	// This keeps the encrypted data
+	// This keeps the compressed data
 	buf *bytes.Buffer
 }
 
