@@ -43,10 +43,7 @@ func TestSplitEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cannot listen: %v", err)
 	}
-	port, err := portpicker.PickUnusedPort()
-	if err != nil {
-		t.Fatalf("Failed picking unused port: %v", err)
-	}
+	port := portpicker.PickUnusedPortTB(t)
 	l2, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		t.Fatalf("Cannot listen: %v", err)
