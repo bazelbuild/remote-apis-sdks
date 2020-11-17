@@ -4,7 +4,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/test_util"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -39,7 +39,7 @@ func TestFileReaderSeeks(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			path, err := test_util.CreateFile(t, false, tc.blob)
+			path, err := testutil.CreateFile(t, false, tc.blob)
 			if err != nil {
 				t.Fatalf("Failed to make temp file: %v", err)
 			}
@@ -94,7 +94,7 @@ func TestFileReaderSeeks(t *testing.T) {
 
 func TestFileReaderSeeksPastOffset(t *testing.T) {
 	t.Parallel()
-	path, err := test_util.CreateFile(t, false, "12345")
+	path, err := testutil.CreateFile(t, false, "12345")
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
