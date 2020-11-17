@@ -45,6 +45,7 @@ func (f *flakyServer) incNumCalls(method string) int {
 func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 	numCalls := f.incNumCalls("Write")
 	if numCalls < 3 {
+		time.Sleep(70 * time.Millisecond)
 		return status.Error(codes.Canceled, "transient error!")
 	}
 
@@ -65,6 +66,7 @@ func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	numCalls := f.incNumCalls("Read")
 	if numCalls < 3 {
+		time.Sleep(70 * time.Millisecond)
 		return status.Error(codes.Canceled, "transient error!")
 	}
 	if numCalls < 4 {
@@ -76,6 +78,7 @@ func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadS
 	}
 	// Client now will only ask for the remaining two bytes.
 	if numCalls < 5 {
+		time.Sleep(70 * time.Millisecond)
 		return status.Error(codes.Aborted, "yet another transient error!")
 	}
 	return stream.Send(&bspb.ReadResponse{Data: []byte("ob")})
@@ -84,7 +87,7 @@ func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadS
 func (f *flakyServer) flakeAndFail(method string) error {
 	numCalls := f.incNumCalls(method)
 	if numCalls == 1 {
-		time.Sleep(2 * time.Second)
+		time.Sleep(70 * time.Millisecond)
 		// The error we return here should not matter; the deadline should have passed by now and the
 		// retrier should retry DeadlineExceeded.
 		return status.Error(codes.InvalidArgument, "non retriable error")
@@ -216,7 +219,7 @@ func setup(t *testing.T) *flakyFixture {
 	f.client, err = client.NewClient(f.ctx, instance, client.DialParams{
 		Service:    f.listener.Addr().String(),
 		NoSecurity: true,
-	}, client.StartupCapabilities(false), client.ChunkMaxSize(2), client.RPCTimeouts(map[string]time.Duration{"default": time.Second}))
+	}, client.StartupCapabilities(false), client.ChunkMaxSize(2), client.RPCTimeouts(map[string]time.Duration{"default": 50 * time.Millisecond}))
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
