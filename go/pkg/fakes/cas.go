@@ -27,6 +27,8 @@ import (
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
+var zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
+
 // Reader implements ByteStream's Read interface, returning one blob.
 type Reader struct {
 	// Blob is the blob being read.
@@ -54,18 +56,34 @@ func (f *Reader) Validate(t *testing.T) {
 // Read implements the corresponding RE API function.
 func (f *Reader) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	path := strings.Split(req.ResourceName, "/")
-	if len(path) != 4 || path[0] != "instance" || path[1] != "blobs" {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs/<hash>/<size>\"")
+	if (len(path) != 4 && len(path) != 5) || path[0] != "instance" || (path[1] != "blobs" && path[1] != "compressed-blobs") {
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
+	// indexOffset for all 2+ paths - `compressed-blobs` has one more URI element.
+	indexOffset := 0
+	if path[1] == "compressed-blobs" {
+		indexOffset = 1
+	}
+
 	dg := digest.NewFromBlob(f.Blob)
-	if path[2] != dg.Hash || path[3] != strconv.FormatInt(dg.Size, 10) {
-		return status.Errorf(codes.NotFound, "test fake only has blob with digest %s, but %s/%s was requested", dg, path[2], path[3])
+	if path[2+indexOffset] != dg.Hash || path[3+indexOffset] != strconv.FormatInt(dg.Size, 10) {
+		return status.Errorf(codes.NotFound, "test fake only has blob with digest %s, but %s/%s was requested", dg, path[2+indexOffset], path[3+indexOffset])
 	}
 
 	offset := req.ReadOffset
 	limit := req.ReadLimit
 	blob := f.Blob
 	chunks := f.Chunks
+	if path[1] == "compressed-blobs" {
+		if path[2] != "zstd" {
+			return status.Error(codes.InvalidArgument, "test fake expected valid compressor, eg zstd")
+		}
+		blob = zstdEncoder.EncodeAll(blob[offset:], nil)
+		offset = 0
+		// For simplicity in coordinating test server & client, compressed blobs are returned as
+		// one chunk.
+		chunks = []int{len(blob)}
+	}
 	for len(chunks) > 0 {
 		buf := blob[:chunks[0]]
 		if offset >= int64(len(buf)) {
@@ -251,6 +269,7 @@ func NewCAS() (*CAS, error) {
 		BatchSize:        client.DefaultMaxBatchSize,
 		PerDigestBlockFn: make(map[digest.Digest]func()),
 	}
+
 	c.Clear()
 
 	var err error
@@ -633,14 +652,20 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 	}
 
 	path := strings.Split(req.ResourceName, "/")
-	if len(path) != 4 || path[0] != "instance" || path[1] != "blobs" {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs/<hash>/<size>\"")
+	if (len(path) != 4 && len(path) != 5) || path[0] != "instance" || (path[1] != "blobs" && path[1] != "compressed-blobs") {
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
-	size, err := strconv.Atoi(path[3])
+	// indexOffset for all 2+ paths - `compressed-blobs` has one more URI element.
+	indexOffset := 0
+	if path[1] == "compressed-blobs" {
+		indexOffset = 1
+	}
+
+	size, err := strconv.Atoi(path[3+indexOffset])
 	if err != nil {
-		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs/<hash>/<size>\"")
+		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
-	dg := digest.TestNew(path[2], int64(size))
+	dg := digest.TestNew(path[2+indexOffset], int64(size))
 	blob, ok := f.blobs[dg]
 	f.mu.Lock()
 	f.reads[dg]++
@@ -651,10 +676,21 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 
 	f.maybeBlock(dg)
 	ue := chunker.EntryFromBlob(blob)
+
+	if path[1] == "compressed-blobs" {
+		if path[2] != "zstd" {
+			return status.Error(codes.InvalidArgument, "test fake expected valid compressor, eg zstd")
+		}
+		blob = zstdEncoder.EncodeAll(blob, nil)
+	}
+
+	// We can set compression to false as the blob is already encrypted. Chunker doesn't
+	// match the UEntry dg.
 	ch, err := chunker.New(ue, false, 2*1024*1024)
 	if err != nil {
 		return status.Errorf(codes.Internal, "test fake failed to create chunker: %v", err)
 	}
+
 	resp := &bspb.ReadResponse{}
 	for ch.HasNext() {
 		chunk, err := ch.Next()

@@ -17,6 +17,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/golang/protobuf/proto"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pborman/uuid"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
@@ -26,8 +27,9 @@ import (
 	log "github.com/golang/glog"
 )
 
-// DefaultCompressedBytestreamThreshold is the default threshold for transferring blobs compressed on ByteStream.Write RPCs.
-const DefaultCompressedBytestreamThreshold = 1024
+// DefaultCompressedBytestreamThreshold is the default threshold, in bytes, for
+// transferring blobs compressed on ByteStream.Write RPCs.
+const DefaultCompressedBytestreamThreshold = 1024 * 1024
 
 const logInterval = 25
 
@@ -429,6 +431,22 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 	return dg, c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
 }
 
+// maybeCompressReadBlob will, depending on the client configuration, set the blobs to be
+// read compressed. It returns the appropriate resource name.
+func (c *Client) maybeCompressReadBlob(hash string, sizeBytes int64, w io.WriteCloser) (string, io.WriteCloser, chan error, error) {
+	if c.CompressedBytestreamThreshold < 0 || int64(c.CompressedBytestreamThreshold) > sizeBytes {
+		// If we aren't compressing the data, theere's nothing to wait on.
+		dummyDone := make(chan error)
+		go func() { dummyDone <- nil }()
+		return c.resourceNameRead(hash, sizeBytes), w, dummyDone, nil
+	}
+	cw, done, err := NewCompressedWriteBuffer(w)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return c.resourceNameCompressedRead(hash, sizeBytes), cw, done, nil
+}
+
 // BatchWriteBlobs uploads a number of blobs to the CAS. They must collectively be below the
 // maximum total size for a batch upload, which is about 4 MB (see MaxBatchSize). Digests must be
 // computed in advance by the caller. In case multiple errors occur during the blob upload, the
@@ -686,14 +704,36 @@ func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath stri
 }
 
 func (c *Client) readBlobToFile(ctx context.Context, hash string, sizeBytes int64, fpath string) (int64, error) {
-	n, err := c.readToFile(ctx, c.resourceNameRead(hash, sizeBytes), fpath)
+	f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, c.RegularMode)
 	if err != nil {
-		return n, err
+		return 0, err
 	}
-	if n != sizeBytes {
-		return n, fmt.Errorf("CAS fetch read %d bytes but %d were expected", n, sizeBytes)
+	defer f.Close()
+	return c.readBlobStreamed(ctx, hash, sizeBytes, 0, 0, f)
+}
+
+func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
+	r, nw := io.Pipe()
+
+	// TODO(rubensf): Reuse decoders when possible to save the effort of starting/closing goroutines.
+	decoder, err := zstd.NewReader(r)
+	if err != nil {
+		return nil, nil, err
 	}
-	return n, nil
+
+	done := make(chan error)
+	go func() {
+		_, err := decoder.WriteTo(w)
+		if err != nil {
+			// Because WriteTo returned early, the pipe writers still
+			// have to go somewhere or they'll block execution.
+			io.Copy(ioutil.Discard, r)
+		}
+		decoder.Close()
+		done <- err
+	}()
+
+	return nw, done, nil
 }
 
 // ReadBlobStreamed fetches a blob with a provided digest from the CAS.
@@ -702,20 +742,45 @@ func (c *Client) ReadBlobStreamed(ctx context.Context, d digest.Digest, w io.Wri
 	return c.readBlobStreamed(ctx, d.Hash, d.Size, 0, 0, w)
 }
 
+type writerTracker struct {
+	io.Writer
+	writtenBytes int64
+}
+
+func (wc *writerTracker) Write(p []byte) (int, error) {
+	n, err := wc.Writer.Write(p)
+	wc.writtenBytes += int64(n)
+	return n, err
+}
+
+func (wc *writerTracker) Close() error { return nil }
+
 func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, offset, limit int64, w io.Writer) (int64, error) {
 	if sizeBytes == 0 {
 		// Do not download empty blobs.
 		return 0, nil
 	}
-	n, err := c.readStreamed(ctx, c.resourceNameRead(hash, sizeBytes), offset, limit, w)
+	wt := &writerTracker{Writer: w}
+	name, wc, done, err := c.maybeCompressReadBlob(hash, sizeBytes, wt)
 	if err != nil {
+		return 0, err
+	}
+	n, err := c.readStreamed(ctx, name, offset, limit, wc)
+	if err != nil {
+		return n, err
+	}
+	if err = wc.Close(); err != nil {
 		return n, err
 	}
 	sz := sizeBytes - offset
 	if limit > 0 && limit < sz {
 		sz = limit
 	}
-	if n != sz {
+	if err := <-done; err != nil {
+		return n, fmt.Errorf("Failed to finalize writing downloaded data downstream: %v", err)
+	}
+	close(done)
+	if wt.writtenBytes != sz {
 		return n, fmt.Errorf("CAS fetch read %d bytes but %d were expected", n, sz)
 	}
 	return n, nil
@@ -794,6 +859,12 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 
 func (c *Client) resourceNameRead(hash string, sizeBytes int64) string {
 	return fmt.Sprintf("%s/blobs/%s/%d", c.InstanceName, hash, sizeBytes)
+}
+
+// TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
+// that gets merged in.
+func (c *Client) resourceNameCompressedRead(hash string, sizeBytes int64) string {
+	return fmt.Sprintf("%s/compressed-blobs/zstd/%s/%d", c.InstanceName, hash, sizeBytes)
 }
 
 // ResourceNameWrite generates a valid write resource name.
