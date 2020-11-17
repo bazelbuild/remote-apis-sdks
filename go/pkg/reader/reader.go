@@ -153,14 +153,16 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 
 func (cfs *compressedSeeker) SeekOffset(offset int64) error {
 	cfs.buf.Reset()
-	err := cfs.encd.Close()
-	cfs.encd.Reset(cfs.buf)
-	err2 := cfs.fs.SeekOffset(offset)
-
-	if err != nil {
+	if err := cfs.encd.Close(); err != nil {
 		return err
 	}
-	return err2
+
+	cfs.encd.Reset(cfs.buf)
+	if err := cfs.fs.SeekOffset(offset); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (cfs *compressedSeeker) IsInitialized() bool { return cfs.fs.IsInitialized() }

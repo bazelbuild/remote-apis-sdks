@@ -22,7 +22,8 @@ var IOBufferSize = 10 * 1024 * 1024
 // ErrEOF is returned when Next is called when HasNext is false.
 var ErrEOF = errors.New("ErrEOF")
 
-// Compressor for full blobs
+// Compressor for full blobs. It is *only* thread-safe for EncodeAll calls and
+// should not be used for streamed compression.
 var fullCompressor, _ = zstd.NewWriter(nil)
 
 type UploadEntry struct {
