@@ -747,9 +747,9 @@ func TestUpload(t *testing.T) {
 						}
 						for _, ue := range input {
 							dg := ue.Digest()
-							ch, err := chunker.NewFromUEntry(ue, false, int(c.ChunkMaxSize))
+							ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 							if err != nil {
-								t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+								t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
 							}
 							blob, err := ch.FullData()
 							if err != nil {

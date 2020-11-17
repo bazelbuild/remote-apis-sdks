@@ -211,9 +211,9 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
 	for _, ue := range inputs {
-		ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+		ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
 		if err != nil {
-			t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+			t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
 		}
 		blob, err := ch.FullData()
 		if err != nil {
@@ -313,9 +313,9 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
 	for _, ue := range inputs {
-		ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+		ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
 		if err != nil {
-			t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+			t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
 		}
 		blob, err := ch.FullData()
 		if err != nil {
@@ -1105,9 +1105,9 @@ func TestComputeMerkleTree(t *testing.T) {
 				t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
 			}
 			for _, ue := range inputs {
-				ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+				ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
 				if err != nil {
-					t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+					t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
 				}
 				blob, err := ch.FullData()
 				if err != nil {
@@ -1392,9 +1392,9 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 				t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
 			for _, ue := range inputs {
-				ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+				ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
 				if err != nil {
-					t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+					t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
 				}
 				blob, err := ch.FullData()
 				if err != nil {
@@ -1504,9 +1504,9 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 				t.Fatalf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
 			for _, ue := range inputs {
-				ch, err := chunker.NewFromUEntry(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+				ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
 				if err != nil {
-					t.Fatalf("chunker.NewFromUEntry(ue): failed to create chunker from UploadEntry: %v", err)
+					t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
 				}
 				blob, err := ch.FullData()
 				if err != nil {

@@ -166,7 +166,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		return digest.Empty, digest.Empty
 	}
 	for _, inp := range inputs {
-		ch, err := chunker.NewFromUEntry(inp, false, int(e.Client.GrpcClient.ChunkMaxSize))
+		ch, err := chunker.New(inp, false, int(e.Client.GrpcClient.ChunkMaxSize))
 		if err != nil {
 			e.t.Fatalf("error getting data from input entry: %v", err)
 		}
