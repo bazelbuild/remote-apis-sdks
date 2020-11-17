@@ -1,11 +1,9 @@
 package client_test
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -36,8 +34,6 @@ var (
 	fooDirBlob, barDirBlob, foobarDirBlob = mustMarshal(fooDir), mustMarshal(barDir), mustMarshal(foobarDir)
 	fooDirDg, barDirDg, foobarDirDg       = digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob)
 	fooDirDgPb, barDirDgPb, foobarDirDgPb = fooDirDg.ToProto(), barDirDg.ToProto(), foobarDirDg.ToProto()
-
-	execRootPlaceholder = "%[EXEC_ROOT]%"
 )
 
 func mustMarshal(p proto.Message) []byte {
@@ -46,16 +42,6 @@ func mustMarshal(p proto.Message) []byte {
 		panic("error marshalling proto during test setup: %s" + err.Error())
 	}
 	return b
-}
-
-func prependExecRootPlaceholder(target string) string {
-	return fmt.Sprintf("%s/%s", execRootPlaceholder, target)
-}
-
-func materializeExecRootInSymlinks(execRoot string, dir *repb.Directory) {
-	for _, s := range dir.Symlinks {
-		s.Target = strings.Replace(s.Target, execRootPlaceholder, execRoot, 1)
-	}
 }
 
 type inputPath struct {
@@ -573,7 +559,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			rootDir: &repb.Directory{
 				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDgPb}},
-				Symlinks:    []*repb.SymlinkNode{{Name: "fooSym", Target: prependExecRootPlaceholder("fooDir/foo")}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "fooSym", Target: "fooDir/foo"}},
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
 			wantCacheCalls: map[string]int{
@@ -714,7 +700,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			rootDir: &repb.Directory{
 				Directories: []*repb.DirectoryNode{{Name: "foobarDir", Digest: foobarDirDgPb}},
-				Symlinks:    []*repb.SymlinkNode{{Name: "foobarSymDir", Target: prependExecRootPlaceholder("foobarDir")}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "foobarSymDir", Target: "foobarDir"}},
 			},
 			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
 			wantCacheCalls: map[string]int{
@@ -1085,7 +1071,6 @@ func TestComputeMerkleTree(t *testing.T) {
 		if err := construct(root, tc.input); err != nil {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
-		materializeExecRootInSymlinks(root, tc.rootDir)
 
 		t.Run(tc.desc, func(t *testing.T) {
 			wantBlobs := make(map[digest.Digest][]byte)

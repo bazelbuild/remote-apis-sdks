@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -68,8 +67,8 @@ type TreeSymlinkOpts struct {
 	FollowsTarget bool
 }
 
-// NewTreeSymlinkOpts returns a default NewTreeSymlinkOpts object.
-func NewTreeSymlinkOpts() *TreeSymlinkOpts {
+// DefaultTreeSymlinkOpts returns a default DefaultTreeSymlinkOpts object.
+func DefaultTreeSymlinkOpts() *TreeSymlinkOpts {
 	return &TreeSymlinkOpts{
 		FollowsTarget: true,
 	}
@@ -94,14 +93,7 @@ func getTargetRelPath(execRoot, symlink, target string) (string, error) {
 	if !filepath.IsAbs(target) {
 		target = filepath.Clean(filepath.Join(execRoot, target))
 	}
-	rel, err := filepath.Rel(execRoot, target)
-	if err != nil {
-		return "", err
-	}
-	if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("symlink=%q (target=%q) is not under execRoot=%q", symlink, target, execRoot)
-	}
-	return rel, nil
+	return getRelPath(execRoot, target)
 }
 
 // preprocessSymlink returns two things: if the routine should continue, and if
@@ -129,7 +121,7 @@ func preprocessSymlink(execRoot, symlink string, meta *filemetadata.SymlinkMetad
 // recursively), and loads their contents into the provided map.
 func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
 	if opts == nil {
-		opts = NewTreeSymlinkOpts()
+		opts = DefaultTreeSymlinkOpts()
 	}
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	normPath, err := getRelPath(execRoot, absPath)
@@ -169,17 +161,19 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		}
 		return nil
 	} else if t == command.SymlinkInputType {
+		relTarget, err := getTargetRelPath(execRoot, path, meta.Symlink.Target)
+		if err != nil {
+			return err
+		}
 		fs[path] = &fileSysNode{
-			symlink: &symlinkNode{target: meta.Symlink.Target},
+			// We cannot directly use meta.Symlink.Target, because it could be
+			// an absolute path. Since the remote worker will map the exec root
+			// to a different directory, we must strip away the local exec root.
+			// See https://github.com/bazelbuild/remote-apis-sdks/pull/229#discussion_r524830458
+			symlink: &symlinkNode{target: relTarget},
 		}
 		if meta.Symlink.IsDangling || !opts.FollowsTarget {
 			return nil
-		}
-		// If we can proceed here, we've already verified that target is
-		// under execRoot, so this should never fail.
-		relTarget, err := getTargetRelPath(execRoot, path, meta.Symlink.Target)
-		if err != nil {
-			panic(fmt.Sprintf("Invalid target=%q err=%v", relTarget, err))
 		}
 		return loadFiles(execRoot, excl, relTarget, fs, chunkSize, cache, opts)
 	}
