@@ -600,7 +600,7 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 
 	f.maybeBlock(dg)
 	ue := chunker.EntryFromBlob(blob)
-	ch, err := chunker.NewFromUEntry(ue, false, 2*1024*1024)
+	ch, err := chunker.New(ue, false, 2*1024*1024)
 	if err != nil {
 		return status.Errorf(codes.Internal, "test fake failed to create chunker: %v", err)
 	}

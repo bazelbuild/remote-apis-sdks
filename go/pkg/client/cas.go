@@ -225,7 +225,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				bchMap := make(map[digest.Digest][]byte)
 				for _, dg := range batch {
 					st := newStates[dg]
-					ch, err := chunker.NewFromUEntry(st.ue, false, int(c.ChunkMaxSize))
+					ch, err := chunker.New(st.ue, false, int(c.ChunkMaxSize))
 					if err != nil {
 						updateAndNotify(st, err, true)
 						continue
@@ -244,7 +244,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 			} else {
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 				st := newStates[batch[0]]
-				ch, err := chunker.NewFromUEntry(st.ue, false, int(c.ChunkMaxSize))
+				ch, err := chunker.New(st.ue, false, int(c.ChunkMaxSize))
 				if err != nil {
 					updateAndNotify(st, err, true)
 				}
@@ -265,7 +265,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.UploadEn
 		dg := ue.Digest()
 		if _, ok := chunkers[dg]; !ok {
 			dgs = append(dgs, dg)
-			ch, err := chunker.NewFromUEntry(ue, false, int(c.ChunkMaxSize))
+			ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 			if err != nil {
 				return nil, err
 			}
@@ -419,7 +419,7 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
 	ue := chunker.EntryFromBlob(blob)
 	dg := ue.Digest()
-	ch, err := chunker.NewFromUEntry(ue, false, int(c.ChunkMaxSize))
+	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
 		return dg, err
 	}

@@ -16,7 +16,7 @@ import (
 // WriteBytes uploads a byte slice.
 func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
 	ue := chunker.EntryFromBlob(data)
-	ch, err := chunker.NewFromUEntry(ue, false, int(c.ChunkMaxSize))
+	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
 		return err
 	}

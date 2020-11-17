@@ -33,10 +33,11 @@ func (ue *UploadEntry) Digest() digest.Digest {
 }
 
 func EntryFromBlob(blob []byte) *UploadEntry {
-	contents := make([]byte, len(blob))
-	copy(contents, blob)
+	if blob == nil {
+		blob = make([]byte, 0)
+	}
 	return &UploadEntry{
-		contents: contents,
+		contents: blob,
 		digest:   digest.NewFromBlob(blob),
 	}
 }
@@ -66,9 +67,7 @@ type Chunker struct {
 	// * Chunker.FullData was called at least once.
 	// * Next() was called and the read was less than IOBufferSize.
 	// Once contents are initialized, they are immutable.
-	contents []byte
-	// The digest carried here is for easy of data access *only*. It is never
-	// checked anywhere in the Chunker logic.
+	contents   []byte
 	path       string
 	offset     int64
 	reachedEOF bool
@@ -77,7 +76,7 @@ type Chunker struct {
 	compressed bool
 }
 
-func NewFromUEntry(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, error) {
+func New(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, error) {
 	if compressed {
 		return nil, errors.New("compression is not supported yet")
 	}
@@ -87,7 +86,7 @@ func NewFromUEntry(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, e
 	var c *Chunker
 	if ue.contents != nil {
 		c = chunkerFromBlob(ue.contents, compressed)
-	} else {
+	} else if ue.path != "" {
 		var err error
 		c, err = chunkerFromFile(ue.path, compressed)
 		if err != nil {
@@ -97,6 +96,8 @@ func NewFromUEntry(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, e
 		if chunkSize > IOBufferSize {
 			chunkSize = IOBufferSize
 		}
+	} else {
+		return nil, errors.New("Invalid UEntry. Content and path cannot both be nil.")
 	}
 
 	c.chunkSize = chunkSize
