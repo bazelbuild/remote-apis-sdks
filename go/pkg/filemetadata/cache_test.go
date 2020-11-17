@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/test_util"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -17,7 +17,7 @@ var (
 
 func TestSimpleCacheLoad(t *testing.T) {
 	c := NewSingleFlightCache()
-	filename, err := test_util.CreateFile(t, false, "")
+	filename, err := testutil.CreateFile(t, false, "")
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestSimpleCacheLoad(t *testing.T) {
 
 func TestCacheOnceLoadMultiple(t *testing.T) {
 	c := NewSingleFlightCache()
-	filename, err := test_util.CreateFile(t, false, "")
+	filename, err := testutil.CreateFile(t, false, "")
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestCacheOnceLoadMultiple(t *testing.T) {
 
 func TestLoadAfterChangeWithoutValidation(t *testing.T) {
 	c := NewSingleFlightCache()
-	filename, err := test_util.CreateFile(t, false, "")
+	filename, err := testutil.CreateFile(t, false, "")
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}

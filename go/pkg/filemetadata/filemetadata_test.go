@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/test_util"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -33,7 +33,7 @@ func TestComputeFiles(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			filename, err := test_util.CreateFile(t, tc.executable, tc.contents)
+			filename, err := testutil.CreateFile(t, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
@@ -160,7 +160,7 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 
 func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, contents string) (string, error) {
 	t.Helper()
-	targetPath, err := test_util.CreateFile(t, executable, contents)
+	targetPath, err := testutil.CreateFile(t, executable, contents)
 	if err != nil {
 		return "", err
 	}
