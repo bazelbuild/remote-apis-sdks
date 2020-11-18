@@ -89,7 +89,7 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 
 // getTargetRelPath returns the part of target that is relative to execRoot,
 // iff target is under execRoot. Otherwise it returns an error.
-func getTargetRelPath(execRoot, symlink, target string) (string, error) {
+func getTargetRelPath(execRoot, target string) (string, error) {
 	if !filepath.IsAbs(target) {
 		target = filepath.Clean(filepath.Join(execRoot, target))
 	}
@@ -111,7 +111,7 @@ func preprocessSymlink(execRoot, symlink string, meta *filemetadata.SymlinkMetad
 		return true, nil
 	}
 
-	if _, err := getTargetRelPath(execRoot, symlink, meta.Target); err != nil {
+	if _, err := getTargetRelPath(execRoot, meta.Target); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -161,7 +161,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		}
 		return nil
 	} else if t == command.SymlinkInputType {
-		relTarget, err := getTargetRelPath(execRoot, path, meta.Symlink.Target)
+		relTarget, err := getTargetRelPath(execRoot, meta.Symlink.Target)
 		if err != nil {
 			return err
 		}
