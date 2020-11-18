@@ -688,7 +688,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
-			desc: "Directory absoluate symlink (preserved)",
+			desc: "Directory absolute symlink (preserved)",
 			input: []*inputPath{
 				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "foobarDir/bar", fileContents: barBlob},

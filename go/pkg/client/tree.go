@@ -165,7 +165,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		if err != nil {
 			return err
 		}
-		fs[path] = &fileSysNode{
+		fs[normPath] = &fileSysNode{
 			// We cannot directly use meta.Symlink.Target, because it could be
 			// an absolute path. Since the remote worker will map the exec root
 			// to a different directory, we must strip away the local exec root.
