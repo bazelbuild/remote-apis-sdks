@@ -47,6 +47,7 @@ func TestFileReaderSeeks(t *testing.T) {
 			data := make([]byte, tc.dataBuffSize)
 
 			r := NewFileReadSeeker(path, tc.IOBuffSize)
+			defer r.Close()
 			if _, err := r.Read(data); err == nil {
 				t.Errorf("Read() = should have err'd on unitialized reader")
 			}
