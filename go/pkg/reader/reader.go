@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 )
 
 type Initializable interface {
@@ -17,6 +18,7 @@ type ReadSeeker interface {
 	io.Reader
 	Initializable
 	SeekOffset(offset int64)
+	Close() error
 }
 
 type fileSeeker struct {
@@ -27,6 +29,8 @@ type fileSeeker struct {
 	buffSize    int
 	seekOffset  int64
 	initialized bool
+
+	mu sync.Mutex
 }
 
 // NewFileReadSeeker wraps a buffered file reader with Seeking functionality.
@@ -54,6 +58,9 @@ func (fio *fileSeeker) Read(p []byte) (int, error) {
 // Seek is a simplified version of io.Seeker. It only supports offsets from the
 // beginning of the file, and it errors lazily at the next Initialize.
 func (fio *fileSeeker) SeekOffset(offset int64) {
+	fio.mu.Lock()
+	defer fio.mu.Unlock()
+
 	fio.seekOffset = offset
 	fio.initialized = false
 	fio.reader = nil
@@ -62,11 +69,17 @@ func (fio *fileSeeker) SeekOffset(offset int64) {
 // IsInitialized indicates whether this reader is ready. If false, Read calls
 // will fail.
 func (fio *fileSeeker) IsInitialized() bool {
+	fio.mu.Lock()
+	defer fio.mu.Unlock()
+
 	return fio.initialized
 }
 
 // Initialize does the required IO pre-work for Read calls to function.
 func (fio *fileSeeker) Initialize() error {
+	fio.mu.Lock()
+	defer fio.mu.Unlock()
+
 	if fio.initialized {
 		return errors.New("Already initialized")
 	}
@@ -93,5 +106,20 @@ func (fio *fileSeeker) Initialize() error {
 		fio.reader.Reset(fio.f)
 	}
 	fio.initialized = true
+	return nil
+}
+
+// Close closes the open file handle if it hasn't been closed yet.
+func (fio *fileSeeker) Close() error {
+	fio.mu.Lock()
+	defer fio.mu.Unlock()
+
+	if fio.f == nil {
+		return nil
+	}
+	if err := fio.f.Close(); err != nil {
+		return fio.f.Close()
+	}
+	fio.initialized = false
 	return nil
 }
