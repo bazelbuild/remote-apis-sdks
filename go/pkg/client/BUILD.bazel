@@ -52,6 +52,7 @@ go_test(
         "exec_test.go",
         "retries_test.go",
         "tree_test.go",
+        "tree_whitebox_test.go",
     ],
     embed = [":go_default_library"],
     deps = [

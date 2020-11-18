@@ -4,7 +4,6 @@ import "testing"
 
 func TestGetTargetRelPath(t *testing.T) {
 	execRoot := "/execRoot/dir"
-	symlink := "sym"
 	tests := []struct {
 		desc      string
 		target    string
@@ -40,7 +39,7 @@ func TestGetTargetRelPath(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			res, err := getTargetRelPath(execRoot, symlink, tc.target)
+			res, err := getTargetRelPath(execRoot, tc.target)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("getTargetRelPath(target=%q) error: expected=%v got=%v", tc.target, tc.wantErr, err)
 			}
