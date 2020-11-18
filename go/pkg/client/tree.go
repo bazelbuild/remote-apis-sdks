@@ -22,8 +22,9 @@ import (
 // tree later. It corresponds roughly to a *repb.Directory, but with pointers, not digests, used to
 // refer to other nodes.
 type treeNode struct {
-	files map[string]*fileNode
-	dirs  map[string]*treeNode
+	files    map[string]*fileNode
+	dirs     map[string]*treeNode
+	symlinks map[string]*symlinkNode
 }
 
 type fileNode struct {
@@ -31,9 +32,14 @@ type fileNode struct {
 	isExecutable bool
 }
 
+type symlinkNode struct {
+	target string
+}
+
 type fileSysNode struct {
 	file                 *fileNode
 	emptyDirectoryMarker bool
+	symlink              *symlinkNode
 }
 
 // TreeStats contains various stats/metadata of the constructed Merkle tree.
@@ -45,9 +51,27 @@ type TreeStats struct {
 	InputFiles int
 	// The total number of input directories.
 	InputDirectories int
+	// The total number of input symlinks
+	InputSymlinks int
 	// The overall number of bytes from all the inputs.
 	TotalInputBytes int64
 	// TODO(olaola): number of FileMetadata cache hits/misses go here.
+}
+
+// TreeSymlinkOpts controls how symlinks are handled when constructing a tree.
+type TreeSymlinkOpts struct {
+	// By default, a symlink is converted into its targeted file.
+	// If true, preserve the symlink.
+	Preserved bool
+	// If true, the symlink target (if not dangling) is followed.
+	FollowsTarget bool
+}
+
+// DefaultTreeSymlinkOpts returns a default DefaultTreeSymlinkOpts object.
+func DefaultTreeSymlinkOpts() *TreeSymlinkOpts {
+	return &TreeSymlinkOpts{
+		FollowsTarget: true,
+	}
 }
 
 // shouldIgnore returns whether a given input should be excluded based on the given InputExclusions,
@@ -63,23 +87,66 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 	return false
 }
 
+// getTargetRelPath returns the part of target that is relative to execRoot,
+// iff target is under execRoot. Otherwise it returns an error.
+func getTargetRelPath(execRoot, target string) (string, error) {
+	if !filepath.IsAbs(target) {
+		target = filepath.Clean(filepath.Join(execRoot, target))
+	}
+	return getRelPath(execRoot, target)
+}
+
+// preprocessSymlink returns two things: if the routine should continue, and if
+// there is an error to be reported back.
+func preprocessSymlink(execRoot, symlink string, meta *filemetadata.SymlinkMetadata, opts *TreeSymlinkOpts) (bool, error) {
+	if meta.IsDangling {
+		// For now, we do not treat a dangling symlink as an error. In the case
+		// where the symlink is not preserved (i.e. needs to be converted to a
+		// file), we simply ignore this path in the finalized tree.
+		return opts.Preserved, nil
+	}
+	if !opts.Preserved {
+		// We will convert the symlink to a normal file, so it doesn't matter
+		// where target is under execRoot or not.
+		return true, nil
+	}
+
+	if _, err := getTargetRelPath(execRoot, meta.Target); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
+	if opts == nil {
+		opts = DefaultTreeSymlinkOpts()
+	}
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
 	normPath, err := getRelPath(execRoot, absPath)
 	if err != nil {
 		return err
 	}
 	meta := cache.Get(absPath)
-	t := command.FileInputType
-	if smd := meta.Symlink; smd != nil && smd.IsDangling {
-		return nil
-	}
-	if meta.Err != nil {
+	isSymlink := meta.Symlink != nil
+	if isSymlink {
+		cont, err := preprocessSymlink(execRoot, path, meta.Symlink, opts)
+		if err != nil {
+			return err
+		}
+		if !cont {
+			return nil
+		}
+	} else if meta.Err != nil {
 		return meta.Err
 	}
-	if meta.IsDirectory {
+	t := command.FileInputType
+	if isSymlink && opts.Preserved {
+		// An implication of this is that, if a path is a symlink to a
+		// directory, then the symlink attribute takes precedence.
+		t = command.SymlinkInputType
+	} else if meta.IsDirectory {
 		t = command.DirectoryInputType
 	}
 	if shouldIgnore(absPath, t, excl) {
@@ -93,6 +160,22 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 			},
 		}
 		return nil
+	} else if t == command.SymlinkInputType {
+		relTarget, err := getTargetRelPath(execRoot, meta.Symlink.Target)
+		if err != nil {
+			return err
+		}
+		fs[normPath] = &fileSysNode{
+			// We cannot directly use meta.Symlink.Target, because it could be
+			// an absolute path. Since the remote worker will map the exec root
+			// to a different directory, we must strip away the local exec root.
+			// See https://github.com/bazelbuild/remote-apis-sdks/pull/229#discussion_r524830458
+			symlink: &symlinkNode{target: relTarget},
+		}
+		if meta.Symlink.IsDangling || !opts.FollowsTarget {
+			return nil
+		}
+		return loadFiles(execRoot, excl, relTarget, fs, chunkSize, cache, opts)
 	}
 	// Directory
 	files, err := ioutil.ReadDir(absPath)
@@ -105,7 +188,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return nil
 	}
 	for _, f := range files {
-		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, chunkSize, cache); e != nil {
+		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, chunkSize, cache, opts); e != nil {
 			return e
 		}
 	}
@@ -141,7 +224,7 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, chunk
 		if i == "" {
 			return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
 		}
-		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache); e != nil {
+		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache, c.TreeSymlinkOpts); e != nil {
 			return digest.Empty, nil, nil, e
 		}
 	}
@@ -184,10 +267,17 @@ func buildTree(files map[string]*fileSysNode) *treeNode {
 			node.dirs[base] = &treeNode{}
 			continue
 		}
-		if node.files == nil {
-			node.files = make(map[string]*fileNode)
+		if fn.file != nil {
+			if node.files == nil {
+				node.files = make(map[string]*fileNode)
+			}
+			node.files[base] = fn.file
+		} else {
+			if node.symlinks == nil {
+				node.symlinks = make(map[string]*symlinkNode)
+			}
+			node.symlinks[base] = fn.symlink
 		}
-		node.files[base] = fn.file
 	}
 	return root
 }
@@ -216,6 +306,12 @@ func packageTree(t *treeNode, chunkSize int, stats *TreeStats) (root digest.Dige
 		stats.TotalInputBytes += dg.Size
 	}
 	sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
+
+	for name, sn := range t.symlinks {
+		dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: sn.target})
+		stats.InputSymlinks++
+	}
+	sort.Slice(dir.Symlinks, func(i, j int) bool { return dir.Symlinks[i].Name < dir.Symlinks[j].Name })
 
 	ch, err := chunker.NewFromProto(dir, chunkSize)
 	if err != nil {
@@ -387,7 +483,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, chunkSi
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, nil, "", fs, chunkSize, cache); e != nil {
+		if e := loadFiles(absPath, nil, "", fs, chunkSize, cache, c.TreeSymlinkOpts); e != nil {
 			return nil, nil, e
 		}
 		ft := buildTree(fs)
