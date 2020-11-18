@@ -130,10 +130,12 @@ func (c *Chunker) FullData() ([]byte, error) {
 		err = c.r.Initialize()
 	}
 	if err != nil {
+		c.r.Close() // Free file handle in case of error.
 		return nil, err
 	}
 	// Cache contents so that the next call to FullData() doesn't result in file read.
 	c.contents, err = ioutil.ReadAll(c.r)
+	c.r.Close()
 	return c.contents, err
 }
 
@@ -191,7 +193,9 @@ func (c *Chunker) Next() (*Chunk, error) {
 				c.contents = data
 			}
 			c.reachedEOF = true
+			c.r.Close()
 		} else if err != nil {
+			c.r.Close() // Free the file handle in case of error.
 			return nil, err
 		}
 	}
