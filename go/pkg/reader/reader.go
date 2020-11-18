@@ -15,6 +15,7 @@ type Initializable interface {
 
 type ReadSeeker interface {
 	io.Reader
+	io.Closer
 	Initializable
 	SeekOffset(offset int64)
 }
@@ -40,6 +41,17 @@ func NewFileReadSeeker(path string, buffsize int) ReadSeeker {
 		seekOffset:  0,
 		initialized: false,
 	}
+}
+
+// Close closes the reader. It still can be reopened with Initialize().
+func (fio *fileSeeker) Close() (err error) {
+	fio.initialized = false
+	if fio.f != nil {
+		err = fio.f.Close()
+	}
+	fio.f = nil
+	fio.reader = nil
+	return err
 }
 
 // Read implements io.Reader.
