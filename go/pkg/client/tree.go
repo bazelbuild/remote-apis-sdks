@@ -87,18 +87,22 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 	return false
 }
 
-// getTargetRelPath returns the part of target that is relative to execRoot,
-// iff target is under execRoot. Otherwise it returns an error.
-func getTargetRelPath(execRoot, target string) (string, error) {
+// getTargetRelPath returns the part of the target relative to the symlink's
+// directory, iff the target is under execRoot. Otherwise it returns an error.
+func getTargetRelPath(execRoot, symlinkNormDir, target string) (string, error) {
+	symlinkAbsDir := filepath.Clean(filepath.Join(execRoot, symlinkNormDir))
 	if !filepath.IsAbs(target) {
-		target = filepath.Clean(filepath.Join(execRoot, target))
+		target = filepath.Clean(filepath.Join(symlinkAbsDir, target))
 	}
-	return getRelPath(execRoot, target)
+	if _, err := getRelPath(execRoot, target); err != nil {
+		return "", err
+	}
+	return filepath.Rel(symlinkAbsDir, target)
 }
 
 // preprocessSymlink returns two things: if the routine should continue, and if
 // there is an error to be reported back.
-func preprocessSymlink(execRoot, symlink string, meta *filemetadata.SymlinkMetadata, opts *TreeSymlinkOpts) (bool, error) {
+func preprocessSymlink(execRoot, symlinkNormDir string, meta *filemetadata.SymlinkMetadata, opts *TreeSymlinkOpts) (bool, error) {
 	if meta.IsDangling {
 		// For now, we do not treat a dangling symlink as an error. In the case
 		// where the symlink is not preserved (i.e. needs to be converted to a
@@ -111,7 +115,7 @@ func preprocessSymlink(execRoot, symlink string, meta *filemetadata.SymlinkMetad
 		return true, nil
 	}
 
-	if _, err := getTargetRelPath(execRoot, meta.Target); err != nil {
+	if _, err := getTargetRelPath(execRoot, symlinkNormDir, meta.Target); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -130,8 +134,10 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 	meta := cache.Get(absPath)
 	isSymlink := meta.Symlink != nil
+	symlinkNormDir := ""
 	if isSymlink {
-		cont, err := preprocessSymlink(execRoot, path, meta.Symlink, opts)
+		symlinkNormDir = filepath.Dir(normPath)
+		cont, err := preprocessSymlink(execRoot, symlinkNormDir, meta.Symlink, opts)
 		if err != nil {
 			return err
 		}
@@ -161,7 +167,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		}
 		return nil
 	} else if t == command.SymlinkInputType {
-		relTarget, err := getTargetRelPath(execRoot, meta.Symlink.Target)
+		relTarget, err := getTargetRelPath(execRoot, symlinkNormDir, meta.Symlink.Target)
 		if err != nil {
 			return err
 		}
@@ -175,7 +181,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		if meta.Symlink.IsDangling || !opts.FollowsTarget {
 			return nil
 		}
-		return loadFiles(execRoot, excl, relTarget, fs, chunkSize, cache, opts)
+		return loadFiles(execRoot, excl, filepath.Clean(filepath.Join(symlinkNormDir, relTarget)), fs, chunkSize, cache, opts)
 	}
 	// Directory
 	files, err := ioutil.ReadDir(absPath)
