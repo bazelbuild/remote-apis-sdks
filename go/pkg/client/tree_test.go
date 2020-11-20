@@ -57,6 +57,15 @@ type inputPath struct {
 func construct(dir string, ips []*inputPath) error {
 	for _, ip := range ips {
 		path := filepath.Join(dir, ip.path)
+		if ip.emptyDir {
+			if err := os.MkdirAll(path, 0777); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+			return err
+		}
 		if ip.isSymlink {
 			target := ip.symlinkTarget
 			if ip.isAbsolute {
@@ -67,16 +76,7 @@ func construct(dir string, ips []*inputPath) error {
 			}
 			continue
 		}
-		if ip.emptyDir {
-			if err := os.MkdirAll(path, 0777); err != nil {
-				return err
-			}
-			continue
-		}
 		// Regular file.
-		if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
-			return err
-		}
 		perm := os.FileMode(0666)
 		if ip.isExecutable {
 			perm = os.FileMode(0777)
@@ -345,6 +345,11 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 }
 
 func TestComputeMerkleTree(t *testing.T) {
+	foobarSymDir := &repb.Directory{Symlinks: []*repb.SymlinkNode{{Name: "foobarSymDir", Target: "../foobarDir"}}}
+	foobarSymDirBlob := mustMarshal(foobarSymDir)
+	foobarSymDirDg := digest.NewFromBlob(foobarSymDirBlob)
+	foobarSymDirDgPb := foobarSymDirDg.ToProto()
+
 	tests := []struct {
 		desc  string
 		input []*inputPath
@@ -692,28 +697,27 @@ func TestComputeMerkleTree(t *testing.T) {
 			input: []*inputPath{
 				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "foobarDir/bar", fileContents: barBlob},
-				{path: "foobarSymDir", isSymlink: true, isAbsolute: true, symlinkTarget: "foobarDir"},
+				{path: "base/foobarSymDir", isSymlink: true, isAbsolute: true, symlinkTarget: "foobarDir"},
 			},
 			spec: &command.InputSpec{
 				// The symlink target will be traversed recursively.
-				Inputs: []string{"foobarSymDir"},
+				Inputs: []string{"base/foobarSymDir"},
 			},
 			rootDir: &repb.Directory{
-				Directories: []*repb.DirectoryNode{{Name: "foobarDir", Digest: foobarDirDgPb}},
-				Symlinks:    []*repb.SymlinkNode{{Name: "foobarSymDir", Target: "foobarDir"}},
+				Directories: []*repb.DirectoryNode{{Name: "base", Digest: foobarSymDirDgPb}, {Name: "foobarDir", Digest: foobarDirDgPb}},
 			},
-			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
+			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob, foobarSymDirBlob},
 			wantCacheCalls: map[string]int{
-				"foobarDir":     1,
-				"foobarDir/foo": 1,
-				"foobarDir/bar": 1,
-				"foobarSymDir":  1,
+				"foobarDir":         1,
+				"foobarDir/foo":     1,
+				"foobarDir/bar":     1,
+				"base/foobarSymDir": 1,
 			},
 			wantStats: &client.TreeStats{
-				InputDirectories: 2,
+				InputDirectories: 3,
 				InputFiles:       2,
 				InputSymlinks:    1,
-				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
+				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size + foobarSymDirDg.Size,
 			},
 			treeOpts: &client.TreeSymlinkOpts{
 				Preserved:     true,
@@ -725,28 +729,27 @@ func TestComputeMerkleTree(t *testing.T) {
 			input: []*inputPath{
 				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "foobarDir/bar", fileContents: barBlob},
-				{path: "foobarSymDir", isSymlink: true, symlinkTarget: "foobarDir"},
+				{path: "base/foobarSymDir", isSymlink: true, symlinkTarget: "../foobarDir"},
 			},
 			spec: &command.InputSpec{
 				// The symlink target will be traversed recursively.
-				Inputs: []string{"foobarSymDir"},
+				Inputs: []string{"base/foobarSymDir"},
 			},
 			rootDir: &repb.Directory{
-				Directories: []*repb.DirectoryNode{{Name: "foobarDir", Digest: foobarDirDgPb}},
-				Symlinks:    []*repb.SymlinkNode{{Name: "foobarSymDir", Target: "foobarDir"}},
+				Directories: []*repb.DirectoryNode{{Name: "base", Digest: foobarSymDirDgPb}, {Name: "foobarDir", Digest: foobarDirDgPb}},
 			},
-			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
+			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob, foobarSymDirBlob},
 			wantCacheCalls: map[string]int{
-				"foobarDir":     1,
-				"foobarDir/foo": 1,
-				"foobarDir/bar": 1,
-				"foobarSymDir":  1,
+				"foobarDir":         1,
+				"foobarDir/foo":     1,
+				"foobarDir/bar":     1,
+				"base/foobarSymDir": 1,
 			},
 			wantStats: &client.TreeStats{
-				InputDirectories: 2,
+				InputDirectories: 3,
 				InputFiles:       2,
 				InputSymlinks:    1,
-				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
+				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size + foobarSymDirDg.Size,
 			},
 			treeOpts: &client.TreeSymlinkOpts{
 				Preserved:     true,
