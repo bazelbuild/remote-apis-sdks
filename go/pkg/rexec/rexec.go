@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
@@ -37,8 +37,8 @@ type Context struct {
 	opt         *command.ExecutionOptions
 	oe          outerr.OutErr
 	client      *Client
-	inputBlobs  []*chunker.UploadEntry
-	cmdUe, acUe *chunker.UploadEntry
+	inputBlobs  []*uploadinfo.Entry
+	cmdUe, acUe *uploadinfo.Entry
 	resPb       *repb.ActionResult
 	// The metadata of the current execution.
 	Metadata *command.Metadata
@@ -138,10 +138,10 @@ func (ec *Context) computeInputs() error {
 	cmdPb := ec.cmd.ToREProto()
 	log.V(2).Infof("%s %s> Command: \n%s\n", cmdID, executionID, proto.MarshalTextString(cmdPb))
 	var err error
-	if ec.cmdUe, err = chunker.EntryFromProto(cmdPb); err != nil {
+	if ec.cmdUe, err = uploadinfo.EntryFromProto(cmdPb); err != nil {
 		return err
 	}
-	cmdDg := ec.cmdUe.Digest()
+	cmdDg := ec.cmdUe.Digest
 	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s %s> Command digest: %s", cmdID, executionID, cmdDg)
 	log.V(1).Infof("%s %s> Computing input Merkle tree...", cmdID, executionID)
@@ -161,10 +161,10 @@ func (ec *Context) computeInputs() error {
 	if ec.cmd.Timeout > 0 {
 		acPb.Timeout = ptypes.DurationProto(ec.cmd.Timeout)
 	}
-	if ec.acUe, err = chunker.EntryFromProto(acPb); err != nil {
+	if ec.acUe, err = uploadinfo.EntryFromProto(acPb); err != nil {
 		return err
 	}
-	acDg := ec.acUe.Digest()
+	acDg := ec.acUe.Digest
 	log.V(1).Infof("%s %s> Action digest: %s", cmdID, executionID, acDg)
 	ec.inputBlobs = append(ec.inputBlobs, ec.cmdUe)
 	ec.inputBlobs = append(ec.inputBlobs, ec.acUe)
@@ -234,7 +234,7 @@ func (ec *Context) UpdateCachedResult() {
 	}
 	ec.resPb = resPb
 	ec.setOutputMetadata()
-	toUpload := []*chunker.UploadEntry{ec.acUe, ec.cmdUe}
+	toUpload := []*uploadinfo.Entry{ec.acUe, ec.cmdUe}
 	for _, ch := range blobs {
 		toUpload = append(toUpload, ch)
 	}

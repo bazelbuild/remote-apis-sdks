@@ -219,7 +219,7 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 		if err != nil {
 			t.Errorf("chunker %v FullData() returned error %v", ch, err)
 		}
-		gotBlobs[ue.Digest()] = blob
+		gotBlobs[ue.Digest] = blob
 	}
 	if diff := cmp.Diff(aDirDg, gotRootDg); diff != "" {
 		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
@@ -321,7 +321,7 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 		if err != nil {
 			t.Errorf("chunker %v FullData() returned error %v", ch, err)
 		}
-		gotBlobs[ue.Digest()] = blob
+		gotBlobs[ue.Digest] = blob
 	}
 	if diff := cmp.Diff(aDirDg, gotRootDg); diff != "" {
 		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
@@ -1113,7 +1113,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				if err != nil {
 					t.Errorf("chunker %v FullData() returned error %v", ch, err)
 				}
-				gotBlobs[ue.Digest()] = blob
+				gotBlobs[ue.Digest] = blob
 			}
 			if diff := cmp.Diff(rootDg, gotRootDg); diff != "" {
 				t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
@@ -1400,7 +1400,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 				if err != nil {
 					t.Errorf("chunker %v FullData() returned error %v", ch, err)
 				}
-				gotBlobs[ue.Digest()] = blob
+				gotBlobs[ue.Digest] = blob
 			}
 			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
@@ -1512,7 +1512,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 				if err != nil {
 					t.Errorf("chunker %v FullData() returned error %v", ch, err)
 				}
-				gotBlobs[ue.Digest()] = blob
+				gotBlobs[ue.Digest] = blob
 			}
 			if diff := cmp.Diff(tc.wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)

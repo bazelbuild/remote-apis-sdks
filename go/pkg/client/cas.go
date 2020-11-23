@@ -17,6 +17,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
 	"golang.org/x/sync/errgroup"
@@ -36,7 +37,7 @@ type requestMetadata struct {
 }
 
 type uploadRequest struct {
-	ue     *chunker.UploadEntry
+	ue     *uploadinfo.Entry
 	meta   *requestMetadata
 	wait   chan<- *uploadResponse
 	cancel bool
@@ -49,7 +50,7 @@ type uploadResponse struct {
 }
 
 type uploadState struct {
-	ue  *chunker.UploadEntry
+	ue  *uploadinfo.Entry
 	err error
 
 	// mu protects clients anc cancel. The fields need protection since they are updated by upload
@@ -109,7 +110,7 @@ func (c *Client) uploadProcessor() {
 				}
 			}
 			buffer = newBuffer
-			st, ok := c.casUploads[req.ue.Digest()]
+			st, ok := c.casUploads[req.ue.Digest]
 			if ok {
 				st.mu.Lock()
 				var remainingClients []chan<- *uploadResponse
@@ -120,11 +121,11 @@ func (c *Client) uploadProcessor() {
 				}
 				st.clients = remainingClients
 				if len(st.clients) == 0 {
-					log.V(3).Infof("Cancelling Write %v", req.ue.Digest())
+					log.V(3).Infof("Cancelling Write %v", req.ue.Digest)
 					if st.cancel != nil {
 						st.cancel()
 					}
-					delete(c.casUploads, req.ue.Digest())
+					delete(c.casUploads, req.ue.Digest)
 				}
 				st.mu.Unlock()
 			}
@@ -143,7 +144,7 @@ func updateAndNotify(st *uploadState, err error, missing bool) {
 	st.err = err
 	for i, cl := range st.clients {
 		cl <- &uploadResponse{
-			digest:  st.ue.Digest(),
+			digest:  st.ue.Digest,
 			missing: i == 0 && missing, // Only first client is reported the digest missing.
 			err:     err,
 		}
@@ -187,7 +188,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 	var newUploads []digest.Digest
 	var metas []*requestMetadata
 	for _, req := range reqs {
-		dg := req.ue.Digest()
+		dg := req.ue.Digest
 		st, ok := c.casUploads[dg]
 		if ok {
 			st.mu.Lock()
@@ -286,7 +287,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				cCtx, cancel := context.WithCancel(ctx)
 				st.cancel = cancel
 				st.mu.Unlock()
-				dg := st.ue.Digest()
+				dg := st.ue.Digest
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 				ch, err := chunker.New(st.ue, false, int(c.ChunkMaxSize))
 				if err != nil {
@@ -301,11 +302,11 @@ func (c *Client) upload(reqs []*uploadRequest) {
 
 // This function is only used when UnifiedCASOps is false. It will be removed
 // once UnifiedCASOps=true is stable.
-func (c *Client) uploadNonUnified(ctx context.Context, data ...*chunker.UploadEntry) ([]digest.Digest, error) {
+func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, error) {
 	var dgs []digest.Digest
 	chunkers := make(map[digest.Digest]*chunker.Chunker)
 	for _, ue := range data {
-		dg := ue.Digest()
+		dg := ue.Digest
 		if _, ok := chunkers[dg]; !ok {
 			dgs = append(dgs, dg)
 			ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
@@ -394,7 +395,7 @@ func (c *Client) cancelPendingRequests(reqs []*uploadRequest) {
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
 // Returns a slice of the missing digests.
-func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.UploadEntry) ([]digest.Digest, error) {
+func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, error) {
 	if !c.UnifiedCASOps {
 		return c.uploadNonUnified(ctx, data...)
 	}
@@ -458,9 +459,9 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*chunker.UploadEnt
 // * How to consistently distinguish in the API between should we use GetMissing or not?
 // * Should BatchWrite be a public method at all?
 func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
-	var uEntries []*chunker.UploadEntry
+	var uEntries []*uploadinfo.Entry
 	for _, blob := range blobs {
-		uEntries = append(uEntries, chunker.EntryFromBlob(blob))
+		uEntries = append(uEntries, uploadinfo.EntryFromBlob(blob))
 	}
 	_, err := c.UploadIfMissing(ctx, uEntries...)
 	return err
@@ -477,8 +478,8 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 
 // WriteBlob uploads a blob to the CAS.
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
-	ue := chunker.EntryFromBlob(blob)
-	dg := ue.Digest()
+	ue := uploadinfo.EntryFromBlob(blob)
+	dg := ue.Digest
 	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
 		return dg, err

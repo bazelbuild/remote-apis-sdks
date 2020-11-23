@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -89,7 +90,7 @@ func TestChunkerFromBlob(t *testing.T) {
 	t.Parallel()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ue := EntryFromBlob(tc.blob)
+			ue := uploadinfo.EntryFromBlob(tc.blob)
 			c, err := New(ue, false, tc.chunkSize)
 			if err != nil {
 				t.Fatalf("Could not make chunker from UEntry: %v", err)
@@ -130,7 +131,7 @@ func TestChunkerFromFile(t *testing.T) {
 				}
 				dg := digest.NewFromBlob(tc.blob)
 				IOBufferSize = bufSize
-				ue := EntryFromFile(dg, path)
+				ue := uploadinfo.EntryFromFile(dg, path)
 				c, err := New(ue, false, tc.chunkSize)
 				if err != nil {
 					t.Fatalf("Could not make chunker from UEntry: %v", err)
@@ -158,7 +159,7 @@ func TestChunkerFullData(t *testing.T) {
 	t.Parallel()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ue := EntryFromBlob(tc.blob)
+			ue := uploadinfo.EntryFromBlob(tc.blob)
 			c, err := New(ue, false, tc.chunkSize)
 			if err != nil {
 				t.Fatalf("Could not make chunker from UEntry: %v", err)
@@ -179,7 +180,7 @@ func TestChunkerFromBlob_Reset(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			for reset := 1; reset < len(tc.wantChunks); reset++ {
-				ue := EntryFromBlob(tc.blob)
+				ue := uploadinfo.EntryFromBlob(tc.blob)
 				c, err := New(ue, false, tc.chunkSize)
 				if err != nil {
 					t.Fatalf("Could not make chunker from UEntry: %v", err)
@@ -243,7 +244,7 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 				dg := digest.NewFromBlob(tc.blob)
 				IOBufferSize = bufSize
 				for reset := 1; reset < len(tc.wantChunks); reset++ {
-					ue := EntryFromFile(dg, path)
+					ue := uploadinfo.EntryFromFile(dg, path)
 					c, err := New(ue, false, tc.chunkSize)
 					if err != nil {
 						t.Fatalf("Could not make chunker from UEntry: %v", err)
@@ -290,7 +291,7 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 }
 
 func TestChunkerErrors_ErrEOF(t *testing.T) {
-	ue := EntryFromBlob([]byte("12"))
+	ue := uploadinfo.EntryFromBlob([]byte("12"))
 	c, err := New(ue, false, 2)
 	if err != nil {
 		t.Fatalf("Could not make chunker from UEntry: %v", err)
@@ -322,7 +323,7 @@ func TestChunkerResetOptimization_SmallFile(t *testing.T) {
 	}
 	dg := digest.NewFromBlob(blob)
 	IOBufferSize = 10
-	ue := EntryFromFile(dg, path)
+	ue := uploadinfo.EntryFromFile(dg, path)
 	c, err := New(ue, false, 4)
 	if err != nil {
 		t.Fatalf("Could not make chunker from UEntry: %v", err)
@@ -365,7 +366,7 @@ func TestChunkerResetOptimization_FullData(t *testing.T) {
 	}
 	dg := digest.NewFromBlob(blob)
 	IOBufferSize = 5
-	ue := EntryFromFile(dg, path)
+	ue := uploadinfo.EntryFromFile(dg, path)
 	c, err := New(ue, false, 3)
 	if err != nil {
 		t.Fatalf("Could not make chunker from UEntry: %v", err)

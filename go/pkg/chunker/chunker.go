@@ -7,9 +7,8 @@ import (
 	"io"
 	"io/ioutil"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/reader"
-	"github.com/golang/protobuf/proto"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 )
 
 // DefaultChunkSize is the default chunk size for ByteStream.Write RPCs.
@@ -20,42 +19,6 @@ var IOBufferSize = 10 * 1024 * 1024
 
 // ErrEOF is returned when Next is called when HasNext is false.
 var ErrEOF = errors.New("ErrEOF")
-
-type UploadEntry struct {
-	digest   digest.Digest
-	contents []byte
-	path     string
-}
-
-// Digest returns the digest of the full data of this chunker.
-func (ue *UploadEntry) Digest() digest.Digest {
-	return ue.digest
-}
-
-func EntryFromBlob(blob []byte) *UploadEntry {
-	if blob == nil {
-		blob = make([]byte, 0)
-	}
-	return &UploadEntry{
-		contents: blob,
-		digest:   digest.NewFromBlob(blob),
-	}
-}
-
-func EntryFromProto(msg proto.Message) (*UploadEntry, error) {
-	blob, err := proto.Marshal(msg)
-	if err != nil {
-		return nil, err
-	}
-	return EntryFromBlob(blob), nil
-}
-
-func EntryFromFile(dg digest.Digest, path string) *UploadEntry {
-	return &UploadEntry{
-		digest: dg,
-		path:   path,
-	}
-}
 
 // Chunker can be used to chunk an input into uploadable-size byte slices.
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
@@ -68,15 +31,14 @@ type Chunker struct {
 	// * Next() was called and the read was less than IOBufferSize.
 	// Once contents are initialized, they are immutable.
 	contents   []byte
-	path       string
 	offset     int64
 	reachedEOF bool
 
-	ue         *UploadEntry
+	ue         *uploadinfo.Entry
 	compressed bool
 }
 
-func New(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, error) {
+func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error) {
 	if compressed {
 		return nil, errors.New("compression is not supported yet")
 	}
@@ -84,13 +46,16 @@ func New(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, error) {
 		chunkSize = DefaultChunkSize
 	}
 	var c *Chunker
-	if ue.contents != nil {
-		c = chunkerFromBlob(ue.contents, compressed)
-	} else if ue.path != "" {
-		var err error
-		c, err = chunkerFromFile(ue.path, compressed)
-		if err != nil {
-			return nil, err
+	if ue.IsBlob() {
+		contents := make([]byte, len(ue.Contents))
+		copy(contents, ue.Contents)
+		c = &Chunker{
+			contents: contents,
+		}
+	} else if ue.IsFile() {
+		r := reader.NewFileReadSeeker(ue.Path, IOBufferSize)
+		c = &Chunker{
+			r: r,
 		}
 
 		if chunkSize > IOBufferSize {
@@ -105,29 +70,13 @@ func New(ue *UploadEntry, compressed bool, chunkSize int) (*Chunker, error) {
 	return c, nil
 }
 
-func chunkerFromBlob(blob []byte, compressed bool) *Chunker {
-	contents := make([]byte, len(blob))
-	copy(contents, blob)
-	return &Chunker{
-		contents: contents,
-	}
-}
-
-func chunkerFromFile(path string, compressed bool) (*Chunker, error) {
-	r := reader.NewFileReadSeeker(path, IOBufferSize)
-	return &Chunker{
-		r:    r,
-		path: path,
-	}, nil
-}
-
 // String returns an identifiable representation of the Chunker.
 func (c *Chunker) String() string {
-	size := fmt.Sprintf("<%d bytes>", c.ue.digest.Size)
-	if c.path == "" {
+	size := fmt.Sprintf("<%d bytes>", c.ue.Digest.Size)
+	if !c.ue.IsFile() {
 		return size
 	}
-	return fmt.Sprintf("%s: %s", size, c.path)
+	return fmt.Sprintf("%s: %s", size, c.ue.Path)
 }
 
 // Offset returns the current Chunker offset.
@@ -191,7 +140,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 	if !c.HasNext() {
 		return nil, ErrEOF
 	}
-	if c.ue.digest.Size == 0 {
+	if c.ue.Digest.Size == 0 {
 		c.reachedEOF = true
 		return &Chunk{}, nil
 	}
