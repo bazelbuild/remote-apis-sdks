@@ -62,7 +62,7 @@ func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error)
 			chunkSize = IOBufferSize
 		}
 	} else {
-		return nil, errors.New("Invalid UEntry. Content and path cannot both be nil.")
+		return nil, errors.New("Invalid UEntry.")
 	}
 
 	c.chunkSize = chunkSize

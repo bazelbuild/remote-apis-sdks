@@ -296,8 +296,6 @@ func TestChunkerErrors_ErrEOF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not make chunker from UEntry: %v", err)
 	}
-	if err != nil {
-	}
 	_, err = c.Next()
 	if err != nil {
 		t.Errorf("c.Next() gave error %v, expecting next chunk \"12\"", err)

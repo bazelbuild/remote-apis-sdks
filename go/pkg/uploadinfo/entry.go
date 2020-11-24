@@ -12,8 +12,8 @@ const (
 	UEPath
 )
 
-// Immutable upon creation. Should be created using constructor.
-// Only Contents or Path must be set.
+// Entry should remain immutable upon creation.
+// Should be created using constructor. Only Contents or Path must be set.
 // In case of a malformed entry, Contents takes precedence over Path.
 type Entry struct {
 	Digest   digest.Digest
