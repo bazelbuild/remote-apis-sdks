@@ -9,6 +9,9 @@ tasks:
       - "go vet ./..."
     build_targets:
       - "//..."
+    test_flags:
+      - "--features=race"
+      - "--runs_per_test=10"
     test_targets:
       - "//..."
   # Check that "go build / test" works, too.
