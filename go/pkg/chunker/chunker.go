@@ -9,6 +9,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/reader"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
+	"github.com/klauspost/compress/zstd"
 )
 
 // DefaultChunkSize is the default chunk size for ByteStream.Write RPCs.
@@ -19,6 +20,9 @@ var IOBufferSize = 10 * 1024 * 1024
 
 // ErrEOF is returned when Next is called when HasNext is false.
 var ErrEOF = errors.New("ErrEOF")
+
+// Compressor for full blobs
+var fullCompressor, _ = zstd.NewWriter(nil)
 
 // Chunker can be used to chunk an input into uploadable-size byte slices.
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
@@ -94,6 +98,7 @@ func (c *Chunker) ChunkSize() int {
 // TODO(olaola): implement Seek(offset) when we have resumable uploads.
 func (c *Chunker) Reset() {
 	if c.r != nil {
+		// We're ignoring the error here, as not to change the fn signature.
 		c.r.SeekOffset(0)
 	}
 	c.offset = 0

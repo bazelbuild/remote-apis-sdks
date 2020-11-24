@@ -40,6 +40,7 @@ require (
 	github.com/googleapis/gax-go v2.0.2+incompatible // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6 // indirect
 	github.com/jung-kurt/gofpdf v1.13.0 // indirect
+	github.com/klauspost/compress v1.11.2
 	github.com/kylelemons/godebug v1.1.0
 	github.com/mattn/go-sqlite3 v1.11.0 // indirect
 	github.com/nbutton23/zxcvbn-go v0.0.0-20180912185939-ae427f1e4c1d // indirect

@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//go/pkg/reader:go_default_library",
         "//go/pkg/uploadinfo:go_default_library",
+        "@com_github_klauspost_compress//zstd:go_default_library",
     ],
 )
 

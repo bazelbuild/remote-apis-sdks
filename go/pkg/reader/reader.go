@@ -2,10 +2,13 @@ package reader
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 type Initializable interface {
@@ -17,7 +20,7 @@ type ReadSeeker interface {
 	io.Reader
 	io.Closer
 	Initializable
-	SeekOffset(offset int64)
+	SeekOffset(offset int64) error
 }
 
 type fileSeeker struct {
@@ -65,10 +68,11 @@ func (fio *fileSeeker) Read(p []byte) (int, error) {
 
 // Seek is a simplified version of io.Seeker. It only supports offsets from the
 // beginning of the file, and it errors lazily at the next Initialize.
-func (fio *fileSeeker) SeekOffset(offset int64) {
+func (fio *fileSeeker) SeekOffset(offset int64) error {
 	fio.seekOffset = offset
 	fio.initialized = false
 	fio.reader = nil
+	return nil
 }
 
 // IsInitialized indicates whether this reader is ready. If false, Read calls
@@ -107,3 +111,74 @@ func (fio *fileSeeker) Initialize() error {
 	fio.initialized = true
 	return nil
 }
+
+type compressedSeeker struct {
+	fs   ReadSeeker
+	encd *zstd.Encoder
+	// This keeps the compressed data
+	buf *bytes.Buffer
+}
+
+func NewCompressedFileSeeker(path string, buffsize int) (ReadSeeker, error) {
+	return NewCompressedSeeker(NewFileReadSeeker(path, buffsize))
+}
+
+func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
+	if _, ok := fs.(*compressedSeeker); ok {
+		return nil, errors.New("Trying to double compress files.")
+	}
+
+	buf := bytes.NewBuffer(nil)
+	encd, err := zstd.NewWriter(buf)
+	return &compressedSeeker{
+		fs:   fs,
+		encd: encd,
+		buf:  buf,
+	}, err
+}
+
+func (cfs *compressedSeeker) Read(p []byte) (int, error) {
+	var n int
+	var errR, errW error
+	for cfs.buf.Len() < len(p) && errR == nil && errW == nil {
+		// Read is allowed to use the entity of p as a scratchpad.
+		n, errR = cfs.fs.Read(p)
+		// errW must be non-nil if written bytes != from n.
+		_, errW = cfs.encd.Write(p[:n])
+	}
+	m, errR2 := cfs.buf.Read(p)
+
+	var retErr error
+	if errR != nil {
+		retErr = errR
+	} else if errW != nil {
+		retErr = errW
+	} else {
+		retErr = errR2
+	}
+
+	if retErr != nil {
+		cfs.encd.Close()
+	}
+
+	return m, retErr
+}
+
+func (cfs *compressedSeeker) SeekOffset(offset int64) error {
+	cfs.buf.Reset()
+	if err := cfs.encd.Close(); err != nil {
+		return err
+	}
+
+	cfs.encd.Reset(cfs.buf)
+	if err := cfs.fs.SeekOffset(offset); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (cfs *compressedSeeker) IsInitialized() bool { return cfs.fs.IsInitialized() }
+func (cfs *compressedSeeker) Initialize() error   { return cfs.fs.Initialize() }
+
+func (cfs *compressedSeeker) Close() error { return cfs.fs.Close() }
