@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
@@ -37,8 +37,8 @@ type Context struct {
 	opt         *command.ExecutionOptions
 	oe          outerr.OutErr
 	client      *Client
-	inputBlobs  []*chunker.Chunker
-	cmdCh, acCh *chunker.Chunker
+	inputBlobs  []*uploadinfo.Entry
+	cmdUe, acUe *uploadinfo.Entry
 	resPb       *repb.ActionResult
 	// The metadata of the current execution.
 	Metadata *command.Metadata
@@ -137,16 +137,15 @@ func (ec *Context) computeInputs() error {
 	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
 	cmdPb := ec.cmd.ToREProto()
 	log.V(2).Infof("%s %s> Command: \n%s\n", cmdID, executionID, proto.MarshalTextString(cmdPb))
-	chunkSize := int(ec.client.GrpcClient.ChunkMaxSize)
 	var err error
-	if ec.cmdCh, err = chunker.NewFromProto(cmdPb, chunkSize); err != nil {
+	if ec.cmdUe, err = uploadinfo.EntryFromProto(cmdPb); err != nil {
 		return err
 	}
-	cmdDg := ec.cmdCh.Digest()
+	cmdDg := ec.cmdUe.Digest
 	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s %s> Command digest: %s", cmdID, executionID, cmdDg)
 	log.V(1).Infof("%s %s> Computing input Merkle tree...", cmdID, executionID)
-	root, blobs, stats, err := ec.client.GrpcClient.ComputeMerkleTree(ec.cmd.ExecRoot, ec.cmd.InputSpec, chunkSize, ec.client.FileMetadataCache)
+	root, blobs, stats, err := ec.client.GrpcClient.ComputeMerkleTree(ec.cmd.ExecRoot, ec.cmd.InputSpec, ec.client.FileMetadataCache)
 	if err != nil {
 		return err
 	}
@@ -162,13 +161,13 @@ func (ec *Context) computeInputs() error {
 	if ec.cmd.Timeout > 0 {
 		acPb.Timeout = ptypes.DurationProto(ec.cmd.Timeout)
 	}
-	if ec.acCh, err = chunker.NewFromProto(acPb, chunkSize); err != nil {
+	if ec.acUe, err = uploadinfo.EntryFromProto(acPb); err != nil {
 		return err
 	}
-	acDg := ec.acCh.Digest()
+	acDg := ec.acUe.Digest
 	log.V(1).Infof("%s %s> Action digest: %s", cmdID, executionID, acDg)
-	ec.inputBlobs = append(ec.inputBlobs, ec.cmdCh)
-	ec.inputBlobs = append(ec.inputBlobs, ec.acCh)
+	ec.inputBlobs = append(ec.inputBlobs, ec.cmdUe)
+	ec.inputBlobs = append(ec.inputBlobs, ec.acUe)
 	ec.Metadata.ActionDigest = acDg
 	ec.Metadata.TotalInputBytes += cmdDg.Size + acDg.Size
 	return nil
@@ -227,16 +226,15 @@ func (ec *Context) UpdateCachedResult() {
 	}
 	ec.Metadata.EventTimes[command.EventUpdateCachedResult] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventUpdateCachedResult].To = time.Now() }()
-	chunkSize := int(ec.client.GrpcClient.ChunkMaxSize)
 	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
-	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, outPaths, chunkSize, ec.client.FileMetadataCache)
+	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, outPaths, ec.client.FileMetadataCache)
 	if err != nil {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
 	ec.resPb = resPb
 	ec.setOutputMetadata()
-	toUpload := []*chunker.Chunker{ec.acCh, ec.cmdCh}
+	toUpload := []*uploadinfo.Entry{ec.acUe, ec.cmdUe}
 	for _, ch := range blobs {
 		toUpload = append(toUpload, ch)
 	}

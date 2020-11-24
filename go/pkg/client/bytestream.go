@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 
 	log "github.com/golang/glog"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
@@ -15,7 +16,12 @@ import (
 
 // WriteBytes uploads a byte slice.
 func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
-	return c.WriteChunked(ctx, name, chunker.NewFromBlob(data, int(c.ChunkMaxSize)))
+	ue := uploadinfo.EntryFromBlob(data)
+	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
+	if err != nil {
+		return err
+	}
+	return c.WriteChunked(ctx, name, ch)
 }
 
 // WriteChunked uploads chunked data with a given resource name to the CAS.

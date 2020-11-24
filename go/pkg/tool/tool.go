@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/ptypes"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
@@ -224,8 +224,8 @@ func (c *Client) UploadBlob(ctx context.Context, path string) error {
 	}
 
 	log.Infof("Uploading blob of %v from %v.", dg, path)
-	chunk := chunker.NewFromFile(path, dg, 0)
-	if _, err := c.GrpcClient.UploadIfMissing(ctx, chunk); err != nil {
+	ue := uploadinfo.EntryFromFile(dg, path)
+	if _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
 		return err
 	}
 	return nil

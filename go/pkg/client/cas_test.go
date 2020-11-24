@@ -20,6 +20,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"golang.org/x/sync/errgroup"
@@ -425,9 +426,9 @@ func TestUploadConcurrent(t *testing.T) {
 			eg, eCtx := errgroup.WithContext(ctx)
 			for i := 0; i < 100; i++ {
 				eg.Go(func() error {
-					var input []*chunker.Chunker
+					var input []*uploadinfo.Entry
 					for _, blob := range append(blobs, blobs...) {
-						input = append(input, chunker.NewFromBlob(blob, 10))
+						input = append(input, uploadinfo.EntryFromBlob(blob))
 					}
 					if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
@@ -474,12 +475,12 @@ func TestUploadConcurrentBatch(t *testing.T) {
 			for i := 0; i < 10; i++ {
 				i := i
 				eg.Go(func() error {
-					var input []*chunker.Chunker
+					var input []*uploadinfo.Entry
 					// Upload 15 digests in a sliding window.
 					for j := i * 10; j < i*10+15 && j < len(blobs); j++ {
-						input = append(input, chunker.NewFromBlob(blobs[j], 10))
+						input = append(input, uploadinfo.EntryFromBlob(blobs[j]))
 						// Twice to have the same upload in same call, in addition to between calls.
-						input = append(input, chunker.NewFromBlob(blobs[j], 10))
+						input = append(input, uploadinfo.EntryFromBlob(blobs[j]))
 					}
 					if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
@@ -533,9 +534,9 @@ func TestUploadCancel(t *testing.T) {
 
 			cCtx, cancel := context.WithCancel(ctx)
 			eg, _ := errgroup.WithContext(cCtx)
-			ch := chunker.NewFromBlob(blob, 3)
+			ue := uploadinfo.EntryFromBlob(blob)
 			eg.Go(func() error {
-				if _, err := c.UploadIfMissing(cCtx, ch); err != context.Canceled {
+				if _, err := c.UploadIfMissing(cCtx, ue); err != context.Canceled {
 					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context.Canceled", err)
 				}
 				return nil
@@ -550,7 +551,7 @@ func TestUploadCancel(t *testing.T) {
 				t.Error(err)
 			}
 			// Verify that nothing was written.
-			if fake.BlobWrites(ch.Digest()) != 0 {
+			if fake.BlobWrites(ue.Digest) != 0 {
 				t.Errorf("Blob was written, expected cancellation.")
 			}
 			close(wait)
@@ -605,10 +606,10 @@ func TestUploadConcurrentCancel(t *testing.T) {
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			eg.Go(func() error {
-				var input []*chunker.Chunker
+				var input []*uploadinfo.Entry
 				for _, blob := range blobs {
-					input = append(input, chunker.NewFromBlob(blob, 10))
-					input = append(input, chunker.NewFromBlob(blob, 10))
+					input = append(input, uploadinfo.EntryFromBlob(blob))
+					input = append(input, uploadinfo.EntryFromBlob(blob))
 				}
 				if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
@@ -618,10 +619,10 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			cCtx, cancel := context.WithCancel(eCtx)
 			for i := 0; i < 50; i++ {
 				eg.Go(func() error {
-					var input []*chunker.Chunker
+					var input []*uploadinfo.Entry
 					for _, blob := range blobs {
-						input = append(input, chunker.NewFromBlob(blob, 10))
-						input = append(input, chunker.NewFromBlob(blob, 10))
+						input = append(input, uploadinfo.EntryFromBlob(blob))
+						input = append(input, uploadinfo.EntryFromBlob(blob))
 					}
 					// Verify that we got a context cancellation error.
 					if _, err := c.UploadIfMissing(cCtx, input...); err != context.Canceled {
@@ -655,7 +656,6 @@ func TestUploadConcurrentCancel(t *testing.T) {
 }
 
 func TestUpload(t *testing.T) {
-	chunkSize := 5
 	var twoThousandBlobs [][]byte
 	var thousandBlobs [][]byte
 	for i := 0; i < 2000; i++ {
@@ -732,9 +732,9 @@ func TestUpload(t *testing.T) {
 							fake.Put(blob)
 							present[digest.NewFromBlob(blob)] = true
 						}
-						var input []*chunker.Chunker
+						var input []*uploadinfo.Entry
 						for _, blob := range tc.input {
-							input = append(input, chunker.NewFromBlob(blob, chunkSize))
+							input = append(input, uploadinfo.EntryFromBlob(blob))
 						}
 
 						missing, err := c.UploadIfMissing(ctx, input...)
@@ -746,8 +746,12 @@ func TestUpload(t *testing.T) {
 						for _, dg := range missing {
 							missingSet[dg] = struct{}{}
 						}
-						for _, ch := range input {
-							dg := ch.Digest()
+						for _, ue := range input {
+							dg := ue.Digest
+							ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
+							if err != nil {
+								t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
+							}
 							blob, err := ch.FullData()
 							if err != nil {
 								t.Errorf("ch.FullData() returned an error: %v", err)

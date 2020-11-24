@@ -15,6 +15,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
 	"google.golang.org/grpc/codes"
@@ -598,7 +599,11 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", dg)
 	}
 
-	ch := chunker.NewFromBlob(blob, 2*1024*1024)
+	ue := uploadinfo.EntryFromBlob(blob)
+	ch, err := chunker.New(ue, false, 2*1024*1024)
+	if err != nil {
+		return status.Errorf(codes.Internal, "test fake failed to create chunker: %v", err)
+	}
 	resp := &bspb.ReadResponse{}
 	for ch.HasNext() {
 		chunk, err := ch.Next()

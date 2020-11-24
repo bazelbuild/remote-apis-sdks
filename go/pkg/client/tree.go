@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -28,7 +28,7 @@ type treeNode struct {
 }
 
 type fileNode struct {
-	chunker      *chunker.Chunker
+	ue           *uploadinfo.Entry
 	isExecutable bool
 }
 
@@ -123,7 +123,7 @@ func preprocessSymlink(execRoot, symlinkNormDir string, meta *filemetadata.Symli
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, chunkSize int, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
 	if opts == nil {
 		opts = DefaultTreeSymlinkOpts()
 	}
@@ -161,7 +161,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	if t == command.FileInputType {
 		fs[normPath] = &fileSysNode{
 			file: &fileNode{
-				chunker:      chunker.NewFromFile(absPath, meta.Digest, chunkSize),
+				ue:           uploadinfo.EntryFromFile(meta.Digest, absPath),
 				isExecutable: meta.IsExecutable,
 			},
 		}
@@ -181,7 +181,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		if meta.Symlink.IsDangling || !opts.FollowsTarget {
 			return nil
 		}
-		return loadFiles(execRoot, excl, filepath.Clean(filepath.Join(symlinkNormDir, relTarget)), fs, chunkSize, cache, opts)
+		return loadFiles(execRoot, excl, filepath.Clean(filepath.Join(symlinkNormDir, relTarget)), fs, cache, opts)
 	}
 	// Directory
 	files, err := ioutil.ReadDir(absPath)
@@ -194,15 +194,15 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return nil
 	}
 	for _, f := range files {
-		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, chunkSize, cache, opts); e != nil {
+		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, cache, opts); e != nil {
 			return e
 		}
 	}
 	return nil
 }
 
-// ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as Chunkers.
-func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, chunkSize int, cache filemetadata.Cache) (root digest.Digest, inputs []*chunker.Chunker, stats *TreeStats, err error) {
+// ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as uploadinfo.Entrys
+func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache filemetadata.Cache) (root digest.Digest, inputs []*uploadinfo.Entry, stats *TreeStats, err error) {
 	stats = &TreeStats{}
 	fs := make(map[string]*fileSysNode)
 	for _, i := range is.VirtualInputs {
@@ -221,7 +221,7 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, chunk
 		}
 		fs[normPath] = &fileSysNode{
 			file: &fileNode{
-				chunker:      chunker.NewFromBlob(i.Contents, chunkSize),
+				ue:           uploadinfo.EntryFromBlob(i.Contents),
 				isExecutable: i.IsExecutable,
 			},
 		}
@@ -230,18 +230,18 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, chunk
 		if i == "" {
 			return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
 		}
-		if e := loadFiles(execRoot, is.InputExclusions, i, fs, chunkSize, cache, c.TreeSymlinkOpts); e != nil {
+		if e := loadFiles(execRoot, is.InputExclusions, i, fs, cache, c.TreeSymlinkOpts); e != nil {
 			return digest.Empty, nil, nil, e
 		}
 	}
 	ft := buildTree(fs)
-	var blobs map[digest.Digest]*chunker.Chunker
-	root, blobs, err = packageTree(ft, chunkSize, stats)
+	var blobs map[digest.Digest]*uploadinfo.Entry
+	root, blobs, err = packageTree(ft, stats)
 	if err != nil {
 		return digest.Empty, nil, nil, err
 	}
-	for _, ch := range blobs {
-		inputs = append(inputs, ch)
+	for _, ue := range blobs {
+		inputs = append(inputs, ue)
 	}
 	return root, inputs, stats, nil
 }
@@ -288,12 +288,12 @@ func buildTree(files map[string]*fileSysNode) *treeNode {
 	return root
 }
 
-func packageTree(t *treeNode, chunkSize int, stats *TreeStats) (root digest.Digest, blobs map[digest.Digest]*chunker.Chunker, err error) {
+func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[digest.Digest]*uploadinfo.Entry, err error) {
 	dir := &repb.Directory{}
-	blobs = make(map[digest.Digest]*chunker.Chunker)
+	blobs = make(map[digest.Digest]*uploadinfo.Entry)
 
 	for name, child := range t.dirs {
-		dg, childBlobs, err := packageTree(child, chunkSize, stats)
+		dg, childBlobs, err := packageTree(child, stats)
 		if err != nil {
 			return digest.Empty, nil, err
 		}
@@ -305,9 +305,9 @@ func packageTree(t *treeNode, chunkSize int, stats *TreeStats) (root digest.Dige
 	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
 
 	for name, fn := range t.files {
-		dg := fn.chunker.Digest()
+		dg := fn.ue.Digest
 		dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.isExecutable})
-		blobs[dg] = fn.chunker
+		blobs[dg] = fn.ue
 		stats.InputFiles++
 		stats.TotalInputBytes += dg.Size
 	}
@@ -319,12 +319,12 @@ func packageTree(t *treeNode, chunkSize int, stats *TreeStats) (root digest.Dige
 	}
 	sort.Slice(dir.Symlinks, func(i, j int) bool { return dir.Symlinks[i].Name < dir.Symlinks[j].Name })
 
-	ch, err := chunker.NewFromProto(dir, chunkSize)
+	ue, err := uploadinfo.EntryFromProto(dir)
 	if err != nil {
 		return digest.Empty, nil, err
 	}
-	dg := ch.Digest()
-	blobs[dg] = ch
+	dg := ue.Digest
+	blobs[dg] = ue
 	stats.TotalInputBytes += dg.Size
 	stats.InputDirectories++
 	return dg, blobs, nil
@@ -349,12 +349,12 @@ func (c *Client) FlattenTree(tree *repb.Tree, rootPath string) (map[string]*Tree
 	}
 	dirs := make(map[digest.Digest]*repb.Directory)
 	dirs[root] = tree.Root
-	for _, ch := range tree.Children {
-		dg, e := digest.NewFromMessage(ch)
+	for _, ue := range tree.Children {
+		dg, e := digest.NewFromMessage(ue)
 		if e != nil {
 			return nil, e
 		}
-		dirs[dg] = ch
+		dirs[dg] = ue
 	}
 	return flattenTree(root, rootPath, dirs)
 }
@@ -418,21 +418,21 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 	return flatFiles, nil
 }
 
-func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, children map[digest.Digest]*repb.Directory, files map[digest.Digest]*chunker.Chunker, err error) {
+func packageDirectories(t *treeNode) (root *repb.Directory, children map[digest.Digest]*repb.Directory, files map[digest.Digest]*uploadinfo.Entry, err error) {
 	root = &repb.Directory{}
 	children = make(map[digest.Digest]*repb.Directory)
-	files = make(map[digest.Digest]*chunker.Chunker)
+	files = make(map[digest.Digest]*uploadinfo.Entry)
 
 	for name, child := range t.dirs {
-		chRoot, chDirs, childFiles, err := packageDirectories(child, chunkSize)
+		chRoot, chDirs, childFiles, err := packageDirectories(child)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		ch, err := chunker.NewFromProto(chRoot, chunkSize)
+		ue, err := uploadinfo.EntryFromProto(chRoot)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		dg := ch.Digest()
+		dg := ue.Digest
 		root.Directories = append(root.Directories, &repb.DirectoryNode{Name: name, Digest: dg.ToProto()})
 		for d, b := range childFiles {
 			files[d] = b
@@ -445,9 +445,9 @@ func packageDirectories(t *treeNode, chunkSize int) (root *repb.Directory, child
 	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
 
 	for name, fn := range t.files {
-		dg := fn.chunker.Digest()
+		dg := fn.ue.Digest
 		root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.isExecutable})
-		files[dg] = fn.chunker
+		files[dg] = fn.ue
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
 	return root, children, files, nil
@@ -464,8 +464,8 @@ func getRelPath(base, path string) (string, error) {
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
 // The paths have to be relative to execRoot.
 // It also populates the remote ActionResult, packaging output directories as trees where required.
-func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, chunkSize int, cache filemetadata.Cache) (map[digest.Digest]*chunker.Chunker, *repb.ActionResult, error) {
-	outs := make(map[digest.Digest]*chunker.Chunker)
+func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache filemetadata.Cache) (map[digest.Digest]*uploadinfo.Entry, *repb.ActionResult, error) {
+	outs := make(map[digest.Digest]*uploadinfo.Entry)
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {
 		absPath := filepath.Clean(filepath.Join(execRoot, path))
@@ -482,47 +482,47 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, chunkSi
 		}
 		if !meta.IsDirectory {
 			// A regular file.
-			ch := chunker.NewFromFile(absPath, meta.Digest, chunkSize)
-			outs[meta.Digest] = ch
+			ue := uploadinfo.EntryFromFile(meta.Digest, absPath)
+			outs[meta.Digest] = ue
 			resPb.OutputFiles = append(resPb.OutputFiles, &repb.OutputFile{Path: normPath, Digest: meta.Digest.ToProto(), IsExecutable: meta.IsExecutable})
 			continue
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, nil, "", fs, chunkSize, cache, c.TreeSymlinkOpts); e != nil {
+		if e := loadFiles(absPath, nil, "", fs, cache, c.TreeSymlinkOpts); e != nil {
 			return nil, nil, e
 		}
 		ft := buildTree(fs)
 
 		treePb := &repb.Tree{}
-		rootDir, childDirs, files, err := packageDirectories(ft, chunkSize)
+		rootDir, childDirs, files, err := packageDirectories(ft)
 		if err != nil {
 			return nil, nil, err
 		}
-		ch, err := chunker.NewFromProto(rootDir, chunkSize)
+		ue, err := uploadinfo.EntryFromProto(rootDir)
 		if err != nil {
 			return nil, nil, err
 		}
-		outs[ch.Digest()] = ch
+		outs[ue.Digest] = ue
 		treePb.Root = rootDir
 		for _, c := range childDirs {
 			treePb.Children = append(treePb.Children, c)
 		}
-		ch, err = chunker.NewFromProto(treePb, chunkSize)
+		ue, err = uploadinfo.EntryFromProto(treePb)
 		if err != nil {
 			return nil, nil, err
 		}
-		outs[ch.Digest()] = ch
-		for _, ch := range files {
-			outs[ch.Digest()] = ch
+		outs[ue.Digest] = ue
+		for _, ue := range files {
+			outs[ue.Digest] = ue
 		}
-		resPb.OutputDirectories = append(resPb.OutputDirectories, &repb.OutputDirectory{Path: normPath, TreeDigest: ch.Digest().ToProto()})
+		resPb.OutputDirectories = append(resPb.OutputDirectories, &repb.OutputDirectory{Path: normPath, TreeDigest: ue.Digest.ToProto()})
 		// Upload the child directories individually as well
-		chRoot, _ := chunker.NewFromProto(treePb.Root, chunkSize)
-		outs[chRoot.Digest()] = chRoot
+		ueRoot, _ := uploadinfo.EntryFromProto(treePb.Root)
+		outs[ueRoot.Digest] = ueRoot
 		for _, child := range treePb.Children {
-			chChild, _ := chunker.NewFromProto(child, chunkSize)
-			outs[chChild.Digest()] = chChild
+			ueChild, _ := uploadinfo.EntryFromProto(child)
+			outs[ueChild.Digest] = ueChild
 		}
 	}
 	return outs, resPb, nil
