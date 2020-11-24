@@ -72,6 +72,11 @@ type Client struct {
 	StartupCapabilities StartupCapabilities
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
 	ChunkMaxSize ChunkMaxSize
+	// CompressedBytestreamThreshold is the threshold in bytes for which blobs are read and written
+	// compressed. Use 0 for all writes being compressed, and a negative number for all writes being
+	// uncompressed. TODO(rubensf): Make sure this will throw an error if the server doesn't support compression,
+	// pending https://github.com/bazelbuild/remote-apis/pull/168 being submitted.
+	CompressedBytestreamThreshold CompressedBytestreamThreshold
 	// MaxBatchDigests is maximum amount of digests to batch in batched operations.
 	MaxBatchDigests MaxBatchDigests
 	// MaxBatchSize is maximum size in bytes of a batch request for batch operations.
@@ -143,6 +148,13 @@ type ChunkMaxSize int
 // Apply sets the client's maximal chunk size s.
 func (s ChunkMaxSize) Apply(c *Client) {
 	c.ChunkMaxSize = s
+}
+
+type CompressedBytestreamThreshold int64
+
+// Apply sets the client's maximal chunk size s.
+func (s CompressedBytestreamThreshold) Apply(c *Client) {
+	c.CompressedBytestreamThreshold = s
 }
 
 // UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
@@ -460,28 +472,29 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		return nil, err
 	}
 	client := &Client{
-		InstanceName:        instanceName,
-		actionCache:         regrpc.NewActionCacheClient(casConn),
-		byteStream:          bsgrpc.NewByteStreamClient(casConn),
-		cas:                 regrpc.NewContentAddressableStorageClient(casConn),
-		execution:           regrpc.NewExecutionClient(conn),
-		operations:          opgrpc.NewOperationsClient(conn),
-		rpcTimeouts:         DefaultRPCTimeouts,
-		Connection:          conn,
-		CASConnection:       casConn,
-		ChunkMaxSize:        chunker.DefaultChunkSize,
-		MaxBatchDigests:     DefaultMaxBatchDigests,
-		MaxBatchSize:        DefaultMaxBatchSize,
-		DirMode:             DefaultDirMode,
-		ExecutableMode:      DefaultExecutableMode,
-		RegularMode:         DefaultRegularMode,
-		useBatchOps:         true,
-		StartupCapabilities: true,
-		casConcurrency:      DefaultCASConcurrency,
-		casUploaders:        semaphore.NewWeighted(DefaultCASConcurrency),
-		casDownloaders:      semaphore.NewWeighted(DefaultCASConcurrency),
-		casUploads:          make(map[digest.Digest]*uploadState),
-		Retrier:             RetryTransient(),
+		InstanceName:                  instanceName,
+		actionCache:                   regrpc.NewActionCacheClient(casConn),
+		byteStream:                    bsgrpc.NewByteStreamClient(casConn),
+		cas:                           regrpc.NewContentAddressableStorageClient(casConn),
+		execution:                     regrpc.NewExecutionClient(conn),
+		operations:                    opgrpc.NewOperationsClient(conn),
+		rpcTimeouts:                   DefaultRPCTimeouts,
+		Connection:                    conn,
+		CASConnection:                 casConn,
+		CompressedBytestreamThreshold: DefaultCompressedBytestreamThreshold,
+		ChunkMaxSize:                  chunker.DefaultChunkSize,
+		MaxBatchDigests:               DefaultMaxBatchDigests,
+		MaxBatchSize:                  DefaultMaxBatchSize,
+		DirMode:                       DefaultDirMode,
+		ExecutableMode:                DefaultExecutableMode,
+		RegularMode:                   DefaultRegularMode,
+		useBatchOps:                   true,
+		StartupCapabilities:           true,
+		casConcurrency:                DefaultCASConcurrency,
+		casUploaders:                  semaphore.NewWeighted(DefaultCASConcurrency),
+		casDownloaders:                semaphore.NewWeighted(DefaultCASConcurrency),
+		casUploads:                    make(map[digest.Digest]*uploadState),
+		Retrier:                       RetryTransient(),
 	}
 	for _, o := range opts {
 		o.Apply(client)

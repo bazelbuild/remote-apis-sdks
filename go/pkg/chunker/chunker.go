@@ -22,7 +22,10 @@ var IOBufferSize = 10 * 1024 * 1024
 var ErrEOF = errors.New("ErrEOF")
 
 // Compressor for full blobs
-var fullCompressor, _ = zstd.NewWriter(nil)
+// It is *only* thread-safe for EncodeAll calls and should not be used for streamed compression.
+// While we avoid sending 0 len blobs, we do want to create zero len compressed blobs if
+// necessary.
+var fullCompressor, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
 
 // Chunker can be used to chunk an input into uploadable-size byte slices.
 // A single Chunker is NOT thread-safe; it should be used by a single uploader thread.
@@ -43,9 +46,6 @@ type Chunker struct {
 }
 
 func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error) {
-	if compressed {
-		return nil, errors.New("compression is not supported yet")
-	}
 	if chunkSize < 1 {
 		chunkSize = DefaultChunkSize
 	}

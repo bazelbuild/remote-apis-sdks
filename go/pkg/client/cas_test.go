@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
@@ -287,23 +286,26 @@ func TestWrite(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			gotDg, err := c.WriteBlob(ctx, tc.blob)
-			if err != nil {
-				t.Errorf("c.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
-			}
-			if fake.Err != nil {
-				t.Errorf("c.WriteBlob(ctx, blob) caused the server to return error %s (possibly unseen by c)", fake.Err)
-			}
-			if !bytes.Equal(tc.blob, fake.Buf) {
-				t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs, want %v, got %v:", tc.blob, fake.Buf)
-			}
-			dg := digest.NewFromBlob(tc.blob)
-			if dg != gotDg {
-				t.Errorf("c.WriteBlob(ctx, blob) had diff on digest returned (want %s, got %s)", dg, gotDg)
-			}
-		})
+	for _, cmp := range []client.CompressedBytestreamThreshold{-1, 0} {
+		for _, tc := range tests {
+			t.Run(fmt.Sprintf("%s - CompressionThresh:%d", tc.name, cmp), func(t *testing.T) {
+				cmp.Apply(c)
+				gotDg, err := c.WriteBlob(ctx, tc.blob)
+				if err != nil {
+					t.Errorf("c.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
+				}
+				if fake.Err != nil {
+					t.Errorf("c.WriteBlob(ctx, blob) caused the server to return error %s (possibly unseen by c)", fake.Err)
+				}
+				if !bytes.Equal(tc.blob, fake.Buf) {
+					t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs, want %v, got %v:", tc.blob, fake.Buf)
+				}
+				dg := digest.NewFromBlob(tc.blob)
+				if dg != gotDg {
+					t.Errorf("c.WriteBlob(ctx, blob) had diff on digest returned (want %s, got %s)", dg, gotDg)
+				}
+			})
+		}
 	}
 }
 
@@ -712,74 +714,71 @@ func TestUpload(t *testing.T) {
 
 	for _, ub := range []client.UseBatchOps{false, true} {
 		for _, uo := range []client.UnifiedCASOps{false, true} {
-			t.Run(fmt.Sprintf("UsingBatch:%t,UnifiedCASOps:%t", ub, uo), func(t *testing.T) {
-				for _, tc := range tests {
-					t.Run(tc.name, func(t *testing.T) {
-						ctx := context.Background()
-						e, cleanup := fakes.NewTestEnv(t)
-						defer cleanup()
-						fake := e.Server.CAS
-						c := e.Client.GrpcClient
-						client.CASConcurrency(defaultCASConcurrency).Apply(c)
-						ub.Apply(c)
-						uo.Apply(c)
-						if tc.concurrency > 0 {
-							tc.concurrency.Apply(c)
-						}
+			for _, cmp := range []client.CompressedBytestreamThreshold{-1, 0} {
+				t.Run(fmt.Sprintf("UsingBatch:%t,UnifiedCASOps:%t,CompressionThresh:%d", ub, uo, cmp), func(t *testing.T) {
+					for _, tc := range tests {
+						t.Run(tc.name, func(t *testing.T) {
+							ctx := context.Background()
+							e, cleanup := fakes.NewTestEnv(t)
+							defer cleanup()
+							fake := e.Server.CAS
+							c := e.Client.GrpcClient
+							client.CASConcurrency(defaultCASConcurrency).Apply(c)
+							cmp.Apply(c)
+							ub.Apply(c)
+							uo.Apply(c)
+							if tc.concurrency > 0 {
+								tc.concurrency.Apply(c)
+							}
 
-						present := make(map[digest.Digest]bool)
-						for _, blob := range tc.present {
-							fake.Put(blob)
-							present[digest.NewFromBlob(blob)] = true
-						}
-						var input []*uploadinfo.Entry
-						for _, blob := range tc.input {
-							input = append(input, uploadinfo.EntryFromBlob(blob))
-						}
+							present := make(map[digest.Digest]bool)
+							for _, blob := range tc.present {
+								fake.Put(blob)
+								present[digest.NewFromBlob(blob)] = true
+							}
+							var input []*uploadinfo.Entry
+							for _, blob := range tc.input {
+								input = append(input, uploadinfo.EntryFromBlob(blob))
+							}
 
-						missing, err := c.UploadIfMissing(ctx, input...)
-						if err != nil {
-							t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
-						}
-
-						missingSet := make(map[digest.Digest]struct{})
-						for _, dg := range missing {
-							missingSet[dg] = struct{}{}
-						}
-						for _, ue := range input {
-							dg := ue.Digest
-							ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
+							missing, err := c.UploadIfMissing(ctx, input...)
 							if err != nil {
-								t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
+								t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 							}
-							blob, err := ch.FullData()
-							if err != nil {
-								t.Errorf("ch.FullData() returned an error: %v", err)
+
+							missingSet := make(map[digest.Digest]struct{})
+							for _, dg := range missing {
+								missingSet[dg] = struct{}{}
 							}
-							if present[dg] {
-								if fake.BlobWrites(dg) > 0 {
-									t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
+
+							for i, ue := range input {
+								dg := ue.Digest
+								blob := tc.input[i]
+								if present[dg] {
+									if fake.BlobWrites(dg) > 0 {
+										t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
+									}
+									if _, ok := missingSet[dg]; ok {
+										t.Errorf("Stats said that blob %v with digest %s was missing in the CAS", blob, dg)
+									}
+									continue
 								}
-								if _, ok := missingSet[dg]; ok {
-									t.Errorf("Stats said that blob %v with digest %s was missing in the CAS", blob, dg)
+								if gotBlob, ok := fake.Get(dg); !ok {
+									t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
+								} else if !bytes.Equal(blob, gotBlob) {
+									t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
 								}
-								continue
+								if _, ok := missingSet[dg]; !ok {
+									t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
+								}
 							}
-							if gotBlob, ok := fake.Get(dg); !ok {
-								t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
-							} else if !bytes.Equal(blob, gotBlob) {
-								t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
+							if fake.MaxConcurrency() > defaultCASConcurrency {
+								t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
 							}
-							if _, ok := missingSet[dg]; !ok {
-								t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
-							}
-						}
-						if fake.MaxConcurrency() > defaultCASConcurrency {
-							t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
-						}
-					})
-				}
-			})
+						})
+					}
+				})
+			}
 		}
 	}
 }
