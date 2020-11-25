@@ -9,6 +9,10 @@ tasks:
       - "go vet ./..."
     build_targets:
       - "//..."
+    test_targets:
+      - "//..."
+# Check that this succeeds even in races.
+  ubuntu1804_race:
     test_flags:
       - "--features=race"
       - "--runs_per_test=10"
