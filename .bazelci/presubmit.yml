@@ -11,7 +11,7 @@ tasks:
       - "//..."
     test_flags:
       - "--features=race"
-      - "--runs_per_test=5"
+      - "--runs_per_test=10"
       - "--jobs=100"
     test_targets:
       - "//..."
