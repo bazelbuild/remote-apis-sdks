@@ -781,7 +781,7 @@ func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
 		return nil, nil, err
 	}
 
-	done := make(chan error)
+	done := make(chan error, 1)
 	go func() {
 		_, err := decoder.WriteTo(w)
 		if err != nil {
