@@ -1,4 +1,4 @@
-// Package chunker provides a way to move metadata and/or actual data on blobs
+// Package uploadinfo provides a way to move metadata and/or actual data on blobs
 // to be uploaded.
 package uploadinfo
 
@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	// Enums for type of Entry.
 	UEBlob = iota
 	UEPath
 )
@@ -23,14 +24,17 @@ type Entry struct {
 	ueType int
 }
 
+// IsBlob returns whether this Entry is for a blob in memory.
 func (ue *Entry) IsBlob() bool {
 	return ue.ueType == UEBlob
 }
 
+// IsFile returns whether this Entry is for a file in disk.
 func (ue *Entry) IsFile() bool {
 	return ue.ueType == UEPath
 }
 
+// EntryFromBlob creates an Entry from an in memory blob.
 func EntryFromBlob(blob []byte) *Entry {
 	return &Entry{
 		Contents: blob,
@@ -39,6 +43,7 @@ func EntryFromBlob(blob []byte) *Entry {
 	}
 }
 
+// EntryFromProto creates an Entry from an in memory proto.
 func EntryFromProto(msg proto.Message) (*Entry, error) {
 	blob, err := proto.Marshal(msg)
 	if err != nil {
@@ -47,6 +52,7 @@ func EntryFromProto(msg proto.Message) (*Entry, error) {
 	return EntryFromBlob(blob), nil
 }
 
+// EntryFromFile creates an entry from a file in disk.
 func EntryFromFile(dg digest.Digest, path string) *Entry {
 	return &Entry{
 		Digest: dg,

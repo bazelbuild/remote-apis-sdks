@@ -675,16 +675,16 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 		return status.Errorf(codes.NotFound, "test fake missing blob with digest %s was requested", dg)
 	}
 
-	ue := uploadinfo.EntryFromBlob(blob)
-	ch, err := chunker.New(ue, false, 2*1024*1024)
-	if err != nil {
-		return status.Errorf(codes.Internal, "test fake failed to create chunker: %v", err)
-	}
 	if path[1] == "compressed-blobs" {
 		if path[2] != "zstd" {
 			return status.Error(codes.InvalidArgument, "test fake expected valid compressor, eg zstd")
 		}
 		blob = zstdEncoder.EncodeAll(blob, nil)
+	}
+	ue := uploadinfo.EntryFromBlob(blob)
+	ch, err := chunker.New(ue, false, 2*1024*1024)
+	if err != nil {
+		return status.Errorf(codes.Internal, "test fake failed to create chunker: %v", err)
 	}
 
 	resp := &bspb.ReadResponse{}
