@@ -13,6 +13,8 @@ tasks:
       - "//..."
 # Check that this succeeds even in races.
   ubuntu1804_race:
+    platform: ubuntu1804
+    name: "bazel race check"
     test_flags:
       - "--features=race"
       - "--runs_per_test=10"
