@@ -119,13 +119,15 @@ type compressedSeeker struct {
 	buf *bytes.Buffer
 }
 
+// NewCompressedFileSeeker creates a ReadSeeker based on a file path.
 func NewCompressedFileSeeker(path string, buffsize int) (ReadSeeker, error) {
 	return NewCompressedSeeker(NewFileReadSeeker(path, buffsize))
 }
 
+// NewCompressedSeeker wraps a ReadSeeker to compress its data on the fly.
 func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 	if _, ok := fs.(*compressedSeeker); ok {
-		return nil, errors.New("Trying to double compress files.")
+		return nil, errors.New("trying to double compress files")
 	}
 
 	buf := bytes.NewBuffer(nil)

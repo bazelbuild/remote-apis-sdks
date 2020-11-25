@@ -772,6 +772,8 @@ func (c *Client) readBlobToFile(ctx context.Context, hash string, sizeBytes int6
 	return c.readBlobStreamed(ctx, hash, sizeBytes, 0, 0, f)
 }
 
+// NewCompressedWriteBuffer creates wraps a io.Writer contained compressed contents to write
+// decompressed contents.
 func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
 	r, nw := io.Pipe()
 

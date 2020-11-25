@@ -150,6 +150,8 @@ func (s ChunkMaxSize) Apply(c *Client) {
 	c.ChunkMaxSize = s
 }
 
+// CompressedBytestreamThreshold is the threshold for compressing blobs when writing/reading.
+// See comment in related field on the Client struct.
 type CompressedBytestreamThreshold int64
 
 // Apply sets the client's maximal chunk size s.

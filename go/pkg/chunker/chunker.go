@@ -45,6 +45,8 @@ type Chunker struct {
 	compressed bool
 }
 
+// New creates a new chunker from an uploadinfo.Entry.
+// If compressed, the data will of the Entry will be compressed on the fly.
 func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error) {
 	if chunkSize < 1 {
 		chunkSize = DefaultChunkSize
@@ -66,7 +68,7 @@ func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error)
 			chunkSize = IOBufferSize
 		}
 	} else {
-		return nil, errors.New("Invalid UEntry.")
+		return nil, errors.New("invalid Entry")
 	}
 
 	c.chunkSize = chunkSize
