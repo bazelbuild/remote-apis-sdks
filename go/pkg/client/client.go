@@ -73,7 +73,7 @@ type Client struct {
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
 	ChunkMaxSize ChunkMaxSize
 	// CompressedBytestreamThreshold is the threshold in bytes for which blobs are read and written
-	// compressed. Use 0 for all writes being compressed, and a negative number for all writes being
+	// compressed. Use 0 for all writes being compressed, and a negative number for all operations being
 	// uncompressed. TODO(rubensf): Make sure this will throw an error if the server doesn't support compression,
 	// pending https://github.com/bazelbuild/remote-apis/pull/168 being submitted.
 	CompressedBytestreamThreshold CompressedBytestreamThreshold

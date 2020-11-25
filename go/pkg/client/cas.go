@@ -30,7 +30,7 @@ import (
 
 // DefaultCompressedBytestreamThreshold is the default threshold, in bytes, for
 // transferring blobs compressed on ByteStream.Write RPCs.
-const DefaultCompressedBytestreamThreshold = 1024 * 1024
+const DefaultCompressedBytestreamThreshold = -1
 
 const logInterval = 25
 
