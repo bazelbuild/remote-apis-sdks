@@ -12,6 +12,7 @@ tasks:
     test_flags:
       - "--features=race"
       - "--runs_per_test=5"
+      - "--jobs=100"
     test_targets:
       - "//..."
   # Check that "go build / test" works, too.
