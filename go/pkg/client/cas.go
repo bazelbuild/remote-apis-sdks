@@ -1192,7 +1192,8 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 		afterDownload(batch, reqs, err)
 		return
 	}
-	for dg, data := range bchMap {
+	for _, dg := range batch {
+		data := bchMap[dg]
 		for _, r := range reqs[dg] {
 			perm := c.RegularMode
 			if r.output.IsExecutable {
