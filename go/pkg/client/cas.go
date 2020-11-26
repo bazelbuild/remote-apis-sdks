@@ -293,11 +293,11 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				st.mu.Unlock()
 				dg := st.ue.Digest
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
-				ch, err := chunker.New(st.ue, false, int(c.ChunkMaxSize))
+				ch, err := chunker.New(st.ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 				if err != nil {
 					updateAndNotify(st, err, true)
 				}
-				err = c.WriteChunked(cCtx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
+				err = c.WriteChunked(cCtx, c.writeRscName(dg), ch)
 				updateAndNotify(st, err, true)
 			}
 		}()
@@ -308,16 +308,12 @@ func (c *Client) upload(reqs []*uploadRequest) {
 // once UnifiedCASOps=true is stable.
 func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, error) {
 	var dgs []digest.Digest
-	chunkers := make(map[digest.Digest]*chunker.Chunker)
+	ueList := make(map[digest.Digest]*uploadinfo.Entry)
 	for _, ue := range data {
 		dg := ue.Digest
-		if _, ok := chunkers[dg]; !ok {
+		if _, ok := ueList[dg]; !ok {
 			dgs = append(dgs, dg)
-			ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
-			if err != nil {
-				return nil, err
-			}
-			chunkers[dg] = ch
+			ueList[dg] = ue
 		}
 	}
 
@@ -352,7 +348,9 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				LogContextInfof(ctx, log.Level(3), "Uploading batch of %d blobs", len(batch))
 				bchMap := make(map[digest.Digest][]byte)
 				for _, dg := range batch {
-					data, err := chunkers[dg].FullData()
+					ue := ueList[dg]
+					ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
+					data, err := ch.FullData()
 					if err != nil {
 						return err
 					}
@@ -363,9 +361,13 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				}
 			} else {
 				LogContextInfof(ctx, log.Level(3), "Uploading single blob with digest %s", batch[0])
-				ch := chunkers[batch[0]]
-				dg := batch[0]
-				if err := c.WriteChunked(eCtx, c.ResourceNameWrite(dg.Hash, dg.Size), ch); err != nil {
+				ue := ueList[batch[0]]
+				dg := ue.Digest
+				ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
+				if err != nil {
+					return err
+				}
+				if err := c.WriteChunked(eCtx, c.writeRscName(dg), ch); err != nil {
 					return err
 				}
 			}
@@ -484,11 +486,11 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
 	ue := uploadinfo.EntryFromBlob(blob)
 	dg := ue.Digest
-	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
+	ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 	if err != nil {
 		return dg, err
 	}
-	return dg, c.WriteChunked(ctx, c.ResourceNameWrite(dg.Hash, dg.Size), ch)
+	return dg, c.WriteChunked(ctx, c.writeRscName(dg), ch)
 }
 
 // maybeCompressReadBlob will, depending on the client configuration, set the blobs to be

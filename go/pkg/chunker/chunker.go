@@ -55,11 +55,21 @@ func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error)
 	if ue.IsBlob() {
 		contents := make([]byte, len(ue.Contents))
 		copy(contents, ue.Contents)
+		if compressed {
+			contents = fullCompressor.EncodeAll(contents, nil)
+		}
 		c = &Chunker{
 			contents: contents,
 		}
 	} else if ue.IsFile() {
 		r := reader.NewFileReadSeeker(ue.Path, IOBufferSize)
+		if compressed {
+			var err error
+			r, err = reader.NewCompressedSeeker(r)
+			if err != nil {
+				return nil, err
+			}
+		}
 		c = &Chunker{
 			r: r,
 		}
