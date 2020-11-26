@@ -8,9 +8,8 @@ import (
 )
 
 const (
-	// Enums for type of Entry.
-	UEBlob = iota
-	UEPath
+	ueBlob = iota
+	uePath
 )
 
 // Entry should remain immutable upon creation.
@@ -26,12 +25,12 @@ type Entry struct {
 
 // IsBlob returns whether this Entry is for a blob in memory.
 func (ue *Entry) IsBlob() bool {
-	return ue.ueType == UEBlob
+	return ue.ueType == ueBlob
 }
 
 // IsFile returns whether this Entry is for a file in disk.
 func (ue *Entry) IsFile() bool {
-	return ue.ueType == UEPath
+	return ue.ueType == uePath
 }
 
 // EntryFromBlob creates an Entry from an in memory blob.
@@ -39,7 +38,7 @@ func EntryFromBlob(blob []byte) *Entry {
 	return &Entry{
 		Contents: blob,
 		Digest:   digest.NewFromBlob(blob),
-		ueType:   UEBlob,
+		ueType:   ueBlob,
 	}
 }
 
@@ -57,6 +56,6 @@ func EntryFromFile(dg digest.Digest, path string) *Entry {
 	return &Entry{
 		Digest: dg,
 		Path:   path,
-		ueType: UEPath,
+		ueType: uePath,
 	}
 }
