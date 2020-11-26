@@ -1372,7 +1372,8 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 				if err != nil {
 					return err
 				}
-				for dg, data := range bchMap {
+				for _, dg := range batch {
+					data := bchMap[dg]
 					out := outputs[dg]
 					perm := c.RegularMode
 					if out.IsExecutable {
