@@ -26,6 +26,7 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 
 // WriteChunked uploads chunked data with a given resource name to the CAS.
 func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chunker) error {
+	fmt.Println("name: ", name)
 	closure := func() error {
 		ch.Reset() // Retry by starting the stream from the beginning.
 		// TODO(olaola): implement resumable uploads.
