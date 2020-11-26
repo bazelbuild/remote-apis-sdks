@@ -350,6 +350,10 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				for _, dg := range batch {
 					ue := ueList[dg]
 					ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
+					if err != nil {
+						return err
+					}
+
 					data, err := ch.FullData()
 					if err != nil {
 						return err
