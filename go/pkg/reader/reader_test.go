@@ -133,6 +133,10 @@ func TestCompressedReader(t *testing.T) {
 			name: "empty blob",
 			blob: "",
 		},
+		{
+			name: "1MB zero blob",
+			blob: string(make([]byte, 1*1024*1024)),
+		},
 	}
 
 	for _, tc := range tests {
@@ -168,17 +172,21 @@ func TestCompressedReader(t *testing.T) {
 			}
 
 			// It is theoretically possible for the compressed data to be
-			// larger than the original
-			data := make([]byte, len(blob)+100)
+			// larger than the original - even more for these small blobs
+			// that are barelly compressible and will need metadata.
+			fullData := make([]byte, len(blob)+100)
+			dataBuf := make([]byte, 5)
 			var n, m int
-			for err = nil; err == nil; m, err = r.Read(data[n:]) {
+			for err = nil; err == nil; {
+				m, err = r.Read(dataBuf)
+				copy(fullData[n:], dataBuf)
 				n += m
 			}
 			if err != io.EOF {
-				t.Errorf("Expected err, got nil")
+				t.Errorf("Expected EOF, got nil")
 			}
 
-			if diff := cmp.Diff(compressedData[:n], data[:n]); diff != "" {
+			if diff := cmp.Diff(compressedData[:buf.Len()], fullData[:buf.Len()]); diff != "" {
 				t.Errorf("Read() = incorrect result, diff(-want, +got): %v", diff)
 			}
 		})

@@ -29,6 +29,7 @@ import (
 )
 
 var zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
+var zstdDecoder, _ = zstd.NewReader(nil)
 
 // Reader implements ByteStream's Read interface, returning one blob.
 type Reader struct {
@@ -37,6 +38,8 @@ type Reader struct {
 	// Chunks is a list of chunk sizes, in the order they are produced. The sum must be equal to the
 	// length of blob.
 	Chunks []int
+	// ExpectCompressed signals whether this writer should error on non-compressed blob calls.
+	ExpectCompressed bool
 }
 
 // Validate ensures that a Reader has the chunk sizes set correctly.
@@ -76,6 +79,9 @@ func (f *Reader) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer
 	blob := f.Blob
 	chunks := f.Chunks
 	if path[1] == "compressed-blobs" {
+		if !f.ExpectCompressed {
+			return status.Errorf(codes.FailedPrecondition, "fake expected a call with uncompressed bytes")
+		}
 		if path[2] != "zstd" {
 			return status.Error(codes.InvalidArgument, "test fake expected valid compressor, eg zstd")
 		}
@@ -84,6 +90,8 @@ func (f *Reader) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer
 		// For simplicity in coordinating test server & client, compressed blobs are returned as
 		// one chunk.
 		chunks = []int{len(blob)}
+	} else if f.ExpectCompressed {
+		return status.Errorf(codes.FailedPrecondition, "fake expected a call with compressed bytes")
 	}
 	for len(chunks) > 0 {
 		buf := blob[:chunks[0]]
@@ -129,6 +137,8 @@ type Writer struct {
 	Buf []byte
 	// Err is a copy of the error returned by Write.
 	Err error
+	// ExpectCompressed signals whether this writer should error on non-compressed blob calls.
+	ExpectCompressed bool
 }
 
 // Write implements the corresponding RE API function.
@@ -212,18 +222,20 @@ func (f *Writer) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	}
 
 	if path[3] == "compressed-blobs" {
+		if !f.ExpectCompressed {
+			return status.Errorf(codes.FailedPrecondition, "fake expected a call with uncompressed bytes")
+		}
 		if path[4] != "zstd" {
 			return status.Errorf(codes.InvalidArgument, "%s compressor isn't supported", path[4])
 		}
-		decoder, err := zstd.NewReader(nil)
-		if err != nil {
-			return status.Errorf(codes.Internal, "failed to initialize internal decoder: %v", err)
-		}
-		f.Buf, err = decoder.DecodeAll(buf.Bytes(), nil)
+		f.Buf, err = zstdDecoder.DecodeAll(buf.Bytes(), nil)
 		if err != nil {
 			return status.Errorf(codes.InvalidArgument, "served bytes can't be decompressed: %v", err)
 		}
 	} else {
+		if f.ExpectCompressed {
+			return status.Errorf(codes.FailedPrecondition, "fake expected a call with compressed bytes")
+		}
 		f.Buf = buf.Bytes()
 	}
 
@@ -261,21 +273,17 @@ type CAS struct {
 	writeReqs         int
 	concReqs          int
 	maxConcReqs       int
-	decoder           *zstd.Decoder
 }
 
 // NewCAS returns a new empty fake CAS.
-func NewCAS() (*CAS, error) {
+func NewCAS() *CAS {
 	c := &CAS{
 		BatchSize:        client.DefaultMaxBatchSize,
 		PerDigestBlockFn: make(map[digest.Digest]func()),
 	}
 
 	c.Clear()
-
-	var err error
-	c.decoder, err = zstd.NewReader(nil)
-	return c, err
+	return c
 }
 
 // Clear removes all results from the cache.
@@ -627,7 +635,7 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 			return status.Errorf(codes.InvalidArgument, "%s compressor isn't supported", path[4])
 		}
 		var err error
-		uncompressedBuf, err = f.decoder.DecodeAll(buf.Bytes(), nil)
+		uncompressedBuf, err = zstdDecoder.DecodeAll(buf.Bytes(), nil)
 		if err != nil {
 			return status.Errorf(codes.InvalidArgument, "served bytes can't be decompressed: %v", err)
 		}
