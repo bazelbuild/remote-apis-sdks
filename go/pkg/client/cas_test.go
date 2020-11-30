@@ -54,8 +54,9 @@ func TestSplitEndpoints(t *testing.T) {
 	casServer := grpc.NewServer()
 	blob := []byte("foobar")
 	fake := &fakes.Reader{
-		Blob:   blob,
-		Chunks: []int{6},
+		Blob:             blob,
+		Chunks:           []int{6},
+		ExpectCompressed: false,
 	}
 	bsgrpc.RegisterByteStreamServer(casServer, fake)
 	go execServer.Serve(l1)
@@ -251,8 +252,10 @@ func TestRead(t *testing.T) {
 		if tc.limit == 0 {
 			// Limit tests don't work well with compression, as the limit refers to the compressed bytes
 			// while offset, per spec, refers to uncompressed bytes.
+			tc.fake.ExpectCompressed = true
 			c.CompressedBytestreamThreshold = 0
 			t.Run(tc.name+" - with compression", testFunc)
+			tc.fake.ExpectCompressed = false
 		}
 	}
 }
@@ -299,6 +302,8 @@ func TestWrite(t *testing.T) {
 	for _, cmp := range []client.CompressedBytestreamThreshold{-1, 0} {
 		for _, tc := range tests {
 			t.Run(fmt.Sprintf("%s - CompressionThresh:%d", tc.name, cmp), func(t *testing.T) {
+				fake.ExpectCompressed = int(cmp) == 0
+
 				cmp.Apply(c)
 				gotDg, err := c.WriteBlob(ctx, tc.blob)
 				if err != nil {

@@ -116,7 +116,8 @@ type compressedSeeker struct {
 	fs   ReadSeeker
 	encd *zstd.Encoder
 	// This keeps the compressed data
-	buf *bytes.Buffer
+	buf    *bytes.Buffer
+	closed bool
 }
 
 // NewCompressedFileSeeker creates a ReadSeeker based on a file path.
@@ -133,9 +134,10 @@ func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 	buf := bytes.NewBuffer(nil)
 	encd, err := zstd.NewWriter(buf)
 	return &compressedSeeker{
-		fs:   fs,
-		encd: encd,
-		buf:  buf,
+		fs:     fs,
+		encd:   encd,
+		buf:    buf,
+		closed: false,
 	}, err
 }
 
@@ -148,19 +150,35 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 		// errW must be non-nil if written bytes != from n.
 		_, errW = cfs.encd.Write(p[:n])
 	}
-	m, errR2 := cfs.buf.Read(p)
 
 	var retErr error
-	if errR != nil {
+	// We have to treat EOF differently. It's the only "everything is going according
+	// to plan" error. EOF implies our uncompressed input data hasd finished reading,
+	// but it doesn't mean that we've finished preparing/returning our compressed data.
+	// We only want to return EOF to the user when the _compressed_ data is finished reading.
+	if errR != nil && errR != io.EOF {
 		retErr = errR
 	} else if errW != nil {
 		retErr = errW
-	} else {
-		retErr = errR2
 	}
 
-	if retErr != nil {
-		cfs.encd.Close()
+	// When the buffer ends, or in case of _any_ error, we compress all the bytes we
+	// had available. The encoder requires a Close call to finish writing compressed
+	// data smaller than zstd's window size.
+	var errC error
+	if !cfs.closed && (retErr != nil || errR == io.EOF) {
+		errC = cfs.encd.Close()
+		cfs.closed = true
+	}
+
+	m, errR2 := cfs.buf.Read(p)
+
+	if retErr == nil {
+		if errC != nil {
+			retErr = errC
+		} else if errR2 != nil {
+			retErr = errR2
+		}
 	}
 
 	return m, retErr
@@ -183,4 +201,5 @@ func (cfs *compressedSeeker) SeekOffset(offset int64) error {
 func (cfs *compressedSeeker) IsInitialized() bool { return cfs.fs.IsInitialized() }
 func (cfs *compressedSeeker) Initialize() error   { return cfs.fs.Initialize() }
 
+// No need for close to close the encoder - that's handled by Read.
 func (cfs *compressedSeeker) Close() error { return cfs.fs.Close() }
