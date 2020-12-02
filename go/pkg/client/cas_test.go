@@ -581,6 +581,11 @@ func TestUploadConcurrentCancel(t *testing.T) {
 	for i := range blobs {
 		blobs[i] = []byte(fmt.Sprint(i))
 	}
+	var input []*uploadinfo.Entry
+	for _, blob := range blobs {
+		input = append(input, uploadinfo.EntryFromBlob(blob))
+	}
+	input = append(input, input...)
 	type testCase struct {
 		name string
 		// Whether to use batching.
@@ -616,18 +621,12 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			fake.ReqSleepDuration = reqMaxSleepDuration
 			fake.ReqSleepRandomize = true
 			c := e.Client.GrpcClient
-			client.CASConcurrency(defaultCASConcurrency).Apply(c)
 			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency, tc.unified} {
 				opt.Apply(c)
 			}
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			eg.Go(func() error {
-				var input []*uploadinfo.Entry
-				for _, blob := range blobs {
-					input = append(input, uploadinfo.EntryFromBlob(blob))
-					input = append(input, uploadinfo.EntryFromBlob(blob))
-				}
 				if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 				}
@@ -636,13 +635,8 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			cCtx, cancel := context.WithCancel(eCtx)
 			for i := 0; i < 50; i++ {
 				eg.Go(func() error {
-					var input []*uploadinfo.Entry
-					for _, blob := range blobs {
-						input = append(input, uploadinfo.EntryFromBlob(blob))
-						input = append(input, uploadinfo.EntryFromBlob(blob))
-					}
-					// Verify that we got a context cancellation error.
-					if _, err := c.UploadIfMissing(cCtx, input...); err != context.Canceled {
+					// Verify that we got a context cancellation error. Sometimes, the request can succeed, if the original thread takes a while to run.
+					if _, err := c.UploadIfMissing(cCtx, input...); err != nil && err != context.Canceled {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context canceled", err)
 					}
 					return nil
@@ -663,8 +657,11 @@ func TestUploadConcurrentCancel(t *testing.T) {
 					if fake.BlobWrites(dg) != 1 {
 						t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
 					}
-					if fake.BlobMissingReqs(dg) != 1 {
-						t.Errorf("wanted 1 missing request for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
+					// It is possible to get more than 1 GetMissingBlobs requests if all concurrent requests for a particular
+					// digest get cancelled, because then this upload gets actually cancelled and deleted.
+					// This will happen if e.g. the original (non-canceled) upload thread is the last to run.
+					if fake.BlobMissingReqs(dg) > 2 {
+						t.Errorf("wanted <=2 missing requests for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
 					}
 				}
 			}

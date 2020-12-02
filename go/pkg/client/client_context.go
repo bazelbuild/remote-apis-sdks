@@ -4,6 +4,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
@@ -27,7 +28,7 @@ func LogContextInfof(ctx context.Context, v log.Level, format string, args ...in
 			format = "%s: " + format
 			args = append([]interface{}{actionID}, args...)
 		}
-		log.V(v).Infof(format, args...)
+		log.InfoDepth(1, fmt.Sprintf(format, args...))
 	}
 }
 

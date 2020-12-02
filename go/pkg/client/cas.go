@@ -191,6 +191,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 	newStates := make(map[digest.Digest]*uploadState)
 	var newUploads []digest.Digest
 	var metas []*requestMetadata
+	log.V(2).Infof("Upload is processing %d requests", len(reqs))
 	for _, req := range reqs {
 		dg := req.ue.Digest
 		st, ok := c.casUploads[dg]
