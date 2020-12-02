@@ -219,7 +219,7 @@ func setup(t *testing.T) *flakyFixture {
 	f.client, err = client.NewClient(f.ctx, instance, client.DialParams{
 		Service:    f.listener.Addr().String(),
 		NoSecurity: true,
-	}, client.StartupCapabilities(false), client.ChunkMaxSize(2), client.RPCTimeouts(map[string]time.Duration{"default": 50 * time.Millisecond}))
+	}, client.StartupCapabilities(false), client.ChunkMaxSize(2), client.RPCTimeouts(map[string]time.Duration{"default": 50 * time.Millisecond, "Execute": 0}))
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}

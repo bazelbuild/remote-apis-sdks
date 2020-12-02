@@ -311,37 +311,51 @@ func (f *CAS) Put(blob []byte) digest.Digest {
 
 // Get returns the bytes corresponding to the given digest, and whether it was found.
 func (f *CAS) Get(d digest.Digest) ([]byte, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	res, ok := f.blobs[d]
 	return res, ok
 }
 
 // BlobReads returns the total number of read requests for a particular digest.
 func (f *CAS) BlobReads(d digest.Digest) int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.reads[d]
 }
 
 // BlobWrites returns the total number of update requests for a particular digest.
 func (f *CAS) BlobWrites(d digest.Digest) int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.writes[d]
 }
 
 // BlobMissingReqs returns the total number of GetMissingBlobs requests for a particular digest.
 func (f *CAS) BlobMissingReqs(d digest.Digest) int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.missingReqs[d]
 }
 
 // BatchReqs returns the total number of BatchUpdateBlobs requests to this fake.
 func (f *CAS) BatchReqs() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.batchReqs
 }
 
 // WriteReqs returns the total number of Write requests to this fake.
 func (f *CAS) WriteReqs() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.writeReqs
 }
 
 // MaxConcurrency returns the maximum number of concurrent Write/Batch requests to this fake.
 func (f *CAS) MaxConcurrency() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.maxConcReqs
 }
 
