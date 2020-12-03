@@ -84,7 +84,7 @@ func (c *Client) findBlobState(ctx context.Context, dgs []digest.Digest) (missin
 
 func (c *Client) uploadProcessor() {
 	var buffer []*uploadRequest
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(time.Duration(c.UnifiedUploadTickDuration))
 	for {
 		select {
 		case req, ok := <-c.casUploadRequests:
@@ -100,7 +100,7 @@ func (c *Client) uploadProcessor() {
 			}
 			if !req.cancel {
 				buffer = append(buffer, req)
-				if len(buffer) >= casChanBufferSize {
+				if len(buffer) >= int(c.UnifiedUploadBufferSize) {
 					c.upload(buffer)
 					buffer = nil
 				}
@@ -305,8 +305,8 @@ func (c *Client) upload(reqs []*uploadRequest) {
 	}
 }
 
-// This function is only used when UnifiedCASOps is false. It will be removed
-// once UnifiedCASOps=true is stable.
+// This function is only used when UnifiedUploads is false. It will be removed
+// once UnifiedUploads=true is stable.
 func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, error) {
 	var dgs []digest.Digest
 	ueList := make(map[digest.Digest]*uploadinfo.Entry)
@@ -407,7 +407,7 @@ func (c *Client) cancelPendingRequests(reqs []*uploadRequest) {
 // It first queries the CAS to see which items are missing and only uploads those that are.
 // Returns a slice of the missing digests.
 func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, error) {
-	if !c.UnifiedCASOps {
+	if !c.UnifiedUploads {
 		return c.uploadNonUnified(ctx, data...)
 	}
 	uploads := len(data)
@@ -1149,7 +1149,7 @@ type downloadRequest struct {
 
 func (c *Client) downloadProcessor() {
 	var buffer []*downloadRequest
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(time.Duration(c.UnifiedDownloadTickDuration))
 	for {
 		select {
 		case ch, ok := <-c.casDownloadRequests:
@@ -1164,7 +1164,7 @@ func (c *Client) downloadProcessor() {
 				return
 			}
 			buffer = append(buffer, ch)
-			if len(buffer) >= casChanBufferSize {
+			if len(buffer) >= int(c.UnifiedDownloadBufferSize) {
 				c.download(buffer)
 				buffer = nil
 			}
@@ -1326,8 +1326,8 @@ func (c *Client) download(data []*downloadRequest) {
 	}
 }
 
-// This is a legacy function used only when UnifiedCASOps=false.
-// It will be removed when UnifiedCASOps=true is stable.
+// This is a legacy function used only when UnifiedDownloads=false.
+// It will be removed when UnifiedDownloads=true is stable.
 func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) error {
 	var dgs []digest.Digest
 
@@ -1419,7 +1419,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 
 // DownloadFiles downloads the output files under |execRoot|.
 func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) error {
-	if !c.UnifiedCASOps {
+	if !c.UnifiedDownloads {
 		return c.downloadNonUnified(ctx, execRoot, outputs)
 	}
 	count := len(outputs)
