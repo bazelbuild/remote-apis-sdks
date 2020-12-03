@@ -406,7 +406,7 @@ func TestUploadConcurrent(t *testing.T) {
 		// Whether to use batching.
 		batching client.UseBatchOps
 		// Whether to use background CAS ops.
-		unified client.UnifiedCASOps
+		unified client.UnifiedUploads
 		// The batch size.
 		maxBatchDigests client.MaxBatchDigests
 		// The CAS concurrency for uploading the blobs.
@@ -414,7 +414,7 @@ func TestUploadConcurrent(t *testing.T) {
 	}
 	var tests []testCase
 	for _, ub := range []client.UseBatchOps{false, true} {
-		for _, cb := range []client.UnifiedCASOps{false, true} {
+		for _, cb := range []client.UnifiedUploads{false, true} {
 			for _, conc := range []client.CASConcurrency{3, 100} {
 				tc := testCase{
 					name:            fmt.Sprintf("batch:%t,unified:%t,conc:%d", ub, cb, conc),
@@ -478,7 +478,7 @@ func TestUploadConcurrentBatch(t *testing.T) {
 		blobs[i] = []byte(fmt.Sprint(i))
 	}
 	ctx := context.Background()
-	for _, uo := range []client.UnifiedCASOps{false, true} {
+	for _, uo := range []client.UnifiedUploads{false, true} {
 		t.Run(fmt.Sprintf("unified:%t", uo), func(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
@@ -511,7 +511,7 @@ func TestUploadConcurrentBatch(t *testing.T) {
 			// Verify everything was written exactly once.
 			for i, blob := range blobs {
 				dg := digest.NewFromBlob(blob)
-				if c.UnifiedCASOps {
+				if c.UnifiedUploads {
 					if fake.BlobWrites(dg) != 1 {
 						t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
 					}
@@ -520,7 +520,7 @@ func TestUploadConcurrentBatch(t *testing.T) {
 					}
 				}
 				expectedReqs := 10
-				if c.UnifiedCASOps {
+				if c.UnifiedUploads {
 					// All the 100 digests will be batched into two batches, together.
 					expectedReqs = 2
 				}
@@ -536,7 +536,7 @@ func TestUploadCancel(t *testing.T) {
 	ctx := context.Background()
 	blob := []byte{1, 2, 3}
 	dg := digest.NewFromBlob(blob)
-	for _, uo := range []client.UnifiedCASOps{false, true} {
+	for _, uo := range []client.UnifiedUploads{false, true} {
 		t.Run(fmt.Sprintf("unified:%t", uo), func(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
@@ -591,7 +591,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 		// Whether to use batching.
 		batching client.UseBatchOps
 		// Whether to use background CAS ops.
-		unified client.UnifiedCASOps
+		unified client.UnifiedUploads
 		// The batch size.
 		maxBatchDigests client.MaxBatchDigests
 		// The CAS concurrency for uploading the blobs.
@@ -599,7 +599,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 	}
 	var tests []testCase
 	for _, ub := range []client.UseBatchOps{false, true} {
-		for _, uo := range []client.UnifiedCASOps{false, true} {
+		for _, uo := range []client.UnifiedUploads{false, true} {
 			for _, conc := range []client.CASConcurrency{3, 20} {
 				tc := testCase{
 					name:            fmt.Sprintf("batch:%t,unified:%t,conc:%d", ub, uo, conc),
@@ -725,9 +725,9 @@ func TestUpload(t *testing.T) {
 	}
 
 	for _, ub := range []client.UseBatchOps{false, true} {
-		for _, uo := range []client.UnifiedCASOps{false, true} {
+		for _, uo := range []client.UnifiedUploads{false, true} {
 			for _, cmp := range []client.CompressedBytestreamThreshold{-1, 0} {
-				t.Run(fmt.Sprintf("UsingBatch:%t,UnifiedCASOps:%t,CompressionThresh:%d", ub, uo, cmp), func(t *testing.T) {
+				t.Run(fmt.Sprintf("UsingBatch:%t,UnifiedUploads:%t,CompressionThresh:%d", ub, uo, cmp), func(t *testing.T) {
 					for _, tc := range tests {
 						t.Run(tc.name, func(t *testing.T) {
 							ctx := context.Background()
@@ -1365,8 +1365,8 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 	}
 
 	for _, ub := range []client.UseBatchOps{false, true} {
-		for _, uo := range []client.UnifiedCASOps{false, true} {
-			t.Run(fmt.Sprintf("%sUsingBatch:%t,UnifiedCASOps:%t", t.Name(), ub, uo), func(t *testing.T) {
+		for _, uo := range []client.UnifiedDownloads{false, true} {
+			t.Run(fmt.Sprintf("%sUsingBatch:%t,UnifiedDownloads:%t", t.Name(), ub, uo), func(t *testing.T) {
 				e, cleanup := fakes.NewTestEnv(t)
 				defer cleanup()
 				fake := e.Server.CAS
@@ -1614,8 +1614,8 @@ func TestDownloadFilesCancel(t *testing.T) {
 	}
 	defer os.RemoveAll(execRoot)
 
-	for _, uo := range []client.UnifiedCASOps{false, true} {
-		t.Run(fmt.Sprintf("UnifiedCASOps:%t", uo), func(t *testing.T) {
+	for _, uo := range []client.UnifiedDownloads{false, true} {
+		t.Run(fmt.Sprintf("UnifiedDownloads:%t", uo), func(t *testing.T) {
 			ctx := context.Background()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()

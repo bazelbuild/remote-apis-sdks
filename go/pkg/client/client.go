@@ -38,10 +38,9 @@ import (
 )
 
 const (
-	scopes            = "https://www.googleapis.com/auth/cloud-platform"
-	authority         = "test-server"
-	localPrefix       = "localhost"
-	casChanBufferSize = 10000
+	scopes      = "https://www.googleapis.com/auth/cloud-platform"
+	authority   = "test-server"
+	localPrefix = "localhost"
 
 	// HomeDirMacro is replaced by the current user's home dir in the CredFile dial parameter.
 	HomeDirMacro = "${HOME}"
@@ -89,8 +88,18 @@ type Client struct {
 	RegularMode os.FileMode
 	// UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
 	UtilizeLocality UtilizeLocality
-	// UnifiedCASOps specifies whether the client uploads/downloads files in the background
-	UnifiedCASOps UnifiedCASOps
+	// UnifiedUploads specifies whether the client uploads files in the background.
+	UnifiedUploads UnifiedUploads
+	// UnifiedUploadBufferSize specifies when the unified upload daemon flushes the pending requests.
+	UnifiedUploadBufferSize UnifiedUploadBufferSize
+	// UnifiedUploadTickDuration specifies how often the unified upload daemon flushes the pending requests.
+	UnifiedUploadTickDuration UnifiedUploadTickDuration
+	// UnifiedDownloads specifies whether the client downloads files in the background.
+	UnifiedDownloads UnifiedDownloads
+	// UnifiedDownloadBufferSize specifies when the unified download daemon flushes the pending requests.
+	UnifiedDownloadBufferSize UnifiedDownloadBufferSize
+	// UnifiedDownloadTickDuration specifies how often the unified download daemon flushes the pending requests.
+	UnifiedDownloadTickDuration UnifiedDownloadTickDuration
 	// TreeSymlinkOpts controls how symlinks are handled when constructing a tree.
 	TreeSymlinkOpts     *TreeSymlinkOpts
 	serverCaps          *repb.ServerCapabilities
@@ -126,7 +135,9 @@ const (
 
 // Close closes the underlying gRPC connection(s).
 func (c *Client) Close() error {
-	UnifiedCASOps(false).Apply(c) // Close the channels & stop background operations.
+	// Close the channels & stop background operations.
+	UnifiedUploads(false).Apply(c)
+	UnifiedDownloads(false).Apply(c)
 	err := c.Connection.Close()
 	if err != nil {
 		return err
@@ -162,30 +173,92 @@ func (s CompressedBytestreamThreshold) Apply(c *Client) {
 // UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
 type UtilizeLocality bool
 
+// Apply sets the client's UtilizeLocality.
 func (s UtilizeLocality) Apply(c *Client) {
 	c.UtilizeLocality = s
 }
 
-// UnifiedCASOps is to specify whether client downloads/uploads files in the background, unifying operations between different actions.
-type UnifiedCASOps bool
+// UnifiedUploads is to specify whether client uploads files in the background, unifying operations between different actions.
+type UnifiedUploads bool
 
+// Apply sets the client's UnifiedUploads.
 // Note: it is unsafe to change this property when connections are ongoing.
-func (s UnifiedCASOps) Apply(c *Client) {
-	if c.UnifiedCASOps == s {
+func (s UnifiedUploads) Apply(c *Client) {
+	if c.UnifiedUploads == s {
 		return
 	}
 	if s {
-		c.casUploadRequests = make(chan *uploadRequest, casChanBufferSize)
-		c.casDownloadRequests = make(chan *downloadRequest, casChanBufferSize)
+		c.casUploadRequests = make(chan *uploadRequest, c.UnifiedUploadBufferSize)
 		go c.uploadProcessor()
-		go c.downloadProcessor()
 	} else {
 		close(c.casUploadRequests)
-		close(c.casDownloadRequests)
 	}
-	c.UnifiedCASOps = s
+	c.UnifiedUploads = s
 }
 
+// UnifiedUploadBufferSize is to tune when the daemon for UnifiedUploads flushes the pending requests.
+type UnifiedUploadBufferSize int
+
+// DefaultUnifiedUploadBufferSize is the default UnifiedUploadBufferSize.
+const DefaultUnifiedUploadBufferSize = 10000
+
+// Apply sets the client's UnifiedDownloadBufferSize.
+func (s UnifiedUploadBufferSize) Apply(c *Client) {
+	c.UnifiedUploadBufferSize = s
+}
+
+// UnifiedUploadTickDuration is to tune how often the daemon for UnifiedUploads flushes the pending requests.
+type UnifiedUploadTickDuration time.Duration
+
+// DefaultUnifiedUploadTickDuration is the default UnifiedUploadTickDuration.
+const DefaultUnifiedUploadTickDuration = UnifiedUploadTickDuration(50 * time.Millisecond)
+
+// Apply sets the client's UnifiedUploadTickDuration.
+func (s UnifiedUploadTickDuration) Apply(c *Client) {
+	c.UnifiedUploadTickDuration = s
+}
+
+// UnifiedDownloads is to specify whether client uploads files in the background, unifying operations between different actions.
+type UnifiedDownloads bool
+
+// Apply sets the client's UnifiedDownloads.
+// Note: it is unsafe to change this property when connections are ongoing.
+func (s UnifiedDownloads) Apply(c *Client) {
+	if c.UnifiedDownloads == s {
+		return
+	}
+	if s {
+		c.casDownloadRequests = make(chan *downloadRequest, c.UnifiedDownloadBufferSize)
+		go c.downloadProcessor()
+	} else {
+		close(c.casDownloadRequests)
+	}
+	c.UnifiedDownloads = s
+}
+
+// UnifiedUploadBufferSize is to tune when the daemon for UnifiedDownloads flushes the pending requests.
+type UnifiedDownloadBufferSize int
+
+// DefaultUnifiedDownloadBufferSize is the default UnifiedDownloadBufferSize.
+const DefaultUnifiedDownloadBufferSize = 10000
+
+// Apply sets the client's UnifiedDownloadBufferSize.
+func (s UnifiedDownloadBufferSize) Apply(c *Client) {
+	c.UnifiedDownloadBufferSize = s
+}
+
+// UnifiedDownloadTickDuration is to tune how often the daemon for UnifiedDownloads flushes the pending requests.
+type UnifiedDownloadTickDuration time.Duration
+
+// DefaultUnifiedDownloadTickDuration is the default UnifiedDownloadTickDuration.
+const DefaultUnifiedDownloadTickDuration = UnifiedDownloadTickDuration(50 * time.Millisecond)
+
+// Apply sets the client's UnifiedDownloadTickDuration.
+func (s UnifiedDownloadTickDuration) Apply(c *Client) {
+	c.UnifiedDownloadTickDuration = s
+}
+
+// Apply sets the client's TreeSymlinkOpts.
 func (o *TreeSymlinkOpts) Apply(c *Client) {
 	c.TreeSymlinkOpts = o
 }
@@ -496,6 +569,10 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		casUploaders:                  semaphore.NewWeighted(DefaultCASConcurrency),
 		casDownloaders:                semaphore.NewWeighted(DefaultCASConcurrency),
 		casUploads:                    make(map[digest.Digest]*uploadState),
+		UnifiedUploadTickDuration:     DefaultUnifiedUploadTickDuration,
+		UnifiedUploadBufferSize:       DefaultUnifiedUploadBufferSize,
+		UnifiedDownloadTickDuration:   DefaultUnifiedDownloadTickDuration,
+		UnifiedDownloadBufferSize:     DefaultUnifiedDownloadBufferSize,
 		Retrier:                       RetryTransient(),
 	}
 	for _, o := range opts {
