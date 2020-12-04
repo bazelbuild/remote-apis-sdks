@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -112,11 +113,42 @@ func (fio *fileSeeker) Initialize() error {
 	return nil
 }
 
+// The zstd encoder lib will async write to the buffer, so we need
+// to lock access to actually check for contents.
+type syncedBuffer struct {
+	mu  sync.Mutex
+	buf *bytes.Buffer
+}
+
+func (sb *syncedBuffer) Read(p []byte) (int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Read(p)
+}
+
+func (sb *syncedBuffer) Write(p []byte) (int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *syncedBuffer) Len() int {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Len()
+}
+
+func (sb *syncedBuffer) Reset() {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	sb.buf.Reset()
+}
+
 type compressedSeeker struct {
 	fs   ReadSeeker
 	encd *zstd.Encoder
 	// This keeps the compressed data
-	buf    *bytes.Buffer
+	buf    *syncedBuffer
 	closed bool
 }
 
@@ -132,11 +164,13 @@ func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 	}
 
 	buf := bytes.NewBuffer(nil)
-	encd, err := zstd.NewWriter(buf)
+	sb := &syncedBuffer{buf: buf}
+	encd, err := zstd.NewWriter(sb)
+
 	return &compressedSeeker{
 		fs:     fs,
 		encd:   encd,
-		buf:    buf,
+		buf:    sb,
 		closed: false,
 	}, err
 }
