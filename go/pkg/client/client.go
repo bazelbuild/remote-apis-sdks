@@ -181,6 +181,18 @@ func (s UtilizeLocality) Apply(c *Client) {
 // UnifiedUploads is to specify whether client uploads files in the background, unifying operations between different actions.
 type UnifiedUploads bool
 
+func (c *Client) restartUploader() {
+	close(c.casUploadRequests)
+	c.casUploadRequests = make(chan *uploadRequest, c.UnifiedUploadBufferSize)
+	go c.uploadProcessor()
+}
+
+func (c *Client) restartDownloader() {
+	close(c.casDownloadRequests)
+	c.casDownloadRequests = make(chan *downloadRequest, c.UnifiedDownloadBufferSize)
+	go c.downloadProcessor()
+}
+
 // Apply sets the client's UnifiedUploads.
 // Note: it is unsafe to change this property when connections are ongoing.
 func (s UnifiedUploads) Apply(c *Client) {
@@ -204,7 +216,10 @@ const DefaultUnifiedUploadBufferSize = 10000
 
 // Apply sets the client's UnifiedDownloadBufferSize.
 func (s UnifiedUploadBufferSize) Apply(c *Client) {
-	c.UnifiedUploadBufferSize = s
+	if c.UnifiedUploadBufferSize != s {
+		c.UnifiedUploadBufferSize = s
+		c.restartUploader()
+	}
 }
 
 // UnifiedUploadTickDuration is to tune how often the daemon for UnifiedUploads flushes the pending requests.
@@ -215,7 +230,10 @@ const DefaultUnifiedUploadTickDuration = UnifiedUploadTickDuration(50 * time.Mil
 
 // Apply sets the client's UnifiedUploadTickDuration.
 func (s UnifiedUploadTickDuration) Apply(c *Client) {
-	c.UnifiedUploadTickDuration = s
+	if c.UnifiedUploadTickDuration != s {
+		c.UnifiedUploadTickDuration = s
+		c.restartUploader()
+	}
 }
 
 // UnifiedDownloads is to specify whether client uploads files in the background, unifying operations between different actions.
@@ -244,7 +262,10 @@ const DefaultUnifiedDownloadBufferSize = 10000
 
 // Apply sets the client's UnifiedDownloadBufferSize.
 func (s UnifiedDownloadBufferSize) Apply(c *Client) {
-	c.UnifiedDownloadBufferSize = s
+	if c.UnifiedDownloadBufferSize != s {
+		c.UnifiedDownloadBufferSize = s
+		c.restartDownloader()
+	}
 }
 
 // UnifiedDownloadTickDuration is to tune how often the daemon for UnifiedDownloads flushes the pending requests.
@@ -255,7 +276,10 @@ const DefaultUnifiedDownloadTickDuration = UnifiedDownloadTickDuration(50 * time
 
 // Apply sets the client's UnifiedDownloadTickDuration.
 func (s UnifiedDownloadTickDuration) Apply(c *Client) {
-	c.UnifiedDownloadTickDuration = s
+	if c.UnifiedDownloadTickDuration != s {
+		c.UnifiedDownloadTickDuration = s
+		c.restartDownloader()
+	}
 }
 
 // Apply sets the client's TreeSymlinkOpts.
