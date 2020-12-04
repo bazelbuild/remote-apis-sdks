@@ -781,7 +781,7 @@ func (c *Client) readBlobToFile(ctx context.Context, hash string, sizeBytes int6
 
 // NewCompressedWriteBuffer creates wraps a io.Writer contained compressed contents to write
 // decompressed contents.
-func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
+func NewCompressedWriteBuffer(w io.WriteCloser) (io.WriteCloser, chan error, error) {
 	r, nw := io.Pipe()
 
 	// TODO(rubensf): Reuse decoders when possible to save the effort of starting/closing goroutines.
@@ -798,6 +798,7 @@ func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
 			// have to go somewhere or they'll block execution.
 			io.Copy(ioutil.Discard, r)
 		}
+		w.Close()
 		decoder.Close()
 		done <- err
 	}()
@@ -812,24 +813,46 @@ func (c *Client) ReadBlobStreamed(ctx context.Context, d digest.Digest, w io.Wri
 }
 
 type writerTracker struct {
-	io.Writer
-	writtenBytes int64
+	w     io.Writer
+	pw    *io.PipeWriter
+	dg    digest.Digest
+	ready chan error
 }
 
-func (wc *writerTracker) Write(p []byte) (int, error) {
-	n, err := wc.Writer.Write(p)
-	wc.writtenBytes += int64(n)
+func newWriteTracker(w io.Writer) *writerTracker {
+	pr, pw := io.Pipe()
+	wt := &writerTracker{
+		pw:    pw,
+		w:     w,
+		ready: make(chan error, 1),
+	}
+
+	go func() {
+		var err error
+		wt.dg, err = digest.NewFromReader(pr)
+		wt.ready <- err
+	}()
+
+	return wt
+}
+
+func (wt *writerTracker) Write(p []byte) (int, error) {
+	wt.pw.Write(p)
+	n, err := wt.w.Write(p)
 	return n, err
 }
 
-func (wc *writerTracker) Close() error { return nil }
+func (wt *writerTracker) Close() error {
+	wt.pw.Close()
+	return nil
+}
 
 func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, offset, limit int64, w io.Writer) (int64, error) {
 	if sizeBytes == 0 {
 		// Do not download empty blobs.
 		return 0, nil
 	}
-	wt := &writerTracker{Writer: w}
+	wt := newWriteTracker(w)
 	name, wc, done, err := c.maybeCompressReadBlob(hash, sizeBytes, wt)
 	if err != nil {
 		return 0, err
@@ -841,6 +864,10 @@ func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, o
 	if err = wc.Close(); err != nil {
 		return n, err
 	}
+	if err := <-wt.ready; err != nil {
+		return n, err
+	}
+	close(wt.ready)
 	sz := sizeBytes - offset
 	if limit > 0 && limit < sz {
 		sz = limit
@@ -849,7 +876,11 @@ func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, o
 		return n, fmt.Errorf("Failed to finalize writing downloaded data downstream: %v", err)
 	}
 	close(done)
-	if wt.writtenBytes != sz {
+	// We can't reliably calculate hash without the full blob
+	if offset == 0 && limit <= 0 && wt.dg.Hash != hash {
+		return n, fmt.Errorf("CAS fetch calculated hash %s != expected hash %s", wt.dg.Hash, hash)
+	}
+	if wt.dg.Size != sz {
 		return n, fmt.Errorf("CAS fetch read %d bytes but %d were expected", n, sz)
 	}
 	return n, nil
