@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ type flakyServer struct {
 	mu               sync.RWMutex   // protects numCalls.
 	numCalls         map[string]int // A counter of calls the server encountered thus far, by method.
 	retriableForever bool           // Set to true to make the flaky server return a retriable error forever, rather than eventually a non-retriable error.
+	sleepDelay       time.Duration  // How long to sleep on each RPC.
 }
 
 func (f *flakyServer) incNumCalls(method string) int {
@@ -45,7 +47,7 @@ func (f *flakyServer) incNumCalls(method string) int {
 func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 	numCalls := f.incNumCalls("Write")
 	if numCalls < 3 {
-		time.Sleep(70 * time.Millisecond)
+		time.Sleep(f.sleepDelay)
 		return status.Error(codes.Canceled, "transient error!")
 	}
 
@@ -66,7 +68,7 @@ func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	numCalls := f.incNumCalls("Read")
 	if numCalls < 3 {
-		time.Sleep(70 * time.Millisecond)
+		time.Sleep(f.sleepDelay)
 		return status.Error(codes.Canceled, "transient error!")
 	}
 	if numCalls < 4 {
@@ -78,7 +80,7 @@ func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadS
 	}
 	// Client now will only ask for the remaining two bytes.
 	if numCalls < 5 {
-		time.Sleep(70 * time.Millisecond)
+		time.Sleep(f.sleepDelay)
 		return status.Error(codes.Aborted, "yet another transient error!")
 	}
 	return stream.Send(&bspb.ReadResponse{Data: []byte("ob")})
@@ -87,10 +89,13 @@ func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadS
 func (f *flakyServer) flakeAndFail(method string) error {
 	numCalls := f.incNumCalls(method)
 	if numCalls == 1 {
-		time.Sleep(70 * time.Millisecond)
-		// The error we return here should not matter; the deadline should have passed by now and the
-		// retrier should retry DeadlineExceeded.
-		return status.Error(codes.InvalidArgument, "non retriable error")
+		if f.sleepDelay != 0 {
+			time.Sleep(f.sleepDelay)
+			// The error we return here should not matter; the deadline should have passed by now and the
+			// retrier should retry DeadlineExceeded.
+			return status.Error(codes.InvalidArgument, "non retriable error")
+		}
+		return status.Error(codes.DeadlineExceeded, "transient error!")
 	}
 	if f.retriableForever || numCalls < 4 {
 		return status.Error(codes.Canceled, "transient error!")
@@ -219,7 +224,7 @@ func setup(t *testing.T) *flakyFixture {
 	f.client, err = client.NewClient(f.ctx, instance, client.DialParams{
 		Service:    f.listener.Addr().String(),
 		NoSecurity: true,
-	}, client.StartupCapabilities(false), client.ChunkMaxSize(2), client.RPCTimeouts(map[string]time.Duration{"default": 50 * time.Millisecond, "Execute": 0}))
+	}, client.StartupCapabilities(false), client.ChunkMaxSize(2))
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
@@ -234,127 +239,52 @@ func (f *flakyFixture) shutDown() {
 
 func TestWriteRetries(t *testing.T) {
 	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
+	for _, sleep := range []bool{false, true} {
+		sleep := sleep
+		t.Run(fmt.Sprintf("sleep=%t", sleep), func(t *testing.T) {
+			t.Parallel()
+			f := setup(t)
+			defer f.shutDown()
+			if sleep {
+				f.fake.sleepDelay = time.Second
+				client.RPCTimeouts(map[string]time.Duration{"default": 500 * time.Millisecond}).Apply(f.client)
+			}
 
-	blob := []byte("blob")
-	gotDg, err := f.client.WriteBlob(f.ctx, blob)
-	if err != nil {
-		t.Errorf("client.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
-	}
-	if diff := cmp.Diff(digest.NewFromBlob(blob), gotDg); diff != "" {
-		t.Errorf("client.WriteBlob(ctx, blob) had diff on digest returned (want -> got):\n%s", diff)
+			blob := []byte("blob")
+			gotDg, err := f.client.WriteBlob(f.ctx, blob)
+			if err != nil {
+				t.Errorf("client.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
+			}
+			if diff := cmp.Diff(digest.NewFromBlob(blob), gotDg); diff != "" {
+				t.Errorf("client.WriteBlob(ctx, blob) had diff on digest returned (want -> got):\n%s", diff)
+			}
+		})
 	}
 }
 
 func TestReadRetries(t *testing.T) {
 	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
+	for _, sleep := range []bool{false, true} {
+		sleep := sleep
+		t.Run(fmt.Sprintf("sleep=%t", sleep), func(t *testing.T) {
+			t.Parallel()
+			f := setup(t)
+			defer f.shutDown()
+			if sleep {
+				f.fake.sleepDelay = time.Second
+				client.RPCTimeouts(map[string]time.Duration{"default": 500 * time.Millisecond}).Apply(f.client)
+			}
 
-	blob := []byte("blob")
-	got, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
-	if err != nil {
-		t.Errorf("client.ReadBlob(ctx, digest) gave error %s, want nil", err)
+			blob := []byte("blob")
+			got, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
+			if err != nil {
+				t.Errorf("client.ReadBlob(ctx, digest) gave error %s, want nil", err)
+			}
+			if diff := cmp.Diff(blob, got, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("client.ReadBlob(ctx, digest) gave diff (-want, +got):\n%s", diff)
+			}
+		})
 	}
-	if diff := cmp.Diff(blob, got, cmpopts.EquateEmpty()); diff != "" {
-		t.Errorf("client.ReadBlob(ctx, digest) gave diff (-want, +got):\n%s", diff)
-	}
-}
-
-func assertCanceledErr(t *testing.T, err error, method string) {
-	t.Helper()
-	if err == nil {
-		t.Errorf("%s(ctx, {}) = nil; expected Canceled error got nil", method)
-	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Canceled {
-		t.Errorf("%s(ctx, {}) = %v; expected Canceled error, got %v", method, err, s.Code())
-	} else if !ok {
-		t.Errorf("%s(ctx, {}) = %v; expected Canceled error (status.FromError failed)", method, err)
-	}
-}
-
-func assertUnimplementedErr(t *testing.T, err error, method string) {
-	t.Helper()
-	if err == nil {
-		t.Errorf("%s(ctx, {}) = nil; expected Unimplemented error got nil", method)
-	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Unimplemented {
-		t.Errorf("%s(ctx, {}) = %v; expected Unimplemented error, got %v", method, err, s.Code())
-	} else if !ok {
-		t.Errorf("%s(ctx, {}) = %v; expected Unimplemented error (status.FromError failed)", method, err)
-	}
-}
-
-func TestQueryWriteStatusRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.QueryWriteStatus(f.ctx, &bspb.QueryWriteStatusRequest{})
-	if got != nil {
-		t.Errorf("client.QueryWriteStatus(ctx, digest) gave result %s, want nil", got)
-	}
-	assertUnimplementedErr(t, err, "client.QueryWriteStatus")
-}
-
-func TestGetActionResultRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.GetActionResult(f.ctx, &repb.GetActionResultRequest{})
-	if got != nil {
-		t.Errorf("client.GetActionResult(ctx, digest) gave result %s, want nil", got)
-	}
-	assertUnimplementedErr(t, err, "client.GetActionResult")
-}
-
-func TestUpdateActionResultRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.UpdateActionResult(f.ctx, &repb.UpdateActionResultRequest{})
-	if got != nil {
-		t.Errorf("client.UpdateActionResult(ctx, digest) gave result %s, want nil", got)
-	}
-	assertUnimplementedErr(t, err, "client.UpdateActionResult")
-}
-
-func TestFindMissingBlobsRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.FindMissingBlobs(f.ctx, &repb.FindMissingBlobsRequest{})
-	if got != nil {
-		t.Errorf("client.FindMissingBlobs(ctx, digest) gave result %s, want nil", got)
-	}
-	assertUnimplementedErr(t, err, "client.FindMissingBlobs")
-}
-
-func TestBatchUpdateBlobsRpcRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.BatchUpdateBlobs(f.ctx, &repb.BatchUpdateBlobsRequest{})
-	if got != nil {
-		t.Errorf("client.BatchUpdateBlobs(ctx, digest) gave result %s, want nil", got)
-	}
-	assertUnimplementedErr(t, err, "client.BatchUpdateBlobs")
-}
-
-func TestBatchWriteBlobsRpcRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	blobs := map[digest.Digest][]byte{
-		digest.TestNew("a", 1): []byte{1},
-		digest.TestNew("b", 1): []byte{2},
-	}
-	err := f.client.BatchWriteBlobs(f.ctx, blobs)
-	assertUnimplementedErr(t, err, "client.BatchWriteBlobs")
 }
 
 // Verify for one arbitrary method that when retries are exhausted, we get the retriable error code
@@ -370,7 +300,13 @@ func TestBatchWriteBlobsRpcRetriesExhausted(t *testing.T) {
 		digest.TestNew("b", 1): []byte{2},
 	}
 	err := f.client.BatchWriteBlobs(f.ctx, blobs)
-	assertCanceledErr(t, err, "client.BatchWriteBlobs")
+	if err == nil {
+		t.Error("BatchWriteBlobs(ctx, {}) = nil; expected Canceled error got nil")
+	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Canceled {
+		t.Errorf("BatchWriteBlobs(ctx, {}) = %v; expected Canceled error, got %v", err, s.Code())
+	} else if !ok {
+		t.Errorf("BatchWriteBlobs(ctx, {}) = %v; expected Canceled error (status.FromError failed)", err)
+	}
 }
 
 func TestGetTreeRetries(t *testing.T) {
@@ -385,70 +321,6 @@ func TestGetTreeRetries(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Errorf("client.GetDirectoryTree(ctx, digest) gave %d directories, want 2", len(got))
-	}
-}
-
-func TestGetOperationRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.GetOperation(f.ctx, &oppb.GetOperationRequest{})
-	if got != nil {
-		t.Errorf("client.GetOperation(ctx, digest) gave result %s, want nil", got)
-	}
-	if err == nil {
-		t.Errorf("client.GetOperation(ctx, {}) = nil; expected Unimplemented error got nil")
-	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Unimplemented {
-		t.Errorf("client.GetOperation(ctx, {}) = %v; expected Unimplemented error, got %v", err, s.Code())
-	}
-}
-
-func TestListOperationsRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.ListOperations(f.ctx, &oppb.ListOperationsRequest{})
-	if got != nil {
-		t.Errorf("client.ListOperations(ctx, digest) gave result %s, want nil", got)
-	}
-	if err == nil {
-		t.Errorf("client.ListOperations(ctx, {}) = nil; expected Unimplemented error got nil")
-	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Unimplemented {
-		t.Errorf("client.ListOperations(ctx, {}) = %v; expected Unimplemented error, got %v", err, s.Code())
-	}
-}
-
-func TestCancelOperationRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.CancelOperation(f.ctx, &oppb.CancelOperationRequest{})
-	if got != nil {
-		t.Errorf("client.CancelOperation(ctx, digest) gave result %s, want nil", got)
-	}
-	if err == nil {
-		t.Errorf("client.CancelOperation(ctx, {}) = nil; expected Unimplemented error got nil")
-	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Unimplemented {
-		t.Errorf("client.CancelOperation(ctx, {}) = %v; expected Unimplemented error, got %v", err, s.Code())
-	}
-}
-
-func TestDeleteOperationRetries(t *testing.T) {
-	t.Parallel()
-	f := setup(t)
-	defer f.shutDown()
-
-	got, err := f.client.DeleteOperation(f.ctx, &oppb.DeleteOperationRequest{})
-	if got != nil {
-		t.Errorf("client.DeleteOperation(ctx, digest) gave result %s, want nil", got)
-	}
-	if err == nil {
-		t.Errorf("client.DeleteOperation(ctx, {}) = nil; expected Unimplemented error got nil")
-	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Unimplemented {
-		t.Errorf("client.DeleteOperation(ctx, {}) = %v; expected Unimplemented error, got %v", err, s.Code())
 	}
 }
 
@@ -475,5 +347,108 @@ func TestExecuteAndWaitRetries(t *testing.T) {
 	// 3 separate transient WaitExecution errors + the final successful call.
 	if f.fake.numCalls["WaitExecution"] != 4 {
 		t.Errorf("Expected 4 WaitExecution calls, got %v", f.fake.numCalls["WaitExecution"])
+	}
+}
+
+func TestNonStreamingRpcRetries(t *testing.T) {
+	t.Parallel()
+	testcases := []struct {
+		name string
+		rpc  func(*flakyFixture) (interface{}, error)
+	}{
+		{
+			name: "QueryWriteStatus",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.QueryWriteStatus(f.ctx, &bspb.QueryWriteStatusRequest{})
+			},
+		},
+		{
+			name: "GetActionResult",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.GetActionResult(f.ctx, &repb.GetActionResultRequest{})
+			},
+		},
+		{
+			name: "UpdateActionResult",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.UpdateActionResult(f.ctx, &repb.UpdateActionResultRequest{})
+			},
+		},
+		{
+			name: "FindMissingBlobs",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.FindMissingBlobs(f.ctx, &repb.FindMissingBlobsRequest{})
+			},
+		},
+		{
+			name: "BatchUpdateBlobs",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.BatchUpdateBlobs(f.ctx, &repb.BatchUpdateBlobsRequest{})
+			},
+		},
+		{
+			name: "GetOperation",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.GetOperation(f.ctx, &oppb.GetOperationRequest{})
+			},
+		},
+		{
+			name: "ListOperations",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.ListOperations(f.ctx, &oppb.ListOperationsRequest{})
+			},
+		},
+		{
+			name: "CancelOperation",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.CancelOperation(f.ctx, &oppb.CancelOperationRequest{})
+			},
+		},
+		{
+			name: "DeleteOperation",
+			rpc: func(f *flakyFixture) (interface{}, error) {
+				return f.client.DeleteOperation(f.ctx, &oppb.DeleteOperationRequest{})
+			},
+		},
+	}
+	for _, tc := range testcases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := setup(t)
+			defer f.shutDown()
+
+			got, err := tc.rpc(f)
+			if !reflect.ValueOf(got).IsNil() {
+				t.Errorf("%s(ctx, {}) gave result %s, want nil", tc.name, got)
+			}
+			if err == nil {
+				t.Errorf("%s(ctx, {}) = nil; expected Unimplemented error got nil", tc.name)
+			} else if s, ok := status.FromError(err); ok && s.Code() != codes.Unimplemented {
+				t.Errorf("%s(ctx, {}) = %v; expected Unimplemented error, got %v", tc.name, err, s.Code())
+			} else if !ok {
+				t.Errorf("%s(ctx, {}) = %v; expected Unimplemented error (status.FromError failed)", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestNonStreamingRpcRetriesSleep(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	defer f.shutDown()
+	f.fake.sleepDelay = time.Second
+	client.RPCTimeouts(map[string]time.Duration{"QueryWriteStatus": 500 * time.Millisecond}).Apply(f.client)
+
+	got, err := f.client.QueryWriteStatus(f.ctx, &bspb.QueryWriteStatusRequest{})
+	if got != nil {
+		t.Errorf("client.QueryWriteStatus(ctx, digest) gave result %s, want nil", got)
+	}
+	if err == nil {
+		t.Error("QueryWriteStatus(ctx, {}) = nil; expected Unimplemented error got nil")
+	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Unimplemented {
+		t.Errorf("QueryWriteStatus(ctx, {}) = %v; expected Unimplemented error, got %v", err, s.Code())
+	} else if !ok {
+		t.Errorf("QueryWriteStatus(ctx, {}) = %v; expected Unimplemented error (status.FromError failed)", err)
 	}
 }
