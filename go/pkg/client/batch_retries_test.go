@@ -124,6 +124,7 @@ func (f *flakyBatchServer) BatchUpdateBlobs(ctx context.Context, req *repb.Batch
 }
 
 func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("Cannot listen: %v", err)
@@ -197,6 +198,7 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 }
 
 func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("Cannot listen: %v", err)
@@ -325,6 +327,7 @@ func (s *sleepyBatchServer) BatchUpdateBlobs(ctx context.Context, req *repb.Batc
 }
 
 func TestBatchReadBlobsDeadlineExceededRetries(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("Cannot listen: %v", err)
@@ -363,6 +366,7 @@ func TestBatchReadBlobsDeadlineExceededRetries(t *testing.T) {
 }
 
 func TestBatchUpdateBlobsDeadlineExceededRetries(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("Cannot listen: %v", err)

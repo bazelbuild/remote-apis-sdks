@@ -75,7 +75,10 @@ func WithPolicy(ctx context.Context, shouldRetry ShouldRetry, bp BackoffPolicy, 
 			return err
 		}
 
-		log.V(1).Infof("call failed with err=%v, retrying.", err)
+		if log.V(1) {
+			// This log depth is custom-tailored to the SDK usage, which always calls the retrier from within client.CallWithTimeout.
+			log.InfoDepth(3, fmt.Sprintf("call failed with err=%v, retrying.", err))
+		}
 
 		if attempts+1 == int(bp.maxAttempts) {
 			// Annotates the error message to indicate the retry budget was exhausted.

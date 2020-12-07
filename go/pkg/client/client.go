@@ -182,12 +182,18 @@ func (s UtilizeLocality) Apply(c *Client) {
 type UnifiedUploads bool
 
 func (c *Client) restartUploader() {
+	if c.casUploadRequests == nil {
+		return
+	}
 	close(c.casUploadRequests)
 	c.casUploadRequests = make(chan *uploadRequest, c.UnifiedUploadBufferSize)
 	go c.uploadProcessor()
 }
 
 func (c *Client) restartDownloader() {
+	if c.casDownloadRequests == nil {
+		return
+	}
 	close(c.casDownloadRequests)
 	c.casDownloadRequests = make(chan *downloadRequest, c.UnifiedDownloadBufferSize)
 	go c.downloadProcessor()

@@ -38,6 +38,7 @@ const (
 )
 
 func TestSplitEndpoints(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	l1, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -83,6 +84,7 @@ func TestSplitEndpoints(t *testing.T) {
 }
 
 func TestReadEmptyBlobDoesNotCallServer(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
@@ -103,33 +105,16 @@ func TestReadEmptyBlobDoesNotCallServer(t *testing.T) {
 }
 
 func TestRead(t *testing.T) {
-	ctx := context.Background()
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("Cannot listen: %v", err)
+	t.Parallel()
+	type testCase struct {
+		name     string
+		fake     fakes.Reader
+		offset   int64
+		limit    int64
+		compress bool
+		want     []byte // If nil, fake.blob is expected by default.
 	}
-	defer listener.Close()
-	server := grpc.NewServer()
-	fake := &fakes.Reader{}
-	bsgrpc.RegisterByteStreamServer(server, fake)
-	go server.Serve(listener)
-	defer server.Stop()
-	c, err := client.NewClient(ctx, instance, client.DialParams{
-		Service:    listener.Addr().String(),
-		NoSecurity: true,
-	}, client.StartupCapabilities(false))
-	if err != nil {
-		t.Fatalf("Error connecting to server: %v", err)
-	}
-	defer c.Close()
-
-	tests := []struct {
-		name   string
-		fake   fakes.Reader
-		offset int64
-		limit  int64
-		want   []byte // If nil, fake.blob is expected by default.
-	}{
+	tests := []testCase{
 		{
 			name: "empty blob, 10 chunks",
 			fake: fakes.Reader{
@@ -216,15 +201,52 @@ func TestRead(t *testing.T) {
 			want:   []byte("obar"),
 		},
 	}
+	var compressionTests []testCase
+	for _, tc := range tests {
+		if tc.limit == 0 {
+			// Limit tests don't work well with compression, as the limit refers to the compressed bytes
+			// while offset, per spec, refers to uncompressed bytes.
+			tc.compress = true
+			tc.name = tc.name + "_compressed"
+			compressionTests = append(compressionTests, tc)
+		}
+	}
+	tests = append(tests, compressionTests...)
 
 	for _, tc := range tests {
-		testFunc := func(t *testing.T) {
-			*fake = tc.fake
-			fake.Validate(t)
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			listener, err := net.Listen("tcp", ":0")
+			if err != nil {
+				t.Fatalf("Cannot listen: %v", err)
+			}
+			defer listener.Close()
+			server := grpc.NewServer()
+			bsgrpc.RegisterByteStreamServer(server, &tc.fake)
+			go server.Serve(listener)
+			defer server.Stop()
+			c, err := client.NewClient(ctx, instance, client.DialParams{
+				Service:    listener.Addr().String(),
+				NoSecurity: true,
+			}, client.StartupCapabilities(false))
+			if err != nil {
+				t.Fatalf("Error connecting to server: %v", err)
+			}
+			defer c.Close()
+
+			tc.fake.Validate(t)
+
+			c.CompressedBytestreamThreshold = -1
+			if tc.compress {
+				c.CompressedBytestreamThreshold = 0
+			}
+			tc.fake.ExpectCompressed = tc.compress
 
 			want := tc.want
 			if want == nil {
-				want = fake.Blob
+				want = tc.fake.Blob
 			}
 
 			if tc.offset == 0 && tc.limit == 0 {
@@ -237,54 +259,25 @@ func TestRead(t *testing.T) {
 				}
 			}
 
-			got, err := c.ReadBlobRange(ctx, digest.NewFromBlob(fake.Blob), tc.offset, tc.limit)
+			got, err := c.ReadBlobRange(ctx, digest.NewFromBlob(tc.fake.Blob), tc.offset, tc.limit)
 			if err != nil {
 				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave error %s, want nil", tc.offset, tc.limit, err)
 			}
 			if !bytes.Equal(want, got) {
 				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave diff: want %v, got %v", tc.offset, tc.limit, want, got)
 			}
-		}
-
-		// Harder to write in a for loop since it -1/0 isn't an intuitive "enabled/disabled"
-		c.CompressedBytestreamThreshold = -1
-		t.Run(tc.name+" - no compression", testFunc)
-		if tc.limit == 0 {
-			// Limit tests don't work well with compression, as the limit refers to the compressed bytes
-			// while offset, per spec, refers to uncompressed bytes.
-			tc.fake.ExpectCompressed = true
-			c.CompressedBytestreamThreshold = 0
-			t.Run(tc.name+" - with compression", testFunc)
-			tc.fake.ExpectCompressed = false
-		}
+		})
 	}
 }
 
 func TestWrite(t *testing.T) {
-	ctx := context.Background()
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("Cannot listen: %v", err)
-	}
-	defer listener.Close()
-	server := grpc.NewServer()
-	fake := &fakes.Writer{}
-	bsgrpc.RegisterByteStreamServer(server, fake)
-	go server.Serve(listener)
-	defer server.Stop()
-	c, err := client.NewClient(ctx, instance, client.DialParams{
-		Service:    listener.Addr().String(),
-		NoSecurity: true,
-	}, client.StartupCapabilities(false), client.ChunkMaxSize(20)) // Use small write chunk size for tests.
-	if err != nil {
-		t.Fatalf("Error connecting to server: %v", err)
-	}
-	defer c.Close()
-
-	tests := []struct {
+	t.Parallel()
+	type testcase struct {
 		name string
 		blob []byte
-	}{
+		cmp  client.CompressedBytestreamThreshold
+	}
+	tests := []testcase{
 		{
 			name: "empty blob",
 			blob: []byte{},
@@ -298,39 +291,63 @@ func TestWrite(t *testing.T) {
 			blob: make([]byte, 5*1024*1024),
 		},
 	}
-
-	for _, cmp := range []client.CompressedBytestreamThreshold{-1, 0} {
-		for _, tc := range tests {
-			t.Run(fmt.Sprintf("%s - CompressionThresh:%d", tc.name, cmp), func(t *testing.T) {
-				fake.ExpectCompressed = int(cmp) == 0
-
-				cmp.Apply(c)
-				gotDg, err := c.WriteBlob(ctx, tc.blob)
-				if err != nil {
-					t.Errorf("c.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
-				}
-				if fake.Err != nil {
-					t.Errorf("c.WriteBlob(ctx, blob) caused the server to return error %s (possibly unseen by c)", fake.Err)
-				}
-				if !bytes.Equal(tc.blob, fake.Buf) {
-					t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs, want %v, got %v:", tc.blob, fake.Buf)
-				}
-				dg := digest.NewFromBlob(tc.blob)
-				if dg != gotDg {
-					t.Errorf("c.WriteBlob(ctx, blob) had diff on digest returned (want %s, got %s)", dg, gotDg)
-				}
-			})
+	var allTests []testcase
+	for _, tc := range tests {
+		for _, th := range []int{0, -1} {
+			t := tc
+			t.name += fmt.Sprintf("CompressionThreshold=%d", th)
+			t.cmp = client.CompressedBytestreamThreshold(th)
+			allTests = append(allTests, t)
 		}
+	}
+
+	for _, tc := range allTests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			listener, err := net.Listen("tcp", ":0")
+			if err != nil {
+				t.Fatalf("Cannot listen: %v", err)
+			}
+			defer listener.Close()
+			server := grpc.NewServer()
+			fake := &fakes.Writer{}
+			bsgrpc.RegisterByteStreamServer(server, fake)
+			go server.Serve(listener)
+			defer server.Stop()
+			c, err := client.NewClient(ctx, instance, client.DialParams{
+				Service:    listener.Addr().String(),
+				NoSecurity: true,
+			}, client.StartupCapabilities(false), client.ChunkMaxSize(20)) // Use small write chunk size for tests.
+			if err != nil {
+				t.Fatalf("Error connecting to server: %v", err)
+			}
+			defer c.Close()
+
+			fake.ExpectCompressed = int(tc.cmp) == 0
+			tc.cmp.Apply(c)
+
+			gotDg, err := c.WriteBlob(ctx, tc.blob)
+			if err != nil {
+				t.Errorf("c.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
+			}
+			if fake.Err != nil {
+				t.Errorf("c.WriteBlob(ctx, blob) caused the server to return error %s (possibly unseen by c)", fake.Err)
+			}
+			if !bytes.Equal(tc.blob, fake.Buf) {
+				t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs, want %v, got %v:", tc.blob, fake.Buf)
+			}
+			dg := digest.NewFromBlob(tc.blob)
+			if dg != gotDg {
+				t.Errorf("c.WriteBlob(ctx, blob) had diff on digest returned (want %s, got %s)", dg, gotDg)
+			}
+		})
 	}
 }
 
 func TestMissingBlobs(t *testing.T) {
-	ctx := context.Background()
-	e, cleanup := fakes.NewTestEnv(t)
-	defer cleanup()
-	fake := e.Server.CAS
-	c := e.Client.GrpcClient
-
+	t.Parallel()
 	tests := []struct {
 		name string
 		// present is the blobs present in the CAS.
@@ -379,8 +396,14 @@ func TestMissingBlobs(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			fake.Clear()
+			t.Parallel()
+			ctx := context.Background()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			c := e.Client.GrpcClient
 			for _, s := range tc.present {
 				fake.Put([]byte(s))
 			}
@@ -397,6 +420,7 @@ func TestMissingBlobs(t *testing.T) {
 }
 
 func TestUploadConcurrent(t *testing.T) {
+	t.Parallel()
 	blobs := make([][]byte, 50)
 	for i := range blobs {
 		blobs[i] = []byte(fmt.Sprint(i))
@@ -428,7 +452,9 @@ func TestUploadConcurrent(t *testing.T) {
 		}
 	}
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
@@ -473,13 +499,16 @@ func TestUploadConcurrent(t *testing.T) {
 }
 
 func TestUploadConcurrentBatch(t *testing.T) {
+	t.Parallel()
 	blobs := make([][]byte, 100)
 	for i := range blobs {
 		blobs[i] = []byte(fmt.Sprint(i))
 	}
 	ctx := context.Background()
 	for _, uo := range []client.UnifiedUploads{false, true} {
+		uo := uo
 		t.Run(fmt.Sprintf("unified:%t", uo), func(t *testing.T) {
+			t.Parallel()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 			fake := e.Server.CAS
@@ -487,6 +516,8 @@ func TestUploadConcurrentBatch(t *testing.T) {
 			fake.ReqSleepRandomize = true
 			c := e.Client.GrpcClient
 			c.MaxBatchDigests = 50
+			client.UnifiedUploadTickDuration(500 * time.Millisecond).Apply(c)
+			uo.Apply(c)
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			for i := 0; i < 10; i++ {
@@ -519,25 +550,28 @@ func TestUploadConcurrentBatch(t *testing.T) {
 						t.Errorf("wanted 1 missing requests for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
 					}
 				}
-				expectedReqs := 10
-				if c.UnifiedUploads {
-					// All the 100 digests will be batched into two batches, together.
-					expectedReqs = 2
-				}
-				if fake.BatchReqs() != expectedReqs {
-					t.Errorf("%d requests were made to BatchUpdateBlobs, wanted %v", fake.BatchReqs(), expectedReqs)
-				}
+			}
+			expectedReqs := 10
+			if c.UnifiedUploads {
+				// All the 100 digests will be batched into two batches, together.
+				expectedReqs = 2
+			}
+			if fake.BatchReqs() != expectedReqs {
+				t.Errorf("%d requests were made to BatchUpdateBlobs, wanted %v", fake.BatchReqs(), expectedReqs)
 			}
 		})
 	}
 }
 
 func TestUploadCancel(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	blob := []byte{1, 2, 3}
 	dg := digest.NewFromBlob(blob)
 	for _, uo := range []client.UnifiedUploads{false, true} {
+		uo := uo
 		t.Run(fmt.Sprintf("unified:%t", uo), func(t *testing.T) {
+			t.Parallel()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 			fake := e.Server.CAS
@@ -577,6 +611,7 @@ func TestUploadCancel(t *testing.T) {
 }
 
 func TestUploadConcurrentCancel(t *testing.T) {
+	t.Parallel()
 	blobs := make([][]byte, 50)
 	for i := range blobs {
 		blobs[i] = []byte(fmt.Sprint(i))
@@ -613,7 +648,9 @@ func TestUploadConcurrentCancel(t *testing.T) {
 		}
 	}
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
@@ -670,6 +707,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 }
 
 func TestUpload(t *testing.T) {
+	t.Parallel()
 	var twoThousandBlobs [][]byte
 	var thousandBlobs [][]byte
 	for i := 0; i < 2000; i++ {
@@ -685,17 +723,16 @@ func TestUpload(t *testing.T) {
 		}
 	}
 
-	tests := []struct {
+	type testcase struct {
 		name string
 		// input is the blobs to try to store; they're converted to a file map by the test
 		input [][]byte
 		// present is the blobs already present in the CAS; they're pre-loaded into the fakes.CAS object
 		// and the test verifies no attempt was made to upload them.
 		present [][]byte
-		// concurrency is the CAS concurrency with which we should be uploading the blobs. If not
-		// specified, it uses defaultCASConcurrency.
-		concurrency client.CASConcurrency
-	}{
+		opts    []client.Opt
+	}
+	tests := []testcase{
 		{
 			name:    "No blobs",
 			input:   nil,
@@ -717,85 +754,89 @@ func TestUpload(t *testing.T) {
 			present: [][]byte{[]byte("bar")},
 		},
 		{
-			name:        "2000 blobs heavy concurrency",
-			input:       twoThousandBlobs,
-			present:     thousandBlobs,
-			concurrency: client.CASConcurrency(500),
+			name:    "2000 blobs heavy concurrency",
+			input:   twoThousandBlobs,
+			present: thousandBlobs,
+			opts:    []client.Opt{client.CASConcurrency(500)},
 		},
 	}
 
-	for _, ub := range []client.UseBatchOps{false, true} {
-		for _, uo := range []client.UnifiedUploads{false, true} {
-			for _, cmp := range []client.CompressedBytestreamThreshold{-1, 0} {
-				t.Run(fmt.Sprintf("UsingBatch:%t,UnifiedUploads:%t,CompressionThresh:%d", ub, uo, cmp), func(t *testing.T) {
-					for _, tc := range tests {
-						t.Run(tc.name, func(t *testing.T) {
-							ctx := context.Background()
-							e, cleanup := fakes.NewTestEnv(t)
-							defer cleanup()
-							fake := e.Server.CAS
-							c := e.Client.GrpcClient
-							client.CASConcurrency(defaultCASConcurrency).Apply(c)
-							cmp.Apply(c)
-							ub.Apply(c)
-							uo.Apply(c)
-							if tc.concurrency > 0 {
-								tc.concurrency.Apply(c)
-							}
-
-							present := make(map[digest.Digest]bool)
-							for _, blob := range tc.present {
-								fake.Put(blob)
-								present[digest.NewFromBlob(blob)] = true
-							}
-							var input []*uploadinfo.Entry
-							for _, blob := range tc.input {
-								input = append(input, uploadinfo.EntryFromBlob(blob))
-							}
-
-							missing, err := c.UploadIfMissing(ctx, input...)
-							if err != nil {
-								t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
-							}
-
-							missingSet := make(map[digest.Digest]struct{})
-							for _, dg := range missing {
-								missingSet[dg] = struct{}{}
-							}
-
-							for i, ue := range input {
-								dg := ue.Digest
-								blob := tc.input[i]
-								if present[dg] {
-									if fake.BlobWrites(dg) > 0 {
-										t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
-									}
-									if _, ok := missingSet[dg]; ok {
-										t.Errorf("Stats said that blob %v with digest %s was missing in the CAS", blob, dg)
-									}
-									continue
-								}
-								if gotBlob, ok := fake.Get(dg); !ok {
-									t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
-								} else if !bytes.Equal(blob, gotBlob) {
-									t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
-								}
-								if _, ok := missingSet[dg]; !ok {
-									t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
-								}
-							}
-							if fake.MaxConcurrency() > defaultCASConcurrency {
-								t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
-							}
-						})
-					}
-				})
+	var allTests []testcase
+	for _, tc := range tests {
+		for _, ub := range []client.UseBatchOps{false, true} {
+			for _, uo := range []client.UnifiedUploads{false, true} {
+				for _, cmp := range []client.CompressedBytestreamThreshold{-1, 0} {
+					t := tc
+					t.name = fmt.Sprintf("%s_UsingBatch:%t,UnifiedUploads:%t,CompressionThresh:%d", tc.name, ub, uo, cmp)
+					t.opts = append(t.opts, []client.Opt{ub, uo, cmp}...)
+					allTests = append(allTests, t)
+				}
 			}
 		}
+	}
+	for _, tc := range allTests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			c := e.Client.GrpcClient
+			for _, o := range tc.opts {
+				o.Apply(c)
+			}
+
+			present := make(map[digest.Digest]bool)
+			for _, blob := range tc.present {
+				fake.Put(blob)
+				present[digest.NewFromBlob(blob)] = true
+			}
+			var input []*uploadinfo.Entry
+			for _, blob := range tc.input {
+				input = append(input, uploadinfo.EntryFromBlob(blob))
+			}
+
+			missing, err := c.UploadIfMissing(ctx, input...)
+			if err != nil {
+				t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
+			}
+
+			missingSet := make(map[digest.Digest]struct{})
+			for _, dg := range missing {
+				missingSet[dg] = struct{}{}
+			}
+
+			for i, ue := range input {
+				dg := ue.Digest
+				blob := tc.input[i]
+				if present[dg] {
+					if fake.BlobWrites(dg) > 0 {
+						t.Errorf("blob %v with digest %s was uploaded even though it was already present in the CAS", blob, dg)
+					}
+					if _, ok := missingSet[dg]; ok {
+						t.Errorf("Stats said that blob %v with digest %s was missing in the CAS", blob, dg)
+					}
+					continue
+				}
+				if gotBlob, ok := fake.Get(dg); !ok {
+					t.Errorf("blob %v with digest %s was not uploaded, expected it to be present in the CAS", blob, dg)
+				} else if !bytes.Equal(blob, gotBlob) {
+					t.Errorf("blob digest %s had diff on uploaded blob: want %v, got %v", dg, blob, gotBlob)
+				}
+				if _, ok := missingSet[dg]; !ok {
+					t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
+				}
+			}
+			if fake.MaxConcurrency() > defaultCASConcurrency {
+				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
+			}
+		})
 	}
 }
 
 func TestWriteBlobsBatching(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	tests := []struct {
 		name      string
@@ -836,7 +877,9 @@ func TestWriteBlobsBatching(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 			fake := e.Server.CAS
@@ -876,6 +919,7 @@ func TestWriteBlobsBatching(t *testing.T) {
 }
 
 func TestFlattenActionOutputs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
@@ -973,6 +1017,7 @@ func TestFlattenActionOutputs(t *testing.T) {
 }
 
 func TestDownloadActionOutputs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
@@ -1157,6 +1202,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 }
 
 func TestDownloadDirectory(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
@@ -1202,11 +1248,6 @@ func TestDownloadDirectory(t *testing.T) {
 }
 
 func TestDownloadActionOutputsErrors(t *testing.T) {
-	ctx := context.Background()
-	e, cleanup := fakes.NewTestEnv(t)
-	defer cleanup()
-	c := e.Client.GrpcClient
-
 	ar := &repb.ActionResult{}
 	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "foo", Digest: digest.NewFromBlob([]byte("foo")).ToProto()})
 	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "bar", Digest: digest.NewFromBlob([]byte("bar")).ToProto()})
@@ -1217,9 +1258,16 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 	defer os.RemoveAll(execRoot)
 
 	for _, ub := range []client.UseBatchOps{false, true} {
-		ub.Apply(c)
+		ub := ub
 		t.Run(fmt.Sprintf("%sUsingBatch:%t", t.Name(), ub), func(t *testing.T) {
-			err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			t.Parallel()
+			ctx := context.Background()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			c := e.Client.GrpcClient
+			ub.Apply(c)
+
+			err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found") {
 				t.Errorf("expected 'not found' error in DownloadActionOutputs, got: %v", err)
 			}
@@ -1228,16 +1276,6 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 }
 
 func TestDownloadActionOutputsBatching(t *testing.T) {
-	ctx := context.Background()
-	e, cleanup := fakes.NewTestEnv(t)
-	defer cleanup()
-	fake := e.Server.CAS
-	c := e.Client.GrpcClient
-	c.MaxBatchSize = 500
-	c.MaxBatchDigests = 4
-	// Each batch request frame overhead is 13 bytes.
-	// A per-blob overhead is 74 bytes.
-
 	tests := []struct {
 		name      string
 		sizes     []int
@@ -1302,8 +1340,19 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			fake.Clear()
+			t.Parallel()
+			ctx := context.Background()
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			fake := e.Server.CAS
+			c := e.Client.GrpcClient
+			c.MaxBatchSize = 500
+			c.MaxBatchDigests = 4
+			// Each batch request frame overhead is 13 bytes.
+			// A per-blob overhead is 74 bytes.
+
 			c.UtilizeLocality = client.UtilizeLocality(tc.locality)
 			var dgs []digest.Digest
 			blobs := make(map[digest.Digest][]byte)
@@ -1350,6 +1399,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 }
 
 func TestDownloadActionOutputsConcurrency(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	type testBlob struct {
 		digest digest.Digest
@@ -1366,7 +1416,9 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 
 	for _, ub := range []client.UseBatchOps{false, true} {
 		for _, uo := range []client.UnifiedDownloads{false, true} {
+			ub, uo := ub, uo
 			t.Run(fmt.Sprintf("%sUsingBatch:%t,UnifiedDownloads:%t", t.Name(), ub, uo), func(t *testing.T) {
+				t.Parallel()
 				e, cleanup := fakes.NewTestEnv(t)
 				defer cleanup()
 				fake := e.Server.CAS
@@ -1441,6 +1493,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 }
 
 func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	type testBlob struct {
 		digest digest.Digest
@@ -1545,6 +1598,7 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 }
 
 func TestWriteAndReadProto(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
@@ -1572,6 +1626,7 @@ func TestWriteAndReadProto(t *testing.T) {
 }
 
 func TestDownloadFiles(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
@@ -1608,14 +1663,16 @@ func TestDownloadFiles(t *testing.T) {
 }
 
 func TestDownloadFilesCancel(t *testing.T) {
-	execRoot, err := ioutil.TempDir("", "DownloadOuts")
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
-
+	t.Parallel()
 	for _, uo := range []client.UnifiedDownloads{false, true} {
+		uo := uo
 		t.Run(fmt.Sprintf("UnifiedDownloads:%t", uo), func(t *testing.T) {
+			t.Parallel()
+			execRoot, err := ioutil.TempDir("", strings.ReplaceAll(t.Name(), string(filepath.Separator), "_"))
+			if err != nil {
+				t.Fatalf("failed to make temp dir: %v", err)
+			}
+			defer os.RemoveAll(execRoot)
 			ctx := context.Background()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
