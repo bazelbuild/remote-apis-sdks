@@ -41,6 +41,7 @@ const (
 	downloadBlob         OpType = "download_blob"
 	downloadDir          OpType = "download_dir"
 	reexecuteAction      OpType = "reexecute_action"
+	checkDeterminism     OpType = "check_determinism"
 	uploadBlob           OpType = "upload_blob"
 )
 
@@ -50,14 +51,16 @@ var supportedOps = []OpType{
 	downloadBlob,
 	downloadDir,
 	reexecuteAction,
+	checkDeterminism,
 	uploadBlob,
 }
 
 var (
-	operation  = flag.String("operation", "", fmt.Sprintf("Specifies the operation to perform. Supported values: %v", supportedOps))
-	digest     = flag.String("digest", "", "Digest in <digest/size_bytes> format.")
-	pathPrefix = flag.String("path", "", "Path to which outputs should be downloaded to.")
-	inputRoot  = flag.String("input_root", "", "For reexecute_action: if specified, override the action inputs with the specified input root.")
+	operation    = flag.String("operation", "", fmt.Sprintf("Specifies the operation to perform. Supported values: %v", supportedOps))
+	digest       = flag.String("digest", "", "Digest in <digest/size_bytes> format.")
+	pathPrefix   = flag.String("path", "", "Path to which outputs should be downloaded to.")
+	inputRoot    = flag.String("input_root", "", "For reexecute_action: if specified, override the action inputs with the specified input root.")
+	execAttempts = flag.Int("exec_attempts", 10, "For check_determinism: the number of times to remotely execute the action and check for mismatches.")
 )
 
 func main() {
@@ -68,6 +71,9 @@ func main() {
 	flag.Parse()
 	if *operation == "" {
 		log.Exitf("--operation must be specified.")
+	}
+	if *execAttempts <= 0 {
+		log.Exitf("--exec_attempts must be >= 1.")
 	}
 
 	ctx := context.Background()
@@ -106,6 +112,11 @@ func main() {
 	case reexecuteAction:
 		if err := c.ReexecuteAction(ctx, getDigestFlag(), *inputRoot, outerr.SystemOutErr); err != nil {
 			log.Exitf("error reexecuting action %v: %v", getDigestFlag(), err)
+		}
+
+	case checkDeterminism:
+		if err := c.CheckDeterminism(ctx, getDigestFlag(), *inputRoot, *execAttempts); err != nil {
+			log.Exitf("error checking the determinism of %v: %v", getDigestFlag(), err)
 		}
 
 	case uploadBlob:

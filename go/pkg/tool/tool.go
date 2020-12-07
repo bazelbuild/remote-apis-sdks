@@ -31,66 +31,72 @@ const (
 	stderrFile = "stderr"
 )
 
+// testOnlyStartDeterminismExec
+var testOnlyStartDeterminismExec = func() {}
+
 // Client is a remote execution client.
 type Client struct {
 	GrpcClient *rc.Client
 }
 
-// ReexecuteAction reexecutes the action remotely, optionally overriding the
-// inputs with the ones provided at the inputRoot path.
-func (c *Client) ReexecuteAction(ctx context.Context, actionDigest, inputRoot string, oe outerr.OutErr) error {
-	acDg, err := digest.NewFromString(actionDigest)
-	if err != nil {
-		return err
-	}
-	actionProto := &repb.Action{}
-	if err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
-		return err
-	}
-
-	commandProto := &repb.Command{}
-	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
-	if err != nil {
-		return err
-	}
-
-	log.Infof("Reading command from action digest..")
-	if err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
-		return err
-	}
-
+// CheckDeterminism executes the action the given number of times and compares
+// output digests, reporting failure if a mismatch is detected.
+func (c *Client) CheckDeterminism(ctx context.Context, actionDigest, inputRoot string, attempts int) error {
+	oe := outerr.SystemOutErr
 	fmc := filemetadata.NewNoopCache()
 	client := &rexec.Client{
 		FileMetadataCache: fmc,
 		GrpcClient:        c.GrpcClient,
 	}
-	_, inputPaths, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
+	cmd, err := c.prepCommand(ctx, client, actionDigest, inputRoot)
 	if err != nil {
 		return err
 	}
-	if inputRoot == "" {
-		curTime := time.Now().Format(time.RFC3339)
-		inputRoot = filepath.Join(os.TempDir(), acDg.Hash+"_"+curTime)
-		dg, err := digest.NewFromProto(actionProto.GetInputRootDigest())
-		if err != nil {
-			return err
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: false, DownloadOutErr: true}
+	firstRes, firstMd := client.Run(ctx, cmd, opt, oe)
+	for i := 1; i < attempts; i++ {
+		testOnlyStartDeterminismExec()
+		res, md := client.Run(ctx, cmd, opt, oe)
+		gotErr := false
+		if res.IsOk() != firstRes.IsOk() {
+			log.Errorf("action does not produce a consistent result, got %v and %v from consecutive executions", res.Err, firstRes.Err)
+			gotErr = true
 		}
-		log.Infof("Fetching input tree from input root digest %s into %s", dg, inputRoot)
-		_, err = c.GrpcClient.DownloadDirectory(ctx, dg, inputRoot, fmc)
-		if err != nil {
-			return err
+		if len(md.OutputDigests) != len(firstMd.OutputDigests) {
+			log.Errorf("action does not produce a consistent number of outputs, got %v and %v from consecutive executions", len(md.OutputDigests), len(firstMd.OutputDigests))
+			gotErr = true
+		}
+		for p, d := range md.OutputDigests {
+			firstD, ok := firstMd.OutputDigests[p]
+			if !ok {
+				log.Errorf("action does not produce %v consistently", p)
+				gotErr = true
+				continue
+			}
+			if d != firstD {
+				log.Errorf("action does not produce a consistent digest for %v, got %v and %v", p, d, firstD)
+				gotErr = true
+				continue
+			}
+		}
+		if gotErr {
+			return fmt.Errorf("action is not deterministic, check error log for more details")
 		}
 	}
-	// Construct Command object.
-	cmd := commandFromREProto(commandProto)
-	cmd.InputSpec.Inputs = inputPaths
-	cmd.ExecRoot = inputRoot
-	if actionProto.Timeout != nil {
-		tm, err := ptypes.Duration(actionProto.Timeout)
-		if err != nil {
-			return err
-		}
-		cmd.Timeout = tm
+	return nil
+}
+
+// ReexecuteAction reexecutes the action remotely, optionally overriding the
+// inputs with the ones provided at the inputRoot path.
+func (c *Client) ReexecuteAction(ctx context.Context, actionDigest, inputRoot string, oe outerr.OutErr) error {
+	fmc := filemetadata.NewNoopCache()
+	client := &rexec.Client{
+		FileMetadataCache: fmc,
+		GrpcClient:        c.GrpcClient,
+	}
+	cmd, err := c.prepCommand(ctx, client, actionDigest, inputRoot)
+	if err != nil {
+		return err
 	}
 	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
 	res, _ := client.Run(ctx, cmd, opt, oe)
@@ -108,6 +114,57 @@ func (c *Client) ReexecuteAction(ctx context.Context, actionDigest, inputRoot st
 	}
 
 	return res.Err
+}
+
+func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDigest, inputRoot string) (*command.Command, error) {
+	acDg, err := digest.NewFromString(actionDigest)
+	if err != nil {
+		return nil, err
+	}
+	actionProto := &repb.Action{}
+	if err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
+		return nil, err
+	}
+
+	commandProto := &repb.Command{}
+	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
+	if err != nil {
+		return nil, err
+	}
+
+	log.Infof("Reading command from action digest..")
+	if err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
+		return nil, err
+	}
+	_, inputPaths, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
+	if err != nil {
+		return nil, err
+	}
+	if inputRoot == "" {
+		curTime := time.Now().Format(time.RFC3339)
+		inputRoot = filepath.Join(os.TempDir(), acDg.Hash+"_"+curTime)
+		dg, err := digest.NewFromProto(actionProto.GetInputRootDigest())
+		if err != nil {
+			return nil, err
+		}
+		log.Infof("Fetching input tree from input root digest %s into %s", dg, inputRoot)
+		_, err = c.GrpcClient.DownloadDirectory(ctx, dg, inputRoot, client.FileMetadataCache)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Construct Command object.
+	cmd := commandFromREProto(commandProto)
+	cmd.InputSpec.Inputs = inputPaths
+	cmd.ExecRoot = inputRoot
+	if actionProto.Timeout != nil {
+		tm, err := ptypes.Duration(actionProto.Timeout)
+		if err != nil {
+			return nil, err
+		}
+		cmd.Timeout = tm
+	}
+	return cmd, nil
 }
 
 func commandFromREProto(cmdPb *repb.Command) *command.Command {
