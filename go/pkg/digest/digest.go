@@ -141,8 +141,14 @@ func NewFromFile(path string) (Digest, error) {
 		return Empty, err
 	}
 	defer f.Close()
+	return NewFromReader(f)
+}
+
+// NewFromReader computes a file digest from a reader.
+// It returns an error if there was a problem reading the file.
+func NewFromReader(r io.Reader) (Digest, error) {
 	h := HashFn.New()
-	size, err := io.Copy(h, f)
+	size, err := io.Copy(h, r)
 	if err != nil {
 		return Empty, err
 	}
