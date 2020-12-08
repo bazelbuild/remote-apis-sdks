@@ -251,9 +251,15 @@ func TestWriteRetries(t *testing.T) {
 			}
 
 			blob := []byte("blob")
-			gotDg, err := f.client.WriteBlob(f.ctx, blob)
+			gotDg, bMoved, err := f.client.WriteBlob(f.ctx, blob)
 			if err != nil {
 				t.Errorf("client.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
+			}
+			if (int(f.client.CompressedBytestreamThreshold) < 0 || int64(f.client.CompressedBytestreamThreshold) > gotDg.Size) && bMoved != gotDg.Size {
+				t.Errorf("c.WriteBlob(ctx, blob) = %v, expected %v (reported different bytes moved and digest size despite no compression) %v", bMoved, gotDg.Size, f.client.CompressedBytestreamThreshold)
+			}
+			if (int(f.client.CompressedBytestreamThreshold) >= 0 && int64(f.client.CompressedBytestreamThreshold) <= gotDg.Size) && bMoved == gotDg.Size && gotDg.Size != 0 {
+				t.Errorf("c.WriteBlob(ctx, blob) = %v, expected any different value (reported same bytes moved and digest size despite compression on)", bMoved)
 			}
 			if diff := cmp.Diff(digest.NewFromBlob(blob), gotDg); diff != "" {
 				t.Errorf("client.WriteBlob(ctx, blob) had diff on digest returned (want -> got):\n%s", diff)

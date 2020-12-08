@@ -328,7 +328,7 @@ func TestWrite(t *testing.T) {
 			fake.ExpectCompressed = int(tc.cmp) == 0
 			tc.cmp.Apply(c)
 
-			gotDg, err := c.WriteBlob(ctx, tc.blob)
+			gotDg, bMoved, err := c.WriteBlob(ctx, tc.blob)
 			if err != nil {
 				t.Errorf("c.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
 			}
@@ -337,6 +337,12 @@ func TestWrite(t *testing.T) {
 			}
 			if !bytes.Equal(tc.blob, fake.Buf) {
 				t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs, want %v, got %v:", tc.blob, fake.Buf)
+			}
+			if !fake.ExpectCompressed && bMoved != gotDg.Size {
+				t.Errorf("c.WriteBlob(ctx, blob) = %v, expected %v (reported different bytes moved and digest size despite no compression)", bMoved, gotDg.Size)
+			}
+			if fake.ExpectCompressed && bMoved == gotDg.Size && gotDg.Size != 0 {
+				t.Errorf("c.WriteBlob(ctx, blob) = %v, expected any different value (reported same bytes moved and digest size despite compression on)", bMoved)
 			}
 			dg := digest.NewFromBlob(tc.blob)
 			if dg != gotDg {
@@ -473,7 +479,7 @@ func TestUploadConcurrent(t *testing.T) {
 					for _, blob := range append(blobs, blobs...) {
 						input = append(input, uploadinfo.EntryFromBlob(blob))
 					}
-					if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+					if _, _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
 					return nil
@@ -530,7 +536,7 @@ func TestUploadConcurrentBatch(t *testing.T) {
 						// Twice to have the same upload in same call, in addition to between calls.
 						input = append(input, uploadinfo.EntryFromBlob(blobs[j]))
 					}
-					if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+					if _, _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
 					return nil
@@ -587,7 +593,7 @@ func TestUploadCancel(t *testing.T) {
 			eg, _ := errgroup.WithContext(cCtx)
 			ue := uploadinfo.EntryFromBlob(blob)
 			eg.Go(func() error {
-				if _, err := c.UploadIfMissing(cCtx, ue); err != context.Canceled {
+				if _, _, err := c.UploadIfMissing(cCtx, ue); err != context.Canceled {
 					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context.Canceled", err)
 				}
 				return nil
@@ -664,7 +670,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			eg.Go(func() error {
-				if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+				if _, _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 				}
 				return nil
@@ -673,7 +679,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			for i := 0; i < 50; i++ {
 				eg.Go(func() error {
 					// Verify that we got a context cancellation error. Sometimes, the request can succeed, if the original thread takes a while to run.
-					if _, err := c.UploadIfMissing(cCtx, input...); err != nil && err != context.Canceled {
+					if _, _, err := c.UploadIfMissing(cCtx, input...); err != nil && err != context.Canceled {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context canceled", err)
 					}
 					return nil
@@ -797,14 +803,22 @@ func TestUpload(t *testing.T) {
 				input = append(input, uploadinfo.EntryFromBlob(blob))
 			}
 
-			missing, err := c.UploadIfMissing(ctx, input...)
+			missing, bMoved, err := c.UploadIfMissing(ctx, input...)
 			if err != nil {
 				t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 			}
 
 			missingSet := make(map[digest.Digest]struct{})
+			totalBytes := int64(0)
 			for _, dg := range missing {
 				missingSet[dg] = struct{}{}
+				totalBytes += dg.Size
+			}
+
+			// It's much harder to check the case where compression is on as we also have to ignore batch ops,
+			// so we just don't.
+			if int(c.CompressedBytestreamThreshold) < 0 && bMoved != totalBytes {
+				t.Errorf("c.UploadIfMissing(ctx, input) = %v, expected %v (reported different bytes moved and digest size despite no compression)", bMoved, totalBytes)
 			}
 
 			for i, ue := range input {
@@ -896,7 +910,7 @@ func TestWriteBlobsBatching(t *testing.T) {
 				blobs[digest.NewFromBlob(blob)] = blob
 			}
 
-			err := c.WriteBlobs(ctx, blobs)
+			_, _, err := c.WriteBlobs(ctx, blobs)
 			if err != nil {
 				t.Fatalf("c.WriteBlobs(ctx, inputs) gave error %s, expected nil", err)
 			}
@@ -1611,9 +1625,12 @@ func TestWriteAndReadProto(t *testing.T) {
 			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
 		},
 	}
-	d, err := c.WriteProto(ctx, dirA)
+	d, bMoved, err := c.WriteProto(ctx, dirA)
 	if err != nil {
 		t.Errorf("Failed writing proto: %s", err)
+	}
+	if bMoved != d.Size {
+		t.Errorf("c.WriteProto(ctx, input) = %v, expected %v (reported different bytes moved and digest size despite no compression)", bMoved, d.Size)
 	}
 
 	dirB := &repb.Directory{}

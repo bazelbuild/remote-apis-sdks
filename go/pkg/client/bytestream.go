@@ -15,19 +15,21 @@ import (
 )
 
 // WriteBytes uploads a byte slice.
-func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
+func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) (int64, error) {
 	ue := uploadinfo.EntryFromBlob(data)
 	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	return c.WriteChunked(ctx, name, ch)
 }
 
 // WriteChunked uploads chunked data with a given resource name to the CAS.
-func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chunker) error {
+func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chunker) (int64, error) {
+	var totalBytes int64
 	closure := func() error {
 		ch.Reset() // Retry by starting the stream from the beginning.
+		totalBytes = int64(0)
 		// TODO(olaola): implement resumable uploads.
 
 		stream, err := c.Write(ctx)
@@ -55,13 +57,15 @@ func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chun
 			if err != nil {
 				return err
 			}
+			totalBytes += int64(len(req.Data))
 		}
 		if _, err := stream.CloseAndRecv(); err != nil {
 			return err
 		}
 		return nil
 	}
-	return c.Retrier.Do(ctx, closure)
+	err := c.Retrier.Do(ctx, closure)
+	return totalBytes, err
 }
 
 // ReadBytes fetches a resource's contents into a byte slice.
