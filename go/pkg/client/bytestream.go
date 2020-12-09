@@ -15,13 +15,14 @@ import (
 )
 
 // WriteBytes uploads a byte slice.
-func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) (int64, error) {
+func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
 	ue := uploadinfo.EntryFromBlob(data)
 	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return c.WriteChunked(ctx, name, ch)
+	_, err = c.WriteChunked(ctx, name, ch)
+	return err
 }
 
 // WriteChunked uploads chunked data with a given resource name to the CAS.

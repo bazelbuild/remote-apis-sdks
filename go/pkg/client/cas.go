@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -342,7 +343,6 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 		}
 	}
 
-	var byteCountMu sync.Mutex
 	totalBytesTransferred := int64(0)
 
 	eg, eCtx := errgroup.WithContext(ctx)
@@ -371,9 +371,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 						return err
 					}
 					bchMap[dg] = data
-					byteCountMu.Lock()
-					totalBytesTransferred += int64(len(data))
-					byteCountMu.Unlock()
+					atomic.AddInt64(&totalBytesTransferred, int64(len(data)))
 				}
 				if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
 					return err
@@ -390,9 +388,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				if err != nil {
 					return err
 				}
-				byteCountMu.Lock()
-				totalBytesTransferred += written
-				byteCountMu.Unlock()
+				atomic.AddInt64(&totalBytesTransferred, written)
 			}
 			if eCtx.Err() != nil {
 				return eCtx.Err()
