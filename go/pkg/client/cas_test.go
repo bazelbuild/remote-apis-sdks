@@ -473,7 +473,7 @@ func TestUploadConcurrent(t *testing.T) {
 					for _, blob := range append(blobs, blobs...) {
 						input = append(input, uploadinfo.EntryFromBlob(blob))
 					}
-					if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+					if _, _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
 					return nil
@@ -530,7 +530,7 @@ func TestUploadConcurrentBatch(t *testing.T) {
 						// Twice to have the same upload in same call, in addition to between calls.
 						input = append(input, uploadinfo.EntryFromBlob(blobs[j]))
 					}
-					if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+					if _, _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 					}
 					return nil
@@ -587,7 +587,7 @@ func TestUploadCancel(t *testing.T) {
 			eg, _ := errgroup.WithContext(cCtx)
 			ue := uploadinfo.EntryFromBlob(blob)
 			eg.Go(func() error {
-				if _, err := c.UploadIfMissing(cCtx, ue); err != context.Canceled {
+				if _, _, err := c.UploadIfMissing(cCtx, ue); err != context.Canceled {
 					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context.Canceled", err)
 				}
 				return nil
@@ -664,7 +664,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			eg.Go(func() error {
-				if _, err := c.UploadIfMissing(eCtx, input...); err != nil {
+				if _, _, err := c.UploadIfMissing(eCtx, input...); err != nil {
 					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 				}
 				return nil
@@ -673,7 +673,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			for i := 0; i < 50; i++ {
 				eg.Go(func() error {
 					// Verify that we got a context cancellation error. Sometimes, the request can succeed, if the original thread takes a while to run.
-					if _, err := c.UploadIfMissing(cCtx, input...); err != nil && err != context.Canceled {
+					if _, _, err := c.UploadIfMissing(cCtx, input...); err != nil && err != context.Canceled {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context canceled", err)
 					}
 					return nil
@@ -797,14 +797,22 @@ func TestUpload(t *testing.T) {
 				input = append(input, uploadinfo.EntryFromBlob(blob))
 			}
 
-			missing, err := c.UploadIfMissing(ctx, input...)
+			missing, bMoved, err := c.UploadIfMissing(ctx, input...)
 			if err != nil {
 				t.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected nil", err)
 			}
 
 			missingSet := make(map[digest.Digest]struct{})
+			totalBytes := int64(0)
 			for _, dg := range missing {
 				missingSet[dg] = struct{}{}
+				totalBytes += dg.Size
+			}
+
+			// It's much harder to check the case where compression is on as we also have to ignore batch ops,
+			// so we just don't.
+			if int(c.CompressedBytestreamThreshold) < 0 && bMoved != totalBytes {
+				t.Errorf("c.UploadIfMissing(ctx, input) = %v, expected %v (reported different bytes moved and digest size despite no compression)", bMoved, totalBytes)
 			}
 
 			for i, ue := range input {

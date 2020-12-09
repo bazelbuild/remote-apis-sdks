@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -48,9 +49,10 @@ type uploadRequest struct {
 }
 
 type uploadResponse struct {
-	digest  digest.Digest
-	err     error
-	missing bool
+	digest     digest.Digest
+	bytesMoved int64
+	err        error
+	missing    bool
 }
 
 type uploadState struct {
@@ -142,16 +144,21 @@ func (c *Client) uploadProcessor() {
 	}
 }
 
-func updateAndNotify(st *uploadState, err error, missing bool) {
+func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.err = err
-	for i, cl := range st.clients {
+	for _, cl := range st.clients {
 		cl <- &uploadResponse{
-			digest:  st.ue.Digest,
-			missing: i == 0 && missing, // Only first client is reported the digest missing.
-			err:     err,
+			digest:     st.ue.Digest,
+			bytesMoved: bytesMoved,
+			missing:    missing,
+			err:        err,
 		}
+
+		// We only report this data to the first client to prevent double accounting.
+		bytesMoved = 0
+		missing = false
 	}
 	st.clients = nil
 	st.ue = nil
@@ -223,19 +230,19 @@ func (c *Client) upload(reqs []*uploadRequest) {
 	}
 	if err != nil {
 		for _, st := range newStates {
-			updateAndNotify(st, err, false)
+			updateAndNotify(st, 0, err, false)
 		}
 		return
 	}
 	missing, present, err := c.findBlobState(ctx, newUploads)
 	if err != nil {
 		for _, st := range newStates {
-			updateAndNotify(st, err, false)
+			updateAndNotify(st, 0, err, false)
 		}
 		return
 	}
 	for _, dg := range present {
-		updateAndNotify(newStates[dg], nil, false)
+		updateAndNotify(newStates[dg], 0, nil, false)
 	}
 
 	LogContextInfof(ctx, log.Level(2), "%d new items to store", len(missing))
@@ -262,23 +269,25 @@ func (c *Client) upload(reqs []*uploadRequest) {
 			if len(batch) > 1 {
 				LogContextInfof(ctx, log.Level(3), "Uploading batch of %d blobs", len(batch))
 				bchMap := make(map[digest.Digest][]byte)
+				totalBytesMap := make(map[digest.Digest]int64)
 				for _, dg := range batch {
 					st := newStates[dg]
 					ch, err := chunker.New(st.ue, false, int(c.ChunkMaxSize))
 					if err != nil {
-						updateAndNotify(st, err, true)
+						updateAndNotify(st, 0, err, true)
 						continue
 					}
 					data, err := ch.FullData()
 					if err != nil {
-						updateAndNotify(st, err, true)
+						updateAndNotify(st, 0, err, true)
 						continue
 					}
 					bchMap[dg] = data
+					totalBytesMap[dg] = int64(len(data))
 				}
 				err := c.BatchWriteBlobs(ctx, bchMap)
 				for dg := range bchMap {
-					updateAndNotify(newStates[dg], err, true)
+					updateAndNotify(newStates[dg], totalBytesMap[dg], err, true)
 				}
 			} else {
 				LogContextInfof(ctx, log.Level(3), "Uploading single blob with digest %s", batch[0])
@@ -296,10 +305,10 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 				ch, err := chunker.New(st.ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 				if err != nil {
-					updateAndNotify(st, err, true)
+					updateAndNotify(st, 0, err, true)
 				}
-				err = c.WriteChunked(cCtx, c.writeRscName(dg), ch)
-				updateAndNotify(st, err, true)
+				totalBytes, err := c.WriteChunked(cCtx, c.writeRscName(dg), ch)
+				updateAndNotify(st, totalBytes, err, true)
 			}
 		}()
 	}
@@ -307,7 +316,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 
 // This function is only used when UnifiedUploads is false. It will be removed
 // once UnifiedUploads=true is stable.
-func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, error) {
+func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
 	var dgs []digest.Digest
 	ueList := make(map[digest.Digest]*uploadinfo.Entry)
 	for _, ue := range data {
@@ -320,7 +329,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 
 	missing, err := c.MissingBlobs(ctx, dgs)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	LogContextInfof(ctx, log.Level(2), "%d items to store", len(missing))
 	var batches [][]digest.Digest
@@ -333,6 +342,8 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 			batches = append(batches, missing[i:i+1])
 		}
 	}
+
+	totalBytesTransferred := int64(0)
 
 	eg, eCtx := errgroup.WithContext(ctx)
 	for i, batch := range batches {
@@ -360,6 +371,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 						return err
 					}
 					bchMap[dg] = data
+					atomic.AddInt64(&totalBytesTransferred, int64(len(data)))
 				}
 				if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
 					return err
@@ -372,9 +384,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				if err != nil {
 					return err
 				}
-				if err := c.WriteChunked(eCtx, c.writeRscName(dg), ch); err != nil {
+				written, err := c.WriteChunked(eCtx, c.writeRscName(dg), ch)
+				if err != nil {
 					return err
 				}
+				atomic.AddInt64(&totalBytesTransferred, written)
 			}
 			if eCtx.Err() != nil {
 				return eCtx.Err()
@@ -390,7 +404,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 		LogContextInfof(ctx, log.Level(2), "Upload error: %v", err)
 	}
 
-	return missing, err
+	return missing, totalBytesTransferred, err
 }
 
 func (c *Client) cancelPendingRequests(reqs []*uploadRequest) {
@@ -405,8 +419,9 @@ func (c *Client) cancelPendingRequests(reqs []*uploadRequest) {
 
 // UploadIfMissing stores a number of uploadable items.
 // It first queries the CAS to see which items are missing and only uploads those that are.
-// Returns a slice of the missing digests.
-func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, error) {
+// Returns a slice of the missing digests and the sum of total bytes moved - may be different
+// from logical bytes moved (ie sum of digest sizes) due to compression.
+func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
 	if !c.UnifiedUploads {
 		return c.uploadNonUnified(ctx, data...)
 	}
@@ -414,11 +429,11 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry)
 	LogContextInfof(ctx, log.Level(2), "Request to upload %d blobs", uploads)
 
 	if uploads == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	toolName, actionID, invocationID, err := GetContextMetadata(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	meta := &requestMetadata{
 		toolName:     toolName,
@@ -439,27 +454,29 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry)
 		case <-ctx.Done():
 			LogContextInfof(ctx, log.Level(2), "Upload canceled")
 			c.cancelPendingRequests(reqs)
-			return nil, ctx.Err()
+			return nil, 0, ctx.Err()
 		case c.casUploadRequests <- req:
 			continue
 		}
 	}
+	totalBytesMoved := int64(0)
 	for uploads > 0 {
 		select {
 		case <-ctx.Done():
 			c.cancelPendingRequests(reqs)
-			return nil, ctx.Err()
+			return nil, 0, ctx.Err()
 		case resp := <-wait:
 			if resp.err != nil {
-				return nil, resp.err
+				return nil, 0, resp.err
 			}
 			if resp.missing {
 				missing = append(missing, resp.digest)
 			}
+			totalBytesMoved += resp.bytesMoved
 			uploads--
 		}
 	}
-	return missing, nil
+	return missing, totalBytesMoved, nil
 }
 
 // WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
@@ -474,7 +491,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	for _, blob := range blobs {
 		uEntries = append(uEntries, uploadinfo.EntryFromBlob(blob))
 	}
-	_, err := c.UploadIfMissing(ctx, uEntries...)
+	_, _, err := c.UploadIfMissing(ctx, uEntries...)
 	return err
 }
 
@@ -495,7 +512,8 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 	if err != nil {
 		return dg, err
 	}
-	return dg, c.WriteChunked(ctx, c.writeRscName(dg), ch)
+	_, err = c.WriteChunked(ctx, c.writeRscName(dg), ch)
+	return dg, err
 }
 
 // maybeCompressReadBlob will, depending on the client configuration, set the blobs to be

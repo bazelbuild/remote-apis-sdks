@@ -282,7 +282,7 @@ func (c *Client) UploadBlob(ctx context.Context, path string) error {
 
 	log.Infof("Uploading blob of %v from %v.", dg, path)
 	ue := uploadinfo.EntryFromFile(dg, path)
-	if _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
+	if _, _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
 		return err
 	}
 	return nil
