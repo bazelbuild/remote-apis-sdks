@@ -7,9 +7,8 @@ require (
 	github.com/aclements/go-moremath v0.0.0-20190830160640-d16893ddf098 // indirect
 	github.com/ajstarks/deck v0.0.0-20191009173945-82d717002242 // indirect
 	github.com/ajstarks/svgo v0.0.0-20190826172357-de52242f3d65 // indirect
-	github.com/bazelbuild/remote-apis v0.0.0-20200904140912-1aeb39973178
+	github.com/bazelbuild/remote-apis v0.0.0-20201113154229-1e9ccef3705c
 	github.com/bradfitz/gomemcache v0.0.0-20190913173617-a41fca850d0b // indirect
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
 	github.com/cznic/cc v0.0.0-20181122101902-d673e9b70d4d // indirect
 	github.com/cznic/fileutil v0.0.0-20181122101858-4d67cfea8c87 // indirect
@@ -29,6 +28,7 @@ require (
 	github.com/godbus/dbus v4.1.0+incompatible // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
+	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/protobuf v1.4.2
 	github.com/gonum/blas v0.0.0-20181208220705-f22b278b28ac // indirect
 	github.com/gonum/floats v0.0.0-20181209220543-c233463c7e82 // indirect
@@ -38,7 +38,6 @@ require (
 	github.com/google/go-cmp v0.5.1
 	github.com/google/uuid v1.1.2
 	github.com/googleapis/gax-go v2.0.2+incompatible // indirect
-	github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6 // indirect
 	github.com/jung-kurt/gofpdf v1.13.0 // indirect
 	github.com/klauspost/compress v1.11.2
 	github.com/kylelemons/godebug v1.1.0
@@ -52,6 +51,7 @@ require (
 	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/syndtr/goleveldb v1.0.0 // indirect
 	golang.org/x/build v0.0.0-20191031202223-0706ea4fce0c // indirect
+	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6 // indirect
 	golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
 	golang.org/x/mobile v0.0.0-20191031020345-0945064e013a // indirect
 	golang.org/x/net v0.0.0-20200904194848-62affa334b73
