@@ -105,6 +105,40 @@ Output Files From Directories
 	}
 }
 
+func TestTool_CheckDeterminism(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	cmd := &command.Command{
+		Args:        []string{"foo bar baz"},
+		ExecRoot:    e.ExecRoot,
+		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}},
+		OutputFiles: []string{"a/b/out"},
+	}
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	out := "output"
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
+	_, acDg := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out})
+
+	client := &Client{GrpcClient: e.Client.GrpcClient}
+	if err := client.CheckDeterminism(context.Background(), acDg.String(), "", 2); err != nil {
+		t.Errorf("CheckDeterminism returned an error: %v", err)
+	}
+	// Now execute again with changed inputs.
+	testOnlyStartDeterminismExec = func() {
+		out = "output2"
+		e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out})
+	}
+	defer func() { testOnlyStartDeterminismExec = func() {} }()
+	if err := client.CheckDeterminism(context.Background(), acDg.String(), "", 2); err == nil {
+		t.Errorf("CheckDeterminism returned nil, want error")
+	}
+}
+
 func TestTool_ReexecuteAction(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
