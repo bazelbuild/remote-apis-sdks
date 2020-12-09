@@ -21,12 +21,12 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 	if err != nil {
 		return err
 	}
-	_, err = c.WriteChunked(ctx, name, ch)
+	_, err = c.writeChunked(ctx, name, ch)
 	return err
 }
 
-// WriteChunked uploads chunked data with a given resource name to the CAS.
-func (c *Client) WriteChunked(ctx context.Context, name string, ch *chunker.Chunker) (int64, error) {
+// writeChunked uploads chunked data with a given resource name to the CAS.
+func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker) (int64, error) {
 	var totalBytes int64
 	closure := func() error {
 		ch.Reset() // Retry by starting the stream from the beginning.
