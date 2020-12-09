@@ -328,7 +328,7 @@ func TestWrite(t *testing.T) {
 			fake.ExpectCompressed = int(tc.cmp) == 0
 			tc.cmp.Apply(c)
 
-			gotDg, bMoved, err := c.WriteBlob(ctx, tc.blob)
+			gotDg, err := c.WriteBlob(ctx, tc.blob)
 			if err != nil {
 				t.Errorf("c.WriteBlob(ctx, blob) gave error %s, wanted nil", err)
 			}
@@ -337,12 +337,6 @@ func TestWrite(t *testing.T) {
 			}
 			if !bytes.Equal(tc.blob, fake.Buf) {
 				t.Errorf("c.WriteBlob(ctx, blob) had diff on blobs, want %v, got %v:", tc.blob, fake.Buf)
-			}
-			if !fake.ExpectCompressed && bMoved != gotDg.Size {
-				t.Errorf("c.WriteBlob(ctx, blob) = %v, expected %v (reported different bytes moved and digest size despite no compression)", bMoved, gotDg.Size)
-			}
-			if fake.ExpectCompressed && bMoved == gotDg.Size && gotDg.Size != 0 {
-				t.Errorf("c.WriteBlob(ctx, blob) = %v, expected any different value (reported same bytes moved and digest size despite compression on)", bMoved)
 			}
 			dg := digest.NewFromBlob(tc.blob)
 			if dg != gotDg {
@@ -910,7 +904,7 @@ func TestWriteBlobsBatching(t *testing.T) {
 				blobs[digest.NewFromBlob(blob)] = blob
 			}
 
-			_, _, err := c.WriteBlobs(ctx, blobs)
+			err := c.WriteBlobs(ctx, blobs)
 			if err != nil {
 				t.Fatalf("c.WriteBlobs(ctx, inputs) gave error %s, expected nil", err)
 			}
@@ -1625,12 +1619,9 @@ func TestWriteAndReadProto(t *testing.T) {
 			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
 		},
 	}
-	d, bMoved, err := c.WriteProto(ctx, dirA)
+	d, err := c.WriteProto(ctx, dirA)
 	if err != nil {
 		t.Errorf("Failed writing proto: %s", err)
-	}
-	if bMoved != d.Size {
-		t.Errorf("c.WriteProto(ctx, input) = %v, expected %v (reported different bytes moved and digest size despite no compression)", bMoved, d.Size)
 	}
 
 	dirB := &repb.Directory{}

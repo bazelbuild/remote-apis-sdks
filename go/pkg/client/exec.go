@@ -83,7 +83,7 @@ func (c *Client) ExecuteAction(ctx context.Context, ac *Action) (*repb.ActionRes
 	}
 
 	// Upload any remaining inputs.
-	if _, _, err := c.WriteBlobs(ctx, ac.InputFiles); err != nil {
+	if err := c.WriteBlobs(ctx, ac.InputFiles); err != nil {
 		return nil, gerrors.WithMessage(err, "uploading input files to the CAS")
 	}
 
@@ -145,7 +145,7 @@ func (c *Client) executeJob(ctx context.Context, skipCache bool, acDg *repb.Dige
 // PrepAction returns the digest of the Action and a (possibly nil) pointer to an ActionResult
 // representing the result of the cache check, if any.
 func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *repb.ActionResult, error) {
-	comDg, _, err := c.WriteProto(ctx, buildCommand(ac))
+	comDg, err := c.WriteProto(ctx, buildCommand(ac))
 	if err != nil {
 		return nil, nil, gerrors.WithMessage(err, "storing Command proto")
 	}
@@ -180,7 +180,7 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	}
 
 	// No cache hit, or we didn't check. Upload the action instead.
-	if _, _, err := c.WriteBlob(ctx, acBlob); err != nil {
+	if _, err := c.WriteBlob(ctx, acBlob); err != nil {
 		return nil, nil, gerrors.WithMessage(err, "uploading action to the CAS")
 	}
 

@@ -155,9 +155,8 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 			err:        err,
 		}
 
-		// Only first client is reported to have moved the bytes to prevent double accounting.
+		// We only report this data to the first client to prevent double accounting.
 		bytesMoved = 0
-		// Only first client is reported the digest missing to prevent double accounting.
 		missing = false
 	}
 	st.clients = nil
@@ -343,6 +342,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 		}
 	}
 
+	var byteCountMu sync.Mutex
 	totalBytesTransferred := int64(0)
 
 	eg, eCtx := errgroup.WithContext(ctx)
@@ -371,7 +371,9 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 						return err
 					}
 					bchMap[dg] = data
+					byteCountMu.Lock()
 					totalBytesTransferred += int64(len(data))
+					byteCountMu.Unlock()
 				}
 				if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
 					return err
@@ -388,7 +390,9 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				if err != nil {
 					return err
 				}
+				byteCountMu.Lock()
 				totalBytesTransferred += written
+				byteCountMu.Unlock()
 			}
 			if eCtx.Err() != nil {
 				return eCtx.Err()
@@ -486,33 +490,34 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry)
 // * Do we want to allow []byte uploads, or require the user to construct Chunkers?
 // * How to consistently distinguish in the API between should we use GetMissing or not?
 // * Should BatchWrite be a public method at all?
-func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) ([]digest.Digest, int64, error) {
+func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
 	var uEntries []*uploadinfo.Entry
 	for _, blob := range blobs {
 		uEntries = append(uEntries, uploadinfo.EntryFromBlob(blob))
 	}
-	return c.UploadIfMissing(ctx, uEntries...)
+	_, _, err := c.UploadIfMissing(ctx, uEntries...)
+	return err
 }
 
 // WriteProto marshals and writes a proto.
-func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Digest, int64, error) {
+func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Digest, error) {
 	bytes, err := proto.Marshal(msg)
 	if err != nil {
-		return digest.Empty, 0, err
+		return digest.Empty, err
 	}
 	return c.WriteBlob(ctx, bytes)
 }
 
 // WriteBlob uploads a blob to the CAS.
-func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, int64, error) {
+func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
 	ue := uploadinfo.EntryFromBlob(blob)
 	dg := ue.Digest
 	ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 	if err != nil {
-		return dg, 0, err
+		return dg, err
 	}
-	bytesMoved, err := c.WriteChunked(ctx, c.writeRscName(dg), ch)
-	return dg, bytesMoved, err
+	_, err = c.WriteChunked(ctx, c.writeRscName(dg), ch)
+	return dg, err
 }
 
 // maybeCompressReadBlob will, depending on the client configuration, set the blobs to be
@@ -1522,7 +1527,7 @@ func (c *Client) shouldCompress(sizeBytes int64) bool {
 	return int64(c.CompressedBytestreamThreshold) >= 0 && int64(c.CompressedBytestreamThreshold) <= sizeBytes
 }
 
-func (c *Client) writeRscName(dg digest.Digest) (ret string) {
+func (c *Client) writeRscName(dg digest.Digest) string {
 	if c.shouldCompress(dg.Size) {
 		return c.ResourceNameCompressedWrite(dg.Hash, dg.Size)
 	}
