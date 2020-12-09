@@ -465,8 +465,11 @@ type Metadata struct {
 	OutputDigests map[string]digest.Digest
 	// Missing digests that are uploaded to CAS.
 	MissingDigests []digest.Digest
-	// RealBytesMoved is the real number of bytes put on the wire for upload. It may differ from the
-	// sum of MissingDigest.Sizes due to compression. It does not, however, account for blobs metadata.
+	// LogicalBytesUploaded is the sum of sizes in bytes of the blobs that were uploaded. It should be
+	// the same value as the sum of digest sizes in MissingDigests.
+	LogicalBytesUploaded int64
+	// RealBytesUploaded is the number of bytes that were put on the wire for upload (exclusing metadata).
+	// It may differ from LogicalBytesUploaded due to compression.
 	RealBytesUploaded int64
 	// TODO(olaola): Add a lot of other fields.
 }

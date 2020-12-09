@@ -246,6 +246,9 @@ func (ec *Context) UpdateCachedResult() {
 	}
 
 	ec.Metadata.MissingDigests = missing
+	for _, d := range missing {
+		ec.Metadata.LogicalBytesUploaded += d.Size
+	}
 	ec.Metadata.RealBytesUploaded = bytesMoved
 	log.V(1).Infof("%s %s> Updating remote cache...", cmdID, executionID)
 	req := &repb.UpdateActionResultRequest{
@@ -277,6 +280,9 @@ func (ec *Context) ExecuteRemotely() {
 		return
 	}
 	ec.Metadata.MissingDigests = missing
+	for _, d := range missing {
+		ec.Metadata.LogicalBytesUploaded += d.Size
+	}
 	ec.Metadata.RealBytesUploaded = bytesMoved
 	log.V(1).Infof("%s %s> Executing remotely...\n%s", cmdID, executionID, strings.Join(ec.cmd.Args, " "))
 	ec.Metadata.EventTimes[command.EventExecuteRemotely] = &command.TimeInterval{From: time.Now()}
