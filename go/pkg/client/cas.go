@@ -37,6 +37,35 @@ const DefaultCompressedBytestreamThreshold = -1
 // DefaultMaxHeaderSize is the defaut maximum gRPC header size.
 const DefaultMaxHeaderSize = 8 * 1024
 
+// MovedBytesMetadata represents the bytes moved in CAS related requests.
+type MovedBytesMetadata struct {
+	// Requested is the sum of the sizes in bytes for all the uncompressed
+	// blobs needed by the execution. It includes bytes that might have
+	// been deduped and thus not passed through the wire.
+	Requested int64
+	// LogicalMoved is the sum of the sizes in bytes of the uncompressed
+	// versions of the blobs passed through the wire. It does not included
+	// bytes for blobs that were de-duped.
+	LogicalMoved int64
+	// RealMoved is the the sum of sizes in bytes for all blobs passed
+	// through the wire in the format they were passed through (eg
+	// compressed).
+	RealMoved int64
+	// Cached is amount of logical bytes that we did not have to move
+	// through the wire because they were de-duped.
+	Cached int64
+}
+
+func sumStats(a, b *MovedBytesMetadata) {
+	if a == nil || b == nil {
+		return
+	}
+	a.Requested += b.Requested
+	a.LogicalMoved += b.LogicalMoved
+	a.RealMoved += b.RealMoved
+	a.Cached += b.Cached
+}
+
 const logInterval = 25
 
 type requestMetadata struct {
@@ -785,7 +814,8 @@ func marshalledRequestSize(d digest.Digest) int64 {
 }
 
 // ReadBlob fetches a blob from the CAS into a byte slice.
-func (c *Client) ReadBlob(ctx context.Context, d digest.Digest) ([]byte, error) {
+// Returns the size of the blob and the amount of bytes moved through the wire.
+func (c *Client) ReadBlob(ctx context.Context, d digest.Digest) ([]byte, *MovedBytesMetadata, error) {
 	return c.readBlob(ctx, d, 0, 0)
 }
 
@@ -793,26 +823,27 @@ func (c *Client) ReadBlob(ctx context.Context, d digest.Digest) ([]byte, error) 
 // and including at most limit bytes (or no limit if limit==0). The offset must be non-negative and
 // no greater than the size of the entire blob. The limit must not be negative, but offset+limit may
 // be greater than the size of the entire blob.
-func (c *Client) ReadBlobRange(ctx context.Context, d digest.Digest, offset, limit int64) ([]byte, error) {
+func (c *Client) ReadBlobRange(ctx context.Context, d digest.Digest, offset, limit int64) ([]byte, *MovedBytesMetadata, error) {
 	return c.readBlob(ctx, d, offset, limit)
 }
 
-func (c *Client) readBlob(ctx context.Context, dg digest.Digest, offset, limit int64) ([]byte, error) {
+// Returns the size of the blob and the amount of bytes moved through the wire.
+func (c *Client) readBlob(ctx context.Context, dg digest.Digest, offset, limit int64) ([]byte, *MovedBytesMetadata, error) {
 	// int might be 32-bit, in which case we could have a blob whose size is representable in int64
 	// but not int32, and thus can't fit in a slice. We can check for this by casting and seeing if
 	// the result is negative, since 32 bits is big enough wrap all out-of-range values of int64 to
 	// negative numbers. If int is 64-bits, the cast is a no-op and so the condition will always fail.
 	if int(dg.Size) < 0 {
-		return nil, fmt.Errorf("digest size %d is too big to fit in a byte slice", dg.Size)
+		return nil, nil, fmt.Errorf("digest size %d is too big to fit in a byte slice", dg.Size)
 	}
 	if offset > dg.Size {
-		return nil, fmt.Errorf("offset %d out of range for a blob of size %d", offset, dg.Size)
+		return nil, nil, fmt.Errorf("offset %d out of range for a blob of size %d", offset, dg.Size)
 	}
 	if offset < 0 {
-		return nil, fmt.Errorf("offset %d may not be negative", offset)
+		return nil, nil, fmt.Errorf("offset %d may not be negative", offset)
 	}
 	if limit < 0 {
-		return nil, fmt.Errorf("limit %d may not be negative", limit)
+		return nil, nil, fmt.Errorf("limit %d may not be negative", limit)
 	}
 	sz := dg.Size - offset
 	if limit > 0 && limit < sz {
@@ -820,8 +851,13 @@ func (c *Client) readBlob(ctx context.Context, dg digest.Digest, offset, limit i
 	}
 	// Pad size so bytes.Buffer does not reallocate.
 	buf := bytes.NewBuffer(make([]byte, 0, sz+bytes.MinRead))
-	_, err := c.readBlobStreamed(ctx, dg, offset, limit, &bufferWriter{buf})
-	return buf.Bytes(), err
+	n, err := c.readBlobStreamed(ctx, dg, offset, limit, &bufferWriter{buf})
+	stats := &MovedBytesMetadata{
+		Requested:    sz,
+		LogicalMoved: sz,
+		RealMoved:    n,
+	}
+	return buf.Bytes(), stats, err
 }
 
 // ReadBlobToFile fetches a blob with a provided digest name from the CAS, saving it into a file.
@@ -1024,12 +1060,13 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 }
 
 // ReadProto reads a blob from the CAS and unmarshals it into the given message.
-func (c *Client) ReadProto(ctx context.Context, d digest.Digest, msg proto.Message) error {
-	bytes, err := c.ReadBlob(ctx, d)
+// Returns the size of the proto and the amount of bytes moved through the wire.
+func (c *Client) ReadProto(ctx context.Context, d digest.Digest, msg proto.Message) (*MovedBytesMetadata, error) {
+	bytes, stats, err := c.ReadBlob(ctx, d)
 	if err != nil {
-		return err
+		return stats, err
 	}
-	return proto.Unmarshal(bytes, msg)
+	return stats, proto.Unmarshal(bytes, msg)
 }
 
 // MissingBlobs queries the CAS to determine if it has the listed blobs. It returns a list of the
@@ -1175,7 +1212,7 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 	}
 	for _, dir := range ar.OutputDirectories {
 		t := &repb.Tree{}
-		if err := c.ReadProto(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest), t); err != nil {
+		if _, err := c.ReadProto(ctx, digest.NewFromProtoUnvalidated(dir.TreeDigest), t); err != nil {
 			return nil, err
 		}
 		dirouts, err := c.FlattenTree(t, dir.Path)
@@ -1190,15 +1227,21 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 }
 
 // DownloadDirectory downloads the entire directory of given digest.
-func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) (map[string]*TreeOutput, error) {
+// It returns the number of logical and real bytes downloaded, which may be different from sum
+// of sizes of the files due to dedupping and compression.
+func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) (map[string]*TreeOutput, *MovedBytesMetadata, error) {
 	dir := &repb.Directory{}
-	if err := c.ReadProto(ctx, d, dir); err != nil {
-		return nil, fmt.Errorf("digest %v cannot be mapped to a directory proto: %v", d, err)
+	stats := &MovedBytesMetadata{}
+
+	protoStats, err := c.ReadProto(ctx, d, dir)
+	sumStats(stats, protoStats)
+	if err != nil {
+		return nil, stats, fmt.Errorf("digest %v cannot be mapped to a directory proto: %v", d, err)
 	}
 
 	dirs, err := c.GetDirectoryTree(ctx, d.ToProto())
 	if err != nil {
-		return nil, err
+		return nil, stats, err
 	}
 
 	outputs, err := c.FlattenTree(&repb.Tree{
@@ -1206,40 +1249,45 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoo
 		Children: dirs,
 	}, "")
 	if err != nil {
-		return nil, err
+		return nil, stats, err
 	}
 
-	return outputs, c.downloadOutputs(ctx, outputs, execRoot, cache)
+	outStats, err := c.downloadOutputs(ctx, outputs, execRoot, cache)
+	sumStats(stats, outStats)
+	return outputs, stats, err
 }
 
-// DownloadActionOutputs downloads the output files and directories in the given action result.
-func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string, cache filemetadata.Cache) error {
+// DownloadActionOutputs downloads the output files and directories in the given action result. It returns the amount of downloaded bytes.
+// It returns the number of logical and real bytes downloaded, which may be different from sum
+// of sizes of the files due to dedupping and compression.
+func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
 	outs, err := c.FlattenActionOutputs(ctx, resPb)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Remove the existing output directories before downloading.
 	for _, dir := range resPb.OutputDirectories {
 		if err := os.RemoveAll(filepath.Join(execRoot, dir.Path)); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	return c.downloadOutputs(ctx, outs, execRoot, cache)
 }
 
-func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutput, execRoot string, cache filemetadata.Cache) error {
+func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutput, execRoot string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
 	var symlinks, copies []*TreeOutput
 	downloads := make(map[digest.Digest]*TreeOutput)
+	fullStats := &MovedBytesMetadata{}
 	for _, out := range outs {
 		path := filepath.Join(execRoot, out.Path)
 		if out.IsEmptyDirectory {
 			if err := os.MkdirAll(path, c.DirMode); err != nil {
-				return err
+				return fullStats, err
 			}
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(path), c.DirMode); err != nil {
-			return err
+			return fullStats, err
 		}
 		// We create the symbolic links after all regular downloads are finished, because dangling
 		// links will not work.
@@ -1249,13 +1297,19 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 		}
 		if _, ok := downloads[out.Digest]; ok {
 			copies = append(copies, out)
+			// All copies are effectivelly cached
+			fullStats.Requested += out.Digest.Size
+			fullStats.Cached += out.Digest.Size
 		} else {
 			downloads[out.Digest] = out
 		}
 	}
-	if err := c.DownloadFiles(ctx, execRoot, downloads); err != nil {
-		return err
+	stats, err := c.DownloadFiles(ctx, execRoot, downloads)
+	sumStats(fullStats, stats)
+	if err != nil {
+		return fullStats, err
 	}
+
 	for _, output := range downloads {
 		path := output.Path
 		md := &filemetadata.Metadata{
@@ -1263,7 +1317,7 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 			IsExecutable: output.IsExecutable,
 		}
 		if err := cache.Update(path, md); err != nil {
-			return err
+			return fullStats, err
 		}
 	}
 	for _, out := range copies {
@@ -1273,18 +1327,18 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 		}
 		src := downloads[out.Digest]
 		if src.IsEmptyDirectory {
-			return fmt.Errorf("unexpected empty directory: %s", src.Path)
+			return fullStats, fmt.Errorf("unexpected empty directory: %s", src.Path)
 		}
 		if err := copyFile(execRoot, execRoot, src.Path, out.Path, perm); err != nil {
-			return err
+			return fullStats, err
 		}
 	}
 	for _, out := range symlinks {
 		if err := os.Symlink(out.SymlinkTarget, filepath.Join(execRoot, out.Path)); err != nil {
-			return err
+			return fullStats, err
 		}
 	}
-	return nil
+	return fullStats, nil
 }
 
 func copyFile(srcExecRoot, dstExecRoot, from, to string, mode os.FileMode) error {
@@ -1312,7 +1366,12 @@ type downloadRequest struct {
 	context context.Context
 	output  *TreeOutput
 	meta    *requestMetadata
-	wait    chan<- error
+	wait    chan<- *downloadResponse
+}
+
+type downloadResponse struct {
+	stats *MovedBytesMetadata
+	err   error
 }
 
 func (c *Client) downloadProcessor() {
@@ -1326,7 +1385,7 @@ func (c *Client) downloadProcessor() {
 				ticker.Stop()
 				if buffer != nil {
 					for _, r := range buffer {
-						r.wait <- context.Canceled
+						r.wait <- &downloadResponse{err: context.Canceled}
 					}
 				}
 				return
@@ -1345,7 +1404,7 @@ func (c *Client) downloadProcessor() {
 	}
 }
 
-func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest, err error) {
+func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest, bytesMoved map[digest.Digest]int64, err error) {
 	if err != nil {
 		log.Errorf("Error downloading %v: %v", batch[0], err)
 	}
@@ -1354,8 +1413,26 @@ func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequ
 		if !ok {
 			log.Errorf("Precondition failed: download request not found in input %v.", dg)
 		}
-		for _, r := range rs {
-			r.wait <- err
+		lbMoved := dg.Size
+		rbMoved, ok := bytesMoved[dg]
+		// If there's no real bytes moved it likely means there was an error moving these.
+		if !ok {
+			lbMoved = 0
+		}
+		stats := &MovedBytesMetadata{
+			Requested:    dg.Size,
+			LogicalMoved: lbMoved,
+			RealMoved:    rbMoved,
+		}
+		for i, r := range rs {
+			// bytesMoved will be zero for error cases.
+			// We only report it to the first client to prevent double accounting.
+			r.wait <- &downloadResponse{stats: stats, err: err}
+			if i == 0 {
+				stats.Cached = stats.LogicalMoved
+				stats.RealMoved = 0
+				stats.LogicalMoved = 0
+			}
 		}
 	}
 }
@@ -1364,17 +1441,32 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 	LogContextInfof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 	bchMap, err := c.BatchDownloadBlobs(ctx, batch)
 	if err != nil {
-		afterDownload(batch, reqs, err)
+		afterDownload(batch, reqs, map[digest.Digest]int64{}, err)
 		return
 	}
 	for _, dg := range batch {
+		stats := &MovedBytesMetadata{
+			Requested:    dg.Size,
+			LogicalMoved: dg.Size,
+			RealMoved:    dg.Size, // There's no compression in batch reads.
+		}
 		data := bchMap[dg]
-		for _, r := range reqs[dg] {
+		for i, r := range reqs[dg] {
 			perm := c.RegularMode
 			if r.output.IsExecutable {
 				perm = c.ExecutableMode
 			}
-			r.wait <- ioutil.WriteFile(filepath.Join(r.execRoot, r.output.Path), data, perm)
+			// bytesMoved will be zero for error cases.
+			// We only report it to the first client to prevent double accounting.
+			r.wait <- &downloadResponse{
+				stats: stats,
+				err:   ioutil.WriteFile(filepath.Join(r.execRoot, r.output.Path), data, perm),
+			}
+			if i == 0 {
+				stats.Cached = stats.LogicalMoved
+				stats.RealMoved = 0
+				stats.LogicalMoved = 0
+			}
 		}
 	}
 }
@@ -1383,7 +1475,8 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	// The lock is released when all file copies are finished.
 	// We cannot release the lock after each individual file copy, because
 	// the caller might move the file, and we don't have the contents in memory.
-	defer func() { afterDownload([]digest.Digest{dg}, reqs, err) }()
+	bytesMoved := map[digest.Digest]int64{}
+	defer afterDownload([]digest.Digest{dg}, reqs, bytesMoved, err)
 	rs := reqs[dg]
 	if len(rs) < 1 {
 		return fmt.Errorf("Failed precondition: cannot find %v in reqs map", dg)
@@ -1392,9 +1485,11 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	rs = rs[1:]
 	path := filepath.Join(r.execRoot, r.output.Path)
 	LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
-	if _, err := c.ReadBlobToFile(ctx, r.output.Digest, path); err != nil {
+	n, err := c.ReadBlobToFile(ctx, r.output.Digest, path)
+	if err != nil {
 		return err
 	}
+	bytesMoved[r.output.Digest] = n
 	if r.output.IsExecutable {
 		if err := os.Chmod(path, c.ExecutableMode); err != nil {
 			return err
@@ -1453,7 +1548,7 @@ func (c *Client) download(data []*downloadRequest) {
 		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta.toolName, unifiedMeta.actionID, unifiedMeta.invocationID)
 	}
 	if err != nil {
-		afterDownload(dgs, reqs, err)
+		afterDownload(dgs, reqs, map[digest.Digest]int64{}, err)
 		return
 	}
 
@@ -1496,8 +1591,11 @@ func (c *Client) download(data []*downloadRequest) {
 
 // This is a legacy function used only when UnifiedDownloads=false.
 // It will be removed when UnifiedDownloads=true is stable.
-func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) error {
+// Returns the number of logical and real bytes downloaded, which may be
+// different from sum of sizes of the files due to compression.
+func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) (*MovedBytesMetadata, error) {
 	var dgs []digest.Digest
+	stats := &MovedBytesMetadata{}
 
 	if bool(c.useBatchOps) && bool(c.UtilizeLocality) {
 		paths := make([]*TreeOutput, 0, len(outputs))
@@ -1512,10 +1610,12 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 
 		for _, path := range paths {
 			dgs = append(dgs, path.Digest)
+			stats.Requested += path.Digest.Size
 		}
 	} else {
 		for dg := range outputs {
 			dgs = append(dgs, dg)
+			stats.Requested += dg.Size
 		}
 	}
 
@@ -1558,14 +1658,19 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 					if err := ioutil.WriteFile(filepath.Join(execRoot, out.Path), data, perm); err != nil {
 						return err
 					}
+					atomic.AddInt64(&stats.LogicalMoved, int64(len(data)))
+					atomic.AddInt64(&stats.RealMoved, int64(len(data)))
 				}
 			} else {
 				out := outputs[batch[0]]
 				path := filepath.Join(execRoot, out.Path)
 				LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
-				if _, err := c.ReadBlobToFile(ctx, out.Digest, path); err != nil {
+				readBytes, err := c.ReadBlobToFile(ctx, out.Digest, path)
+				if err != nil {
 					return err
 				}
+				atomic.AddInt64(&stats.LogicalMoved, out.Digest.Size)
+				atomic.AddInt64(&stats.RealMoved, readBytes)
 				if out.IsExecutable {
 					if err := os.Chmod(path, c.ExecutableMode); err != nil {
 						return err
@@ -1582,28 +1687,32 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 	LogContextInfof(ctx, log.Level(3), "Waiting for remaining jobs")
 	err := eg.Wait()
 	LogContextInfof(ctx, log.Level(3), "Done")
-	return err
+	return stats, err
 }
 
 // DownloadFiles downloads the output files under |execRoot|.
-func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) error {
+// It returns the number of logical and real bytes downloaded, which may be different from sum
+// of sizes of the files due to dedupping and compression.
+func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) (*MovedBytesMetadata, error) {
+	stats := &MovedBytesMetadata{}
+
 	if !c.UnifiedDownloads {
 		return c.downloadNonUnified(ctx, execRoot, outputs)
 	}
 	count := len(outputs)
 	if count == 0 {
-		return nil
+		return stats, nil
 	}
 	toolName, actionID, invocationID, err := GetContextMetadata(ctx)
 	if err != nil {
-		return err
+		return stats, err
 	}
 	meta := &requestMetadata{
 		toolName:     toolName,
 		actionID:     actionID,
 		invocationID: invocationID,
 	}
-	wait := make(chan error, count)
+	wait := make(chan *downloadResponse, count)
 	for dg, out := range outputs {
 		r := &downloadRequest{
 			digest:   dg,
@@ -1616,7 +1725,7 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 		select {
 		case <-ctx.Done():
 			LogContextInfof(ctx, log.Level(2), "Download canceled")
-			return ctx.Err()
+			return stats, ctx.Err()
 		case c.casDownloadRequests <- r:
 			continue
 		}
@@ -1627,15 +1736,16 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 		select {
 		case <-ctx.Done():
 			LogContextInfof(ctx, log.Level(2), "Download canceled")
-			return ctx.Err()
-		case err := <-wait:
-			if err != nil {
-				return err
+			return stats, ctx.Err()
+		case resp := <-wait:
+			if resp.err != nil {
+				return stats, resp.err
 			}
+			sumStats(stats, resp.stats)
 			count--
 		}
 	}
-	return nil
+	return stats, nil
 }
 
 func (c *Client) shouldCompress(sizeBytes int64) bool {

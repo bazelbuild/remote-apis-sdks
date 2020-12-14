@@ -304,7 +304,7 @@ func TestReadRetries(t *testing.T) {
 				}
 
 				blob := []byte("blob")
-				got, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
+				got, _, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
 				if err != nil {
 					t.Errorf("client.ReadBlob(ctx, digest) gave error %s, want nil", err)
 				}

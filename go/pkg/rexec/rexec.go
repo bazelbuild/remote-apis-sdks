@@ -74,10 +74,12 @@ func (ec *Context) downloadStream(raw []byte, dgPb *repb.Digest, write func([]by
 		if err != nil {
 			return err
 		}
-		bytes, err := ec.client.GrpcClient.ReadBlob(ec.ctx, dg)
+		bytes, stats, err := ec.client.GrpcClient.ReadBlob(ec.ctx, dg)
 		if err != nil {
 			return err
 		}
+		ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
+		ec.Metadata.RealBytesDownloaded += stats.RealMoved
 		write(bytes)
 	}
 	return nil
@@ -118,13 +120,14 @@ func (ec *Context) downloadOutErr() *command.Result {
 	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
-func (ec *Context) downloadOutputs(execRoot string) *command.Result {
+func (ec *Context) downloadOutputs(execRoot string) (*rc.MovedBytesMetadata, *command.Result) {
 	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
-	if err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, execRoot, ec.client.FileMetadataCache); err != nil {
-		return command.NewRemoteErrorResult(err)
+	stats, err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, execRoot, ec.client.FileMetadataCache)
+	if err != nil {
+		return &rc.MovedBytesMetadata{}, command.NewRemoteErrorResult(err)
 	}
-	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
+	return stats, command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
 func (ec *Context) computeInputs() error {
@@ -201,7 +204,10 @@ func (ec *Context) GetCachedResult() {
 			ec.Result = ec.downloadOutErr()
 		}
 		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
-			ec.Result = ec.downloadOutputs(ec.cmd.ExecRoot)
+			stats, res := ec.downloadOutputs(ec.cmd.ExecRoot)
+			ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
+			ec.Metadata.RealBytesDownloaded += stats.RealMoved
+			ec.Result = res
 		}
 		if ec.Result.Err == nil {
 			ec.Result.Status = command.CacheHitResultStatus
@@ -323,7 +329,10 @@ func (ec *Context) ExecuteRemotely() {
 			ec.Result = ec.downloadOutErr()
 		}
 		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
-			ec.Result = ec.downloadOutputs(ec.cmd.ExecRoot)
+			stats, res := ec.downloadOutputs(ec.cmd.ExecRoot)
+			ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
+			ec.Metadata.RealBytesDownloaded += stats.RealMoved
+			ec.Result = res
 		}
 		if resp.CachedResult && ec.Result.Err == nil {
 			ec.Result.Status = command.CacheHitResultStatus
@@ -354,7 +363,10 @@ func (ec *Context) DownloadOutErr() {
 // DownloadOutputs downloads the outputs of the command in the context to the specified directory.
 func (ec *Context) DownloadOutputs(execRoot string) {
 	st := ec.Result.Status
-	ec.Result = ec.downloadOutputs(execRoot)
+	stats, res := ec.downloadOutputs(ec.cmd.ExecRoot)
+	ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
+	ec.Metadata.RealBytesDownloaded += stats.RealMoved
+	ec.Result = res
 	if ec.Result.Err == nil {
 		ec.Result.Status = st
 	}

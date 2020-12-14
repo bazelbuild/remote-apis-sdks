@@ -471,6 +471,12 @@ type Metadata struct {
 	// RealBytesUploaded is the number of bytes that were put on the wire for upload (exclusing metadata).
 	// It may differ from LogicalBytesUploaded due to compression.
 	RealBytesUploaded int64
+	// LogicalBytesDownloaded is the sum of sizes in bytes of the blobs that were downloaded. It should be
+	// the same value as the sum of digest sizes in OutputDigests.
+	LogicalBytesDownloaded int64
+	// RealBytesDownloaded is the number of bytes that were put on the wire for download (exclusing metadata).
+	// It may differ from LogicalBytesDownloaded due to compression.
+	RealBytesDownloaded int64
 	// TODO(olaola): Add a lot of other fields.
 }
 
