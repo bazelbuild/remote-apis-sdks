@@ -81,11 +81,11 @@ type Client struct {
 	// MaxBatchSize is maximum size in bytes of a batch request for batch operations.
 	MaxBatchSize MaxBatchSize
 	// DirMode is mode used to create directories.
-	DirMode os.FileMode
+	DirMode DirMode
 	// ExecutableMode is mode used to create executable files.
-	ExecutableMode os.FileMode
+	ExecutableMode ExecutableMode
 	// RegularMode is mode used to create non-executable files.
-	RegularMode os.FileMode
+	RegularMode RegularMode
 	// UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
 	UtilizeLocality UtilizeLocality
 	// UnifiedUploads specifies whether the client uploads files in the background.
@@ -323,6 +323,14 @@ type ExecutableMode os.FileMode
 // Apply sets the client's ExecutableMode to m.
 func (m ExecutableMode) Apply(c *Client) {
 	c.ExecutableMode = m
+}
+
+// RegularMode is mode used to create non-executable files.
+type RegularMode os.FileMode
+
+// Apply sets the client's RegularMode to m.
+func (m RegularMode) Apply(c *Client) {
+	c.RegularMode = m
 }
 
 // UseBatchOps can be set to true to use batch CAS operations when uploading multiple blobs, or
