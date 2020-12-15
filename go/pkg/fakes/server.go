@@ -177,7 +177,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		e.Server.CAS.Put(bytes)
 	}
 
-	cmdPb := cmd.ToREProto()
+	cmdPb := cmd.ToREProto(false)
 	bytes, err := proto.Marshal(cmdPb)
 	if err != nil {
 		e.t.Fatalf("error inserting command digest blob into CAS %v", err)
