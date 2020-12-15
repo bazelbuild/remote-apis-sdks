@@ -63,7 +63,7 @@ http_archive(
 go_repository(
     name = "com_github_bazelbuild_remote_apis",
     importpath = "github.com/bazelbuild/remote-apis",
-    tag = "v2.0.0",
+    commit = "9e72daff42c941baaf43a4c370e2607a984c58a7", # 2020-12-09
 )
 
 load("@com_github_bazelbuild_remote_apis//:repository_rules.bzl", "switched_rules_by_language")
