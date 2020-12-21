@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/mostynb/zstdpool-syncpool"
 )
 
 type Initializable interface {
@@ -153,12 +154,7 @@ type compressedSeeker struct {
 }
 
 var encoderInit sync.Once
-var encoders sync.Pool
-
-func newEncoder() interface{} {
-	e, _ := zstd.NewWriter(nil)
-	return e
-}
+var encoders *sync.Pool
 
 // NewCompressedFileSeeker creates a ReadSeeker based on a file path.
 func NewCompressedFileSeeker(path string, buffsize int) (ReadSeeker, error) {
@@ -172,18 +168,19 @@ func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 	}
 
 	encoderInit.Do(func() {
-		encoders.New = newEncoder
+		encoders = syncpool.NewEncoderPool(zstd.WithEncoderConcurrency(1))
 	})
 
 	buf := bytes.NewBuffer(nil)
 	sb := &syncedBuffer{buf: buf}
 
 	encdIntf := encoders.Get()
-	encd, ok := encdIntf.(*zstd.Encoder)
-	if !ok || encd == nil {
+	encdW, ok := encdIntf.(*syncpool.EncoderWrapper)
+	if !ok || encdW == nil {
 		return nil, errors.New("failed creating new encoder")
 	}
 
+	encd := encdW.Encoder
 	encd.Reset(sb)
 	return &compressedSeeker{
 		fs:   fs,
@@ -223,7 +220,7 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 	var errC error
 	if cfs.err != nil || errR == io.EOF {
 		errC = cfs.encd.Close()
-		encoders.Put(cfs.encd)
+		encoders.Put(syncpool.EncoderWrapper{Encoder: cfs.encd})
 		cfs.encd = nil
 	}
 
@@ -244,11 +241,11 @@ func (cfs *compressedSeeker) SeekOffset(offset int64) error {
 	cfs.buf.Reset()
 	if cfs.encd == nil {
 		encdIntf := encoders.Get()
-		var ok bool
-		cfs.encd, ok = encdIntf.(*zstd.Encoder)
-		if !ok {
+		encdW, ok := encdIntf.(*syncpool.EncoderWrapper)
+		if !ok || encdW == nil {
 			return errors.New("failed to get a new encoder")
 		}
+		cfs.encd = encdW.Encoder
 	} else if err := cfs.encd.Close(); err != nil {
 		encoders.Put(cfs.encd)
 		return err
