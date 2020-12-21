@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/mostynb/zstdpool-syncpool"
 )
 
 type Initializable interface {
@@ -145,12 +146,15 @@ func (sb *syncedBuffer) Reset() {
 }
 
 type compressedSeeker struct {
-	fs   ReadSeeker
-	encd *zstd.Encoder
+	fs    ReadSeeker
+	encdW *syncpool.EncoderWrapper
 	// This keeps the compressed data
-	buf    *syncedBuffer
-	closed bool
+	buf *syncedBuffer
+	err error
 }
+
+var encoderInit sync.Once
+var encoders *sync.Pool
 
 // NewCompressedFileSeeker creates a ReadSeeker based on a file path.
 func NewCompressedFileSeeker(path string, buffsize int) (ReadSeeker, error) {
@@ -163,68 +167,92 @@ func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 		return nil, errors.New("trying to double compress files")
 	}
 
+	encoderInit.Do(func() {
+		encoders = syncpool.NewEncoderPool(zstd.WithEncoderConcurrency(1))
+	})
+
 	buf := bytes.NewBuffer(nil)
 	sb := &syncedBuffer{buf: buf}
-	encd, err := zstd.NewWriter(sb)
 
+	encdIntf := encoders.Get()
+	encdW, ok := encdIntf.(*syncpool.EncoderWrapper)
+	if !ok || encdW == nil {
+		return nil, errors.New("failed creating new encoder")
+	}
+
+	encdW.Encoder.Reset(sb)
 	return &compressedSeeker{
-		fs:     fs,
-		encd:   encd,
-		buf:    sb,
-		closed: false,
-	}, err
+		fs:    fs,
+		encdW: encdW,
+		buf:   sb,
+		err:   nil,
+	}, nil
 }
 
 func (cfs *compressedSeeker) Read(p []byte) (int, error) {
+	if cfs.err != nil {
+		return 0, cfs.err
+	}
+
 	var n int
 	var errR, errW error
-	for cfs.buf.Len() < len(p) && errR == nil && errW == nil {
+	for cfs.encdW != nil && cfs.buf.Len() < len(p) && errR == nil && errW == nil {
 		// Read is allowed to use the entity of p as a scratchpad.
 		n, errR = cfs.fs.Read(p)
 		// errW must be non-nil if written bytes != from n.
-		_, errW = cfs.encd.Write(p[:n])
+		_, errW = cfs.encdW.Encoder.Write(p[:n])
 	}
 
-	var retErr error
 	// We have to treat EOF differently. It's the only "everything is going according
-	// to plan" error. EOF implies our uncompressed input data hasd finished reading,
+	// to plan" error. EOF implies our uncompressed input data has finished reading,
 	// but it doesn't mean that we've finished preparing/returning our compressed data.
 	// We only want to return EOF to the user when the _compressed_ data is finished reading.
 	if errR != nil && errR != io.EOF {
-		retErr = errR
+		cfs.err = errR
 	} else if errW != nil {
-		retErr = errW
+		cfs.err = errW
 	}
 
 	// When the buffer ends, or in case of _any_ error, we compress all the bytes we
 	// had available. The encoder requires a Close call to finish writing compressed
 	// data smaller than zstd's window size.
 	var errC error
-	if !cfs.closed && (retErr != nil || errR == io.EOF) {
-		errC = cfs.encd.Close()
-		cfs.closed = true
+	if cfs.err != nil || errR == io.EOF {
+		errC = cfs.encdW.Encoder.Close()
+		encoders.Put(cfs.encdW)
+		cfs.encdW = nil
 	}
 
 	m, errR2 := cfs.buf.Read(p)
 
-	if retErr == nil {
+	if cfs.err == nil {
 		if errC != nil {
-			retErr = errC
+			cfs.err = errC
 		} else if errR2 != nil {
-			retErr = errR2
+			cfs.err = errR2
 		}
 	}
 
-	return m, retErr
+	return m, cfs.err
 }
 
 func (cfs *compressedSeeker) SeekOffset(offset int64) error {
 	cfs.buf.Reset()
-	if err := cfs.encd.Close(); err != nil {
+	if cfs.encdW == nil {
+		encdIntf := encoders.Get()
+		var ok bool
+		cfs.encdW, ok = encdIntf.(*syncpool.EncoderWrapper)
+		if !ok || cfs.encdW == nil {
+			return errors.New("failed to get a new encoder")
+		}
+	} else if err := cfs.encdW.Encoder.Close(); err != nil {
+		encoders.Put(cfs.encdW)
+		cfs.encdW = nil
 		return err
 	}
 
-	cfs.encd.Reset(cfs.buf)
+	cfs.buf.Reset()
+	cfs.encdW.Encoder.Reset(cfs.buf)
 	if err := cfs.fs.SeekOffset(offset); err != nil {
 		return err
 	}
