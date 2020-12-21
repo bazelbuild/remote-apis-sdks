@@ -146,8 +146,8 @@ func (sb *syncedBuffer) Reset() {
 }
 
 type compressedSeeker struct {
-	fs   ReadSeeker
-	encd *zstd.Encoder
+	fs    ReadSeeker
+	encdW *syncpool.EncoderWrapper
 	// This keeps the compressed data
 	buf *syncedBuffer
 	err error
@@ -180,13 +180,12 @@ func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 		return nil, errors.New("failed creating new encoder")
 	}
 
-	encd := encdW.Encoder
-	encd.Reset(sb)
+	encdW.Encoder.Reset(sb)
 	return &compressedSeeker{
-		fs:   fs,
-		encd: encd,
-		buf:  sb,
-		err:  nil,
+		fs:    fs,
+		encdW: encdW,
+		buf:   sb,
+		err:   nil,
 	}, nil
 }
 
@@ -197,11 +196,11 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 
 	var n int
 	var errR, errW error
-	for cfs.encd != nil && cfs.buf.Len() < len(p) && errR == nil && errW == nil {
+	for cfs.encdW != nil && cfs.buf.Len() < len(p) && errR == nil && errW == nil {
 		// Read is allowed to use the entity of p as a scratchpad.
 		n, errR = cfs.fs.Read(p)
 		// errW must be non-nil if written bytes != from n.
-		_, errW = cfs.encd.Write(p[:n])
+		_, errW = cfs.encdW.Encoder.Write(p[:n])
 	}
 
 	// We have to treat EOF differently. It's the only "everything is going according
@@ -219,9 +218,9 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 	// data smaller than zstd's window size.
 	var errC error
 	if cfs.err != nil || errR == io.EOF {
-		errC = cfs.encd.Close()
-		encoders.Put(syncpool.EncoderWrapper{Encoder: cfs.encd})
-		cfs.encd = nil
+		errC = cfs.encdW.Encoder.Close()
+		encoders.Put(cfs.encdW)
+		cfs.encdW = nil
 	}
 
 	m, errR2 := cfs.buf.Read(p)
@@ -239,20 +238,21 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 
 func (cfs *compressedSeeker) SeekOffset(offset int64) error {
 	cfs.buf.Reset()
-	if cfs.encd == nil {
+	if cfs.encdW == nil {
 		encdIntf := encoders.Get()
-		encdW, ok := encdIntf.(*syncpool.EncoderWrapper)
-		if !ok || encdW == nil {
+		var ok bool
+		cfs.encdW, ok = encdIntf.(*syncpool.EncoderWrapper)
+		if !ok || cfs.encdW == nil {
 			return errors.New("failed to get a new encoder")
 		}
-		cfs.encd = encdW.Encoder
-	} else if err := cfs.encd.Close(); err != nil {
-		encoders.Put(cfs.encd)
+	} else if err := cfs.encdW.Encoder.Close(); err != nil {
+		encoders.Put(cfs.encdW)
+		cfs.encdW = nil
 		return err
 	}
 
 	cfs.buf.Reset()
-	cfs.encd.Reset(cfs.buf)
+	cfs.encdW.Encoder.Reset(cfs.buf)
 	if err := cfs.fs.SeekOffset(offset); err != nil {
 		return err
 	}
