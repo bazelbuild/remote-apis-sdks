@@ -104,11 +104,11 @@ def remote_apis_sdks_go_deps():
         go_repository,
         name = "com_github_klauspost_compress",
         importpath = "github.com/klauspost/compress",
-        tag = "v1.11.2",
+        tag = "v1.11.6",
     )
     _maybe(
         go_repository,
         name = "com_github_mostynb_zstdpool_syncpool",
         importpath = "github.com/mostynb/zstdpool-syncpool",
-        tag = "v0.0.2",
+        tag = "v0.0.3",
     )
