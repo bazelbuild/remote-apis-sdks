@@ -309,6 +309,30 @@ func (s MaxBatchSize) Apply(c *Client) {
 	c.MaxBatchSize = s
 }
 
+// DirMode is mode used to create directories.
+type DirMode os.FileMode
+
+// Apply sets the client's DirMode to m.
+func (m DirMode) Apply(c *Client) {
+	c.DirMode = os.FileMode(m)
+}
+
+// ExecutableMode is mode used to create executable files.
+type ExecutableMode os.FileMode
+
+// Apply sets the client's ExecutableMode to m.
+func (m ExecutableMode) Apply(c *Client) {
+	c.ExecutableMode = os.FileMode(m)
+}
+
+// RegularMode is mode used to create non-executable files.
+type RegularMode os.FileMode
+
+// Apply sets the client's RegularMode to m.
+func (m RegularMode) Apply(c *Client) {
+	c.RegularMode = os.FileMode(m)
+}
+
 // UseBatchOps can be set to true to use batch CAS operations when uploading multiple blobs, or
 // false to always use individual ByteStream requests.
 type UseBatchOps bool
