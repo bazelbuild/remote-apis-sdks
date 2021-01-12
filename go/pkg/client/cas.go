@@ -33,6 +33,9 @@ import (
 // transferring blobs compressed on ByteStream.Write RPCs.
 const DefaultCompressedBytestreamThreshold = -1
 
+// DefaultMaxHeaderSize is the defaut maximum gRPC header size.
+const DefaultMaxHeaderSize = 8 * 1024
+
 const logInterval = 25
 
 type requestMetadata struct {
@@ -164,6 +167,47 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 	st.ue = nil
 }
 
+func getUnifiedLabel(labels map[string]bool) string {
+	var keys []string
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
+}
+
+// capToLimit ensures total length does not exceed max header size.
+func capToLimit(m *requestMetadata, limit int) {
+	total := len(m.toolName) + len(m.actionID) + len(m.invocationID)
+	excess := total - limit
+	if excess <= 0 {
+		return
+	}
+	// We ignore the tool name, because in practice this is a
+	// very short constant which makes no sense to truncate.
+	diff := len(m.actionID) - len(m.invocationID)
+	if diff > 0 {
+		if diff > excess {
+			m.actionID = m.actionID[:len(m.actionID)-excess]
+		} else {
+			m.actionID = m.actionID[:len(m.actionID)-diff]
+			rem := (excess - diff + 1) / 2
+			m.actionID = m.actionID[:len(m.actionID)-rem]
+			m.invocationID = m.invocationID[:len(m.invocationID)-rem]
+		}
+	} else {
+		diff = -diff
+		if diff > excess {
+			m.invocationID = m.invocationID[:len(m.invocationID)-excess]
+		} else {
+			m.invocationID = m.invocationID[:len(m.invocationID)-diff]
+			rem := (excess - diff + 1) / 2
+			m.invocationID = m.invocationID[:len(m.invocationID)-rem]
+			m.actionID = m.actionID[:len(m.actionID)-rem]
+		}
+	}
+}
+
 func getUnifiedMetadata(metas []*requestMetadata) *requestMetadata {
 	toolNames := make(map[string]bool)
 	actionIDs := make(map[string]bool)
@@ -173,24 +217,15 @@ func getUnifiedMetadata(metas []*requestMetadata) *requestMetadata {
 		actionIDs[m.actionID] = true
 		invocationIDs[m.invocationID] = true
 	}
-	var tnKeys, aiKeys, iiKeys []string
-	for toolName := range toolNames {
-		tnKeys = append(tnKeys, toolName)
+	m := &requestMetadata{
+		toolName:     getUnifiedLabel(toolNames),
+		actionID:     getUnifiedLabel(actionIDs),
+		invocationID: getUnifiedLabel(invocationIDs),
 	}
-	for actionID := range actionIDs {
-		aiKeys = append(aiKeys, actionID)
-	}
-	for invocationID := range invocationIDs {
-		iiKeys = append(iiKeys, invocationID)
-	}
-	sort.Strings(tnKeys)
-	sort.Strings(aiKeys)
-	sort.Strings(iiKeys)
-	return &requestMetadata{
-		toolName:     strings.Join(tnKeys, ","),
-		actionID:     strings.Join(aiKeys, ","),
-		invocationID: strings.Join(iiKeys, ","),
-	}
+	// We cap to a bit less than the maximum header size in order to allow
+	// for some proto fields serialization overhead.
+	capToLimit(m, DefaultMaxHeaderSize-100)
+	return m
 }
 
 func (c *Client) upload(reqs []*uploadRequest) {
