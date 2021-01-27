@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,6 +18,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
 	"github.com/klauspost/compress/zstd"
@@ -553,18 +555,18 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 
 // maybeCompressReadBlob will, depending on the client configuration, set the blobs to be
 // read compressed. It returns the appropriate resource name.
-func (c *Client) maybeCompressReadBlob(hash string, sizeBytes int64, w io.WriteCloser) (string, io.WriteCloser, chan error, error) {
-	if !c.shouldCompress(sizeBytes) {
+func (c *Client) maybeCompressReadBlob(d digest.Digest, w io.WriteCloser) (string, io.WriteCloser, chan error, error) {
+	if !c.shouldCompress(d.Size) {
 		// If we aren't compressing the data, theere's nothing to wait on.
 		dummyDone := make(chan error, 1)
 		dummyDone <- nil
-		return c.resourceNameRead(hash, sizeBytes), w, dummyDone, nil
+		return c.resourceNameRead(d.Hash, d.Size), w, dummyDone, nil
 	}
 	cw, done, err := NewCompressedWriteBuffer(w)
 	if err != nil {
 		return "", nil, nil, err
 	}
-	return c.resourceNameCompressedRead(hash, sizeBytes), cw, done, nil
+	return c.resourceNameCompressedRead(d.Hash, d.Size), cw, done, nil
 }
 
 // BatchWriteBlobs uploads a number of blobs to the CAS. They must collectively be below the
@@ -779,7 +781,7 @@ func marshalledRequestSize(d digest.Digest) int64 {
 
 // ReadBlob fetches a blob from the CAS into a byte slice.
 func (c *Client) ReadBlob(ctx context.Context, d digest.Digest) ([]byte, error) {
-	return c.readBlob(ctx, d.Hash, d.Size, 0, 0)
+	return c.readBlob(ctx, d, 0, 0)
 }
 
 // ReadBlobRange fetches a partial blob from the CAS into a byte slice, starting from offset bytes
@@ -787,19 +789,19 @@ func (c *Client) ReadBlob(ctx context.Context, d digest.Digest) ([]byte, error) 
 // no greater than the size of the entire blob. The limit must not be negative, but offset+limit may
 // be greater than the size of the entire blob.
 func (c *Client) ReadBlobRange(ctx context.Context, d digest.Digest, offset, limit int64) ([]byte, error) {
-	return c.readBlob(ctx, d.Hash, d.Size, offset, limit)
+	return c.readBlob(ctx, d, offset, limit)
 }
 
-func (c *Client) readBlob(ctx context.Context, hash string, sizeBytes, offset, limit int64) ([]byte, error) {
+func (c *Client) readBlob(ctx context.Context, dg digest.Digest, offset, limit int64) ([]byte, error) {
 	// int might be 32-bit, in which case we could have a blob whose size is representable in int64
 	// but not int32, and thus can't fit in a slice. We can check for this by casting and seeing if
 	// the result is negative, since 32 bits is big enough wrap all out-of-range values of int64 to
 	// negative numbers. If int is 64-bits, the cast is a no-op and so the condition will always fail.
-	if int(sizeBytes) < 0 {
-		return nil, fmt.Errorf("digest size %d is too big to fit in a byte slice", sizeBytes)
+	if int(dg.Size) < 0 {
+		return nil, fmt.Errorf("digest size %d is too big to fit in a byte slice", dg.Size)
 	}
-	if offset > sizeBytes {
-		return nil, fmt.Errorf("offset %d out of range for a blob of size %d", offset, sizeBytes)
+	if offset > dg.Size {
+		return nil, fmt.Errorf("offset %d out of range for a blob of size %d", offset, dg.Size)
 	}
 	if offset < 0 {
 		return nil, fmt.Errorf("offset %d may not be negative", offset)
@@ -807,29 +809,25 @@ func (c *Client) readBlob(ctx context.Context, hash string, sizeBytes, offset, l
 	if limit < 0 {
 		return nil, fmt.Errorf("limit %d may not be negative", limit)
 	}
-	sz := sizeBytes - offset
+	sz := dg.Size - offset
 	if limit > 0 && limit < sz {
 		sz = limit
 	}
-	sz += bytes.MinRead // Pad size so bytes.Buffer does not reallocate.
-	buf := bytes.NewBuffer(make([]byte, 0, sz))
-	_, err := c.readBlobStreamed(ctx, hash, sizeBytes, offset, limit, buf)
+	// Pad size so bytes.Buffer does not reallocate.
+	buf := bytes.NewBuffer(make([]byte, 0, sz+bytes.MinRead))
+	_, err := c.readBlobStreamed(ctx, dg, offset, limit, &bufferWriter{buf})
 	return buf.Bytes(), err
 }
 
 // ReadBlobToFile fetches a blob with a provided digest name from the CAS, saving it into a file.
 // It returns the number of bytes read.
 func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath string) (int64, error) {
-	return c.readBlobToFile(ctx, d.Hash, d.Size, fpath)
-}
-
-func (c *Client) readBlobToFile(ctx context.Context, hash string, sizeBytes int64, fpath string) (int64, error) {
 	f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, c.RegularMode)
 	if err != nil {
 		return 0, err
 	}
 	defer f.Close()
-	return c.readBlobStreamed(ctx, hash, sizeBytes, 0, 0, f)
+	return c.readBlobStreamed(ctx, d, 0, 0, &fileWriter{f})
 }
 
 // NewCompressedWriteBuffer creates wraps a io.Writer contained compressed contents to write
@@ -857,12 +855,6 @@ func NewCompressedWriteBuffer(w io.WriteCloser) (io.WriteCloser, chan error, err
 	}()
 
 	return nw, done, nil
-}
-
-// ReadBlobStreamed fetches a blob with a provided digest from the CAS.
-// It streams into an io.Writer, and returns the number of bytes read.
-func (c *Client) ReadBlobStreamed(ctx context.Context, d digest.Digest, w io.Writer) (int64, error) {
-	return c.readBlobStreamed(ctx, d.Hash, d.Size, 0, 0, w)
 }
 
 type writerTracker struct {
@@ -900,43 +892,86 @@ func (wt *writerTracker) Close() error {
 	return nil
 }
 
-func (c *Client) readBlobStreamed(ctx context.Context, hash string, sizeBytes, offset, limit int64, w io.Writer) (int64, error) {
-	if sizeBytes == 0 {
+type resettableWriter interface {
+	io.Writer
+	Reset() error
+}
+
+type fileWriter struct {
+	f *os.File
+}
+
+func (fw *fileWriter) Write(p []byte) (int, error) {
+	return fw.f.Write(p)
+}
+
+func (fw *fileWriter) Reset() error {
+	err := fw.f.Truncate(0)
+	if err != nil {
+		return err
+	}
+	_, err = fw.f.Seek(0, 0)
+	return err
+}
+
+type bufferWriter struct {
+	b *bytes.Buffer
+}
+
+func (bw *bufferWriter) Write(p []byte) (int, error) {
+	return bw.b.Write(p)
+}
+
+func (bw *bufferWriter) Reset() error {
+	bw.b.Reset()
+	return nil
+}
+
+var DigestMismatchError = errors.New("CAS fetch digest mismatch")
+
+func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, limit int64, w resettableWriter) (n int64, err error) {
+	if d.Size == 0 {
 		// Do not download empty blobs.
 		return 0, nil
 	}
-	wt := newWriteTracker(w)
-	name, wc, done, err := c.maybeCompressReadBlob(hash, sizeBytes, wt)
-	if err != nil {
-		return 0, err
-	}
-	n, err := c.readStreamed(ctx, name, offset, limit, wc)
-	if err != nil {
-		return n, err
-	}
-	if err = wc.Close(); err != nil {
-		return n, err
-	}
-	if err := <-wt.ready; err != nil {
-		return n, err
-	}
-	close(wt.ready)
-	sz := sizeBytes - offset
+	sz := d.Size - offset
 	if limit > 0 && limit < sz {
 		sz = limit
 	}
-	if err := <-done; err != nil {
-		return n, fmt.Errorf("Failed to finalize writing downloaded data downstream: %v", err)
+	closure := func() error {
+		if err = w.Reset(); err != nil {
+			return err
+		}
+		wt := newWriteTracker(w)
+		name, wc, done, e := c.maybeCompressReadBlob(d, wt)
+		if e != nil {
+			return e
+		}
+		n, err = c.readStreamed(ctx, name, offset, limit, wc)
+		if err != nil {
+			return err
+		}
+		if err = wc.Close(); err != nil {
+			return err
+		}
+		if err = <-wt.ready; err != nil {
+			return err
+		}
+		close(wt.ready)
+		if err = <-done; err != nil {
+			return fmt.Errorf("Failed to finalize writing downloaded data downstream: %v", err)
+		}
+		close(done)
+		if wt.dg.Size != sz {
+			return fmt.Errorf("%w: partial read of digest %s returned %d bytes", DigestMismatchError, wt.dg, sz)
+		}
+		// Incomplete reads only, since we can't reliably calculate hash without the full blob
+		if d.Size == sz && wt.dg != d {
+			return fmt.Errorf("%w: calculated digest %s != expected digest %s", DigestMismatchError, wt.dg, d)
+		}
+		return nil
 	}
-	close(done)
-	// We can't reliably calculate hash without the full blob
-	if offset == 0 && limit <= 0 && wt.dg.Hash != hash {
-		return n, fmt.Errorf("CAS fetch calculated hash %s != expected hash %s", wt.dg.Hash, hash)
-	}
-	if wt.dg.Size != sz {
-		return n, fmt.Errorf("CAS fetch read %d bytes but %d were expected", n, sz)
-	}
-	return n, nil
+	return n, retry.WithPolicy(ctx, func(e error) bool { return errors.Is(e, DigestMismatchError) }, retry.Immediately(3), closure)
 }
 
 // ReadProto reads a blob from the CAS and unmarshals it into the given message.
