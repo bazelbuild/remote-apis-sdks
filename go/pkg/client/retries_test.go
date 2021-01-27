@@ -1,10 +1,14 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -67,6 +71,13 @@ func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 
 func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	numCalls := f.incNumCalls("Read")
+	if numCalls < 2 {
+		// Send the wrong blob back to be retried.
+		if err := stream.Send(&bspb.ReadResponse{Data: []byte("bl")}); err != nil {
+			return err
+		}
+		return stream.Send(&bspb.ReadResponse{Data: []byte("a")})
+	}
 	if numCalls < 3 {
 		time.Sleep(f.sleepDelay)
 		return status.Error(codes.Canceled, "transient error!")
@@ -282,6 +293,39 @@ func TestReadRetries(t *testing.T) {
 			}
 			if diff := cmp.Diff(blob, got, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("client.ReadBlob(ctx, digest) gave diff (-want, +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestReadToFileRetries(t *testing.T) {
+	t.Parallel()
+	for _, sleep := range []bool{false, true} {
+		sleep := sleep
+		t.Run(fmt.Sprintf("sleep=%t", sleep), func(t *testing.T) {
+			t.Parallel()
+			f := setup(t)
+			defer f.shutDown()
+			if sleep {
+				f.fake.sleepDelay = time.Second
+				client.RPCTimeouts(map[string]time.Duration{"default": 500 * time.Millisecond}).Apply(f.client)
+			}
+
+			blob := []byte("blob")
+			path := filepath.Join(t.TempDir(), strings.Replace(t.Name(), "/", "_", -1))
+			n, err := f.client.ReadBlobToFile(f.ctx, digest.NewFromBlob(blob), path)
+			if err != nil {
+				t.Errorf("client.ReadBlobToFile(ctx, digest) gave error %s, want nil", err)
+			}
+			if int(n) != len(blob) {
+				t.Errorf("client.ReadBlobToFile(ctx, digest) returned %d read bytes, wanted %d", n, len(blob))
+			}
+			contents, err := ioutil.ReadFile(path)
+			if err != nil {
+				t.Errorf("error reading from %s: %v", path, err)
+			}
+			if !bytes.Equal(contents, blob) {
+				t.Errorf("expected %s to contain %v, got %v", path, blob, contents)
 			}
 		})
 	}
