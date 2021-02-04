@@ -18,7 +18,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
 	"github.com/klauspost/compress/zstd"
@@ -553,14 +552,20 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 	return dg, err
 }
 
+type writeDummyCloser struct {
+	io.Writer
+}
+
+func (w *writeDummyCloser) Close() error { return nil }
+
 // maybeCompressReadBlob will, depending on the client configuration, set the blobs to be
 // read compressed. It returns the appropriate resource name.
-func (c *Client) maybeCompressReadBlob(d digest.Digest, w io.WriteCloser) (string, io.WriteCloser, chan error, error) {
+func (c *Client) maybeCompressReadBlob(d digest.Digest, w io.Writer) (string, io.WriteCloser, chan error, error) {
 	if !c.shouldCompress(d.Size) {
 		// If we aren't compressing the data, theere's nothing to wait on.
 		dummyDone := make(chan error, 1)
 		dummyDone <- nil
-		return c.resourceNameRead(d.Hash, d.Size), w, dummyDone, nil
+		return c.resourceNameRead(d.Hash, d.Size), &writeDummyCloser{w}, dummyDone, nil
 	}
 	cw, done, err := NewCompressedWriteBuffer(w)
 	if err != nil {
@@ -832,7 +837,11 @@ func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath stri
 
 // NewCompressedWriteBuffer creates wraps a io.Writer contained compressed contents to write
 // decompressed contents.
-func NewCompressedWriteBuffer(w io.WriteCloser) (io.WriteCloser, chan error, error) {
+func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
+	// Our Bytestream abstraction uses a Writer so that the bytestream interface can "write"
+	// the data upstream. However, the zstd library only has an interface from a reader.
+	// Instead of writing a different bytestream version that returns a reader, we're piping
+	// the writer data.
 	r, nw := io.Pipe()
 
 	// TODO(rubensf): Reuse decoders when possible to save the effort of starting/closing goroutines.
@@ -841,15 +850,19 @@ func NewCompressedWriteBuffer(w io.WriteCloser) (io.WriteCloser, chan error, err
 		return nil, nil, err
 	}
 
-	done := make(chan error, 1)
+	done := make(chan error)
 	go func() {
+		// WriteTo will block until the reader is closed - or, in this
+		// case, the pipe writer, so we have to launch our compressor in a
+		// separate thread. As such, we also need a way to signal the main
+		// thread that the decoding has finished - which will have some delay
+		// from the last Write call.
 		_, err := decoder.WriteTo(w)
 		if err != nil {
 			// Because WriteTo returned early, the pipe writers still
 			// have to go somewhere or they'll block execution.
 			io.Copy(ioutil.Discard, r)
 		}
-		w.Close()
 		decoder.Close()
 		done <- err
 	}()
@@ -857,10 +870,18 @@ func NewCompressedWriteBuffer(w io.WriteCloser) (io.WriteCloser, chan error, err
 	return nw, done, nil
 }
 
+// writerTracker is useful as an midware before writing to a Read caller's
+// underlying data. Since cas.go should be responsible for sanity checking data,
+// and potentially having to re-open files on disk to do a checking earlier
+// on the call stack, we dup the writes through a digest creator and track
+// how much data was written.
 type writerTracker struct {
-	w     io.Writer
-	pw    *io.PipeWriter
-	dg    digest.Digest
+	w  io.Writer
+	pw *io.PipeWriter
+	dg digest.Digest
+	// Tracked independently of the digest as we might want to retry
+	// on partial reads.
+	n     int64
 	ready chan error
 }
 
@@ -870,6 +891,7 @@ func newWriteTracker(w io.Writer) *writerTracker {
 		pw:    pw,
 		w:     w,
 		ready: make(chan error, 1),
+		n:     0,
 	}
 
 	go func() {
@@ -882,14 +904,21 @@ func newWriteTracker(w io.Writer) *writerTracker {
 }
 
 func (wt *writerTracker) Write(p []byte) (int, error) {
+	// Any error on this write will be reflected on the
+	// pipe reader end when trying to calculate the digest.
+	// Additionally, if we are not downloading the entire
+	// blob, we can't even verify the digest to begin with.
+	// So we can ignore errors on this pipewriter.
 	wt.pw.Write(p)
 	n, err := wt.w.Write(p)
+	wt.n += int64(n)
 	return n, err
 }
 
+// Close closes the pipe - which triggers the the end of the
+// digest creation.
 func (wt *writerTracker) Close() error {
-	wt.pw.Close()
-	return nil
+	return wt.pw.Close()
 }
 
 type resettableWriter interface {
@@ -938,40 +967,60 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 	if limit > 0 && limit < sz {
 		sz = limit
 	}
-	closure := func() error {
-		if err = w.Reset(); err != nil {
-			return err
-		}
-		wt := newWriteTracker(w)
+	if err = w.Reset(); err != nil {
+		return 0, err
+	}
+	wt := newWriteTracker(w)
+	closure := func() (err error) {
 		name, wc, done, e := c.maybeCompressReadBlob(d, wt)
 		if e != nil {
 			return e
 		}
-		n, err = c.readStreamed(ctx, name, offset, limit, wc)
+
+		defer func() {
+			errC := wc.Close()
+			errD := <-done
+			close(done)
+
+			if err != nil && errC != nil {
+				err = errC
+			}
+			if err != nil && errD != nil {
+				err = fmt.Errorf("Failed to finalize writing downloaded data downstream: %v", err)
+			}
+		}()
+
+		n, err = c.readStreamed(ctx, name, offset+wt.n, limit, wc)
 		if err != nil {
 			return err
 		}
-		if err = wc.Close(); err != nil {
-			return err
-		}
-		if err = <-wt.ready; err != nil {
-			return err
-		}
-		close(wt.ready)
-		if err = <-done; err != nil {
-			return fmt.Errorf("Failed to finalize writing downloaded data downstream: %v", err)
-		}
-		close(done)
-		if wt.dg.Size != sz {
-			return fmt.Errorf("%w: partial read of digest %s returned %d bytes", DigestMismatchError, wt.dg, sz)
-		}
-		// Incomplete reads only, since we can't reliably calculate hash without the full blob
-		if d.Size == sz && wt.dg != d {
-			return fmt.Errorf("%w: calculated digest %s != expected digest %s", DigestMismatchError, wt.dg, d)
-		}
 		return nil
 	}
-	return n, retry.WithPolicy(ctx, func(e error) bool { return errors.Is(e, DigestMismatchError) }, retry.Immediately(3), closure)
+	// Only retry on transient backend issues.
+	if err := c.Retrier.Do(ctx, closure); err != nil {
+		return wt.n, err
+	}
+	if wt.n != sz {
+		return wt.n, fmt.Errorf("%w: partial read of digest %s returned %d bytes", DigestMismatchError, wt.dg, sz)
+	}
+
+	// Incomplete reads only, since we can't reliably calculate hash without the full blob
+	if d.Size == sz {
+		// Signal for writeTracker to take the digest of the data.
+		if err := wt.Close(); err != nil {
+			return wt.n, err
+		}
+		// Wait for the digest to be ready.
+		if err = <-wt.ready; err != nil {
+			return wt.n, err
+		}
+		close(wt.ready)
+		if wt.dg != d {
+			return wt.n, fmt.Errorf("%w: calculated digest %s != expected digest %s", DigestMismatchError, wt.dg, d)
+		}
+	}
+
+	return wt.n, nil
 }
 
 // ReadProto reads a blob from the CAS and unmarshals it into the given message.
