@@ -334,7 +334,7 @@ func (ec *Context) ExecuteRemotely() {
 		return
 	}
 	if st.Code() != codes.OK {
-		ec.Result = command.NewRemoteErrorResult(st.Err())
+		ec.Result = command.NewRemoteErrorResult(rc.StatusDetailedError(st))
 		return
 	}
 	if ec.resPb == nil {
