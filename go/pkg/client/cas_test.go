@@ -276,7 +276,7 @@ func TestRead(t *testing.T) {
 				t.Errorf("c.ReadBlob(ctx, digest) = _, %v - logical bytes moved different than len of blob received", stats.LogicalMoved)
 			}
 			if tc.compress && len(tc.fake.Blob) > 0 && stats.LogicalMoved == stats.RealMoved {
-				t.Errorf("c.ReadBlob(ctx, digest) = %v - compression on but different real and logical bytes", stats)
+				t.Errorf("c.ReadBlob(ctx, digest) = %v - compression on but same real and logical bytes", stats)
 			}
 		})
 	}

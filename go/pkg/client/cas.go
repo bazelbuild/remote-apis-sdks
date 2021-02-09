@@ -56,14 +56,15 @@ type MovedBytesMetadata struct {
 	Cached int64
 }
 
-func sumStats(a, b *MovedBytesMetadata) {
-	if a == nil || b == nil {
-		return
+func (mbm *MovedBytesMetadata) addFrom(other *MovedBytesMetadata) *MovedBytesMetadata {
+	if other == nil {
+		return mbm
 	}
-	a.Requested += b.Requested
-	a.LogicalMoved += b.LogicalMoved
-	a.RealMoved += b.RealMoved
-	a.Cached += b.Cached
+	mbm.Requested += other.Requested
+	mbm.LogicalMoved += other.LogicalMoved
+	mbm.RealMoved += other.RealMoved
+	mbm.Cached += other.Cached
+	return mbm
 }
 
 const logInterval = 25
@@ -851,21 +852,16 @@ func (c *Client) readBlob(ctx context.Context, dg digest.Digest, offset, limit i
 	}
 	// Pad size so bytes.Buffer does not reallocate.
 	buf := bytes.NewBuffer(make([]byte, 0, sz+bytes.MinRead))
-	n, err := c.readBlobStreamed(ctx, dg, offset, limit, &bufferWriter{buf})
-	stats := &MovedBytesMetadata{
-		Requested:    sz,
-		LogicalMoved: sz,
-		RealMoved:    n,
-	}
+	stats, err := c.readBlobStreamed(ctx, dg, offset, limit, &bufferWriter{buf})
 	return buf.Bytes(), stats, err
 }
 
 // ReadBlobToFile fetches a blob with a provided digest name from the CAS, saving it into a file.
 // It returns the number of bytes read.
-func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath string) (int64, error) {
+func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath string) (*MovedBytesMetadata, error) {
 	f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, c.RegularMode)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer f.Close()
 	return c.readBlobStreamed(ctx, d, 0, 0, &fileWriter{f})
@@ -994,19 +990,22 @@ func (bw *bufferWriter) Reset() error {
 
 var DigestMismatchError = errors.New("CAS fetch digest mismatch")
 
-func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, limit int64, w resettableWriter) (n int64, err error) {
+func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, limit int64, w resettableWriter) (*MovedBytesMetadata, error) {
+	stats := &MovedBytesMetadata{}
+	stats.Requested = d.Size
 	if d.Size == 0 {
 		// Do not download empty blobs.
-		return 0, nil
+		return stats, nil
 	}
 	sz := d.Size - offset
 	if limit > 0 && limit < sz {
 		sz = limit
 	}
-	if err = w.Reset(); err != nil {
-		return 0, err
+	if err := w.Reset(); err != nil {
+		return stats, err
 	}
 	wt := newWriteTracker(w)
+	defer func() { stats.LogicalMoved = wt.n }()
 	closure := func() (err error) {
 		name, wc, done, e := c.maybeCompressReadBlob(d, wt)
 		if e != nil {
@@ -1026,7 +1025,8 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 			}
 		}()
 
-		n, err = c.readStreamed(ctx, name, offset+wt.n, limit, wc)
+		wireBytes, err := c.readStreamed(ctx, name, offset+wt.n, limit, wc)
+		stats.RealMoved += wireBytes
 		if err != nil {
 			return err
 		}
@@ -1034,29 +1034,29 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 	}
 	// Only retry on transient backend issues.
 	if err := c.Retrier.Do(ctx, closure); err != nil {
-		return wt.n, err
+		return stats, err
 	}
 	if wt.n != sz {
-		return wt.n, fmt.Errorf("%w: partial read of digest %s returned %d bytes", DigestMismatchError, wt.dg, sz)
+		return stats, fmt.Errorf("%w: partial read of digest %s returned %d bytes", DigestMismatchError, wt.dg, sz)
 	}
 
 	// Incomplete reads only, since we can't reliably calculate hash without the full blob
 	if d.Size == sz {
 		// Signal for writeTracker to take the digest of the data.
 		if err := wt.Close(); err != nil {
-			return wt.n, err
+			return stats, err
 		}
 		// Wait for the digest to be ready.
-		if err = <-wt.ready; err != nil {
-			return wt.n, err
+		if err := <-wt.ready; err != nil {
+			return stats, err
 		}
 		close(wt.ready)
 		if wt.dg != d {
-			return wt.n, fmt.Errorf("%w: calculated digest %s != expected digest %s", DigestMismatchError, wt.dg, d)
+			return stats, fmt.Errorf("%w: calculated digest %s != expected digest %s", DigestMismatchError, wt.dg, d)
 		}
 	}
 
-	return wt.n, nil
+	return stats, nil
 }
 
 // ReadProto reads a blob from the CAS and unmarshals it into the given message.
@@ -1234,7 +1234,7 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoo
 	stats := &MovedBytesMetadata{}
 
 	protoStats, err := c.ReadProto(ctx, d, dir)
-	sumStats(stats, protoStats)
+	stats.addFrom(protoStats)
 	if err != nil {
 		return nil, stats, fmt.Errorf("digest %v cannot be mapped to a directory proto: %v", d, err)
 	}
@@ -1253,7 +1253,7 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoo
 	}
 
 	outStats, err := c.downloadOutputs(ctx, outputs, execRoot, cache)
-	sumStats(stats, outStats)
+	stats.addFrom(outStats)
 	return outputs, stats, err
 }
 
@@ -1305,7 +1305,7 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 		}
 	}
 	stats, err := c.DownloadFiles(ctx, execRoot, downloads)
-	sumStats(fullStats, stats)
+	fullStats.addFrom(stats)
 	if err != nil {
 		return fullStats, err
 	}
@@ -1404,7 +1404,7 @@ func (c *Client) downloadProcessor() {
 	}
 }
 
-func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest, bytesMoved map[digest.Digest]int64, err error) {
+func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest, bytesMoved map[digest.Digest]*MovedBytesMetadata, err error) {
 	if err != nil {
 		log.Errorf("Error downloading %v: %v", batch[0], err)
 	}
@@ -1413,25 +1413,21 @@ func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequ
 		if !ok {
 			log.Errorf("Precondition failed: download request not found in input %v.", dg)
 		}
-		lbMoved := dg.Size
-		rbMoved, ok := bytesMoved[dg]
+		stats, ok := bytesMoved[dg]
 		// If there's no real bytes moved it likely means there was an error moving these.
-		if !ok {
-			lbMoved = 0
-		}
-		stats := &MovedBytesMetadata{
-			Requested:    dg.Size,
-			LogicalMoved: lbMoved,
-			RealMoved:    rbMoved,
-		}
 		for i, r := range rs {
 			// bytesMoved will be zero for error cases.
 			// We only report it to the first client to prevent double accounting.
 			r.wait <- &downloadResponse{stats: stats, err: err}
 			if i == 0 {
-				stats.Cached = stats.LogicalMoved
-				stats.RealMoved = 0
-				stats.LogicalMoved = 0
+				// Prevent races by not writing to the original stats.
+				newStats := &MovedBytesMetadata{}
+				newStats.Requested = stats.Requested
+				newStats.Cached = stats.LogicalMoved
+				newStats.RealMoved = 0
+				newStats.LogicalMoved = 0
+
+				stats = newStats
 			}
 		}
 	}
@@ -1441,14 +1437,16 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 	LogContextInfof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 	bchMap, err := c.BatchDownloadBlobs(ctx, batch)
 	if err != nil {
-		afterDownload(batch, reqs, map[digest.Digest]int64{}, err)
+		afterDownload(batch, reqs, map[digest.Digest]*MovedBytesMetadata{}, err)
 		return
 	}
 	for _, dg := range batch {
 		stats := &MovedBytesMetadata{
 			Requested:    dg.Size,
 			LogicalMoved: dg.Size,
-			RealMoved:    dg.Size, // There's no compression in batch reads.
+			// There's no compression for batch requests, and there's no such thing as "partial" data for
+			// a blob since they're all inlined in the response.
+			RealMoved: dg.Size,
 		}
 		data := bchMap[dg]
 		for i, r := range reqs[dg] {
@@ -1463,9 +1461,14 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 				err:   ioutil.WriteFile(filepath.Join(r.execRoot, r.output.Path), data, perm),
 			}
 			if i == 0 {
-				stats.Cached = stats.LogicalMoved
-				stats.RealMoved = 0
-				stats.LogicalMoved = 0
+				// Prevent races by not writing to the original stats.
+				newStats := &MovedBytesMetadata{}
+				newStats.Requested = stats.Requested
+				newStats.Cached = stats.LogicalMoved
+				newStats.RealMoved = 0
+				newStats.LogicalMoved = 0
+
+				stats = newStats
 			}
 		}
 	}
@@ -1475,7 +1478,7 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	// The lock is released when all file copies are finished.
 	// We cannot release the lock after each individual file copy, because
 	// the caller might move the file, and we don't have the contents in memory.
-	bytesMoved := map[digest.Digest]int64{}
+	bytesMoved := map[digest.Digest]*MovedBytesMetadata{}
 	defer afterDownload([]digest.Digest{dg}, reqs, bytesMoved, err)
 	rs := reqs[dg]
 	if len(rs) < 1 {
@@ -1485,11 +1488,11 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	rs = rs[1:]
 	path := filepath.Join(r.execRoot, r.output.Path)
 	LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
-	n, err := c.ReadBlobToFile(ctx, r.output.Digest, path)
+	stats, err := c.ReadBlobToFile(ctx, r.output.Digest, path)
+	bytesMoved[r.output.Digest] = stats
 	if err != nil {
 		return err
 	}
-	bytesMoved[r.output.Digest] = n
 	if r.output.IsExecutable {
 		if err := os.Chmod(path, c.ExecutableMode); err != nil {
 			return err
@@ -1548,7 +1551,7 @@ func (c *Client) download(data []*downloadRequest) {
 		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta.toolName, unifiedMeta.actionID, unifiedMeta.invocationID)
 	}
 	if err != nil {
-		afterDownload(dgs, reqs, map[digest.Digest]int64{}, err)
+		afterDownload(dgs, reqs, map[digest.Digest]*MovedBytesMetadata{}, err)
 		return
 	}
 
@@ -1595,7 +1598,9 @@ func (c *Client) download(data []*downloadRequest) {
 // different from sum of sizes of the files due to compression.
 func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) (*MovedBytesMetadata, error) {
 	var dgs []digest.Digest
-	stats := &MovedBytesMetadata{}
+	// statsMu protects stats across threads.
+	statsMu := sync.Mutex{}
+	fullStats := &MovedBytesMetadata{}
 
 	if bool(c.useBatchOps) && bool(c.UtilizeLocality) {
 		paths := make([]*TreeOutput, 0, len(outputs))
@@ -1610,12 +1615,12 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 
 		for _, path := range paths {
 			dgs = append(dgs, path.Digest)
-			stats.Requested += path.Digest.Size
+			fullStats.Requested += path.Digest.Size
 		}
 	} else {
 		for dg := range outputs {
 			dgs = append(dgs, dg)
-			stats.Requested += dg.Size
+			fullStats.Requested += dg.Size
 		}
 	}
 
@@ -1645,9 +1650,6 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 			if len(batch) > 1 {
 				LogContextInfof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 				bchMap, err := c.BatchDownloadBlobs(eCtx, batch)
-				if err != nil {
-					return err
-				}
 				for _, dg := range batch {
 					data := bchMap[dg]
 					out := outputs[dg]
@@ -1658,19 +1660,25 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 					if err := ioutil.WriteFile(filepath.Join(execRoot, out.Path), data, perm); err != nil {
 						return err
 					}
-					atomic.AddInt64(&stats.LogicalMoved, int64(len(data)))
-					atomic.AddInt64(&stats.RealMoved, int64(len(data)))
+					statsMu.Lock()
+					fullStats.LogicalMoved += int64(len(data))
+					fullStats.RealMoved += int64(len(data))
+					statsMu.Unlock()
+				}
+				if err != nil {
+					return err
 				}
 			} else {
 				out := outputs[batch[0]]
 				path := filepath.Join(execRoot, out.Path)
 				LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
-				readBytes, err := c.ReadBlobToFile(ctx, out.Digest, path)
+				stats, err := c.ReadBlobToFile(ctx, out.Digest, path)
+				statsMu.Lock()
+				fullStats.addFrom(stats)
+				statsMu.Unlock()
 				if err != nil {
 					return err
 				}
-				atomic.AddInt64(&stats.LogicalMoved, out.Digest.Size)
-				atomic.AddInt64(&stats.RealMoved, readBytes)
 				if out.IsExecutable {
 					if err := os.Chmod(path, c.ExecutableMode); err != nil {
 						return err
@@ -1687,7 +1695,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 	LogContextInfof(ctx, log.Level(3), "Waiting for remaining jobs")
 	err := eg.Wait()
 	LogContextInfof(ctx, log.Level(3), "Done")
-	return stats, err
+	return fullStats, err
 }
 
 // DownloadFiles downloads the output files under |execRoot|.
@@ -1741,7 +1749,7 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 			if resp.err != nil {
 				return stats, resp.err
 			}
-			sumStats(stats, resp.stats)
+			stats.addFrom(resp.stats)
 			count--
 		}
 	}
