@@ -74,7 +74,7 @@ func TestSplitEndpoints(t *testing.T) {
 	}
 	defer c.Close()
 
-	got, err := c.ReadBlob(ctx, digest.NewFromBlob(blob))
+	got, _, err := c.ReadBlob(ctx, digest.NewFromBlob(blob))
 	if err != nil {
 		t.Errorf("c.ReadBlob(ctx, digest) gave error %s, want nil", err)
 	}
@@ -91,7 +91,7 @@ func TestReadEmptyBlobDoesNotCallServer(t *testing.T) {
 	fake := e.Server.CAS
 	c := e.Client.GrpcClient
 
-	got, err := c.ReadBlob(ctx, digest.Empty)
+	got, _, err := c.ReadBlob(ctx, digest.Empty)
 	if err != nil {
 		t.Errorf("c.ReadBlob(ctx, Empty) gave error %s, want nil", err)
 	}
@@ -249,22 +249,34 @@ func TestRead(t *testing.T) {
 				want = tc.fake.Blob
 			}
 
-			if tc.offset == 0 && tc.limit == 0 {
-				got, err := c.ReadBlob(ctx, digest.NewFromBlob(want))
+			if tc.offset == 0 && tc.limit > int64(len(tc.fake.Blob)) {
+				got, stats, err := c.ReadBlob(ctx, digest.NewFromBlob(want))
 				if err != nil {
 					t.Errorf("c.ReadBlob(ctx, digest) gave error %s, want nil", err)
 				}
 				if !bytes.Equal(want, got) {
 					t.Errorf("c.ReadBlob(ctx, digest) gave diff: want %v, got %v", want, got)
 				}
+				if int64(len(got)) != stats.LogicalMoved {
+					t.Errorf("c.ReadBlob(ctx, digest) = _, %v - logical bytes moved different than len of blob received", stats.LogicalMoved)
+				}
+				if tc.compress && len(tc.fake.Blob) > 0 && stats.LogicalMoved == stats.RealMoved {
+					t.Errorf("c.ReadBlob(ctx, digest) = %v - compression on but different real and logical bytes", stats)
+				}
 			}
 
-			got, err := c.ReadBlobRange(ctx, digest.NewFromBlob(tc.fake.Blob), tc.offset, tc.limit)
+			got, stats, err := c.ReadBlobRange(ctx, digest.NewFromBlob(tc.fake.Blob), tc.offset, tc.limit)
 			if err != nil {
 				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave error %s, want nil", tc.offset, tc.limit, err)
 			}
 			if !bytes.Equal(want, got) {
 				t.Errorf("c.ReadBlobRange(ctx, digest, %d, %d) gave diff: want %v, got %v", tc.offset, tc.limit, want, got)
+			}
+			if int64(len(got)) != stats.LogicalMoved {
+				t.Errorf("c.ReadBlob(ctx, digest) = _, %v - logical bytes moved different than len of blob received", stats.LogicalMoved)
+			}
+			if tc.compress && len(tc.fake.Blob) > 0 && stats.LogicalMoved == stats.RealMoved {
+				t.Errorf("c.ReadBlob(ctx, digest) = %v - compression on but same real and logical bytes", stats)
 			}
 		})
 	}
@@ -1093,7 +1105,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 		t.Fatalf("failed to make temp dir: %v", err)
 	}
 	defer os.RemoveAll(execRoot)
-	err = c.DownloadActionOutputs(ctx, ar, execRoot, cache)
+	_, err = c.DownloadActionOutputs(ctx, ar, execRoot, cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
@@ -1233,7 +1245,7 @@ func TestDownloadDirectory(t *testing.T) {
 	d := digest.TestNewFromMessage(dir)
 	execRoot := t.TempDir()
 
-	outputs, err := c.DownloadDirectory(ctx, d, execRoot, cache)
+	outputs, _, err := c.DownloadDirectory(ctx, d, execRoot, cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
@@ -1275,7 +1287,7 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 			c := e.Client.GrpcClient
 			ub.Apply(c)
 
-			err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			_, err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found") {
 				t.Errorf("expected 'not found' error in DownloadActionOutputs, got: %v", err)
 			}
@@ -1385,7 +1397,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 				t.Fatalf("failed to make temp dir: %v", err)
 			}
 			defer os.RemoveAll(execRoot)
-			err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			_, err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if err != nil {
 				t.Errorf("error in DownloadActionOutputs: %s", err)
 			}
@@ -1459,7 +1471,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 						}
 
 						execRoot := t.TempDir()
-						if err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
+						if _, err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
 							return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 						}
 						for _, i := range input {
@@ -1544,7 +1556,7 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 		ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name + "_copy", Digest: dgPb})
 
 		execRoot := t.TempDir()
-		if err := c.DownloadActionOutputs(pCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
+		if _, err := c.DownloadActionOutputs(pCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
 			return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 		}
 		for _, path := range []string{name, name + "_copy"} {
@@ -1569,16 +1581,26 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 			for j := i * 10; j < i*10+15 && j < len(blobs); j++ {
 				input = append(input, blobs[j])
 			}
+			totalBytes := int64(0)
 			for _, i := range input {
 				name := fmt.Sprintf("foo_%s", i.digest)
 				dgPb := i.digest.ToProto()
 				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dgPb})
 				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name + "_copy", Digest: dgPb})
+				// Count only once due to dedup
+				totalBytes += i.digest.Size
 			}
 
 			execRoot := t.TempDir()
-			if err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
+			stats, err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			if err != nil {
 				return fmt.Errorf("error in DownloadActionOutputs: %s", err)
+			}
+			if stats.LogicalMoved != stats.RealMoved {
+				t.Errorf("c.DownloadActionOutputs: logical (%v) and real (%v) bytes moved different despite compression off", stats.LogicalMoved, stats.RealMoved)
+			}
+			if stats.LogicalMoved != totalBytes {
+				t.Errorf("c.DownloadActionOutputs: logical (%v) bytes moved different from sum of digests (%v) despite downloaded", stats.LogicalMoved, stats.RealMoved)
 			}
 			for _, i := range input {
 				name := filepath.Join(execRoot, fmt.Sprintf("foo_%s", i.digest))
@@ -1625,7 +1647,7 @@ func TestWriteAndReadProto(t *testing.T) {
 	}
 
 	dirB := &repb.Directory{}
-	if err := c.ReadProto(ctx, d, dirB); err != nil {
+	if _, err := c.ReadProto(ctx, d, dirB); err != nil {
 		t.Errorf("Failed reading proto: %s", err)
 	}
 	if !proto.Equal(dirA, dirB) {
@@ -1650,11 +1672,18 @@ func TestDownloadFiles(t *testing.T) {
 	}
 	defer os.RemoveAll(execRoot)
 
-	if err := c.DownloadFiles(ctx, execRoot, map[digest.Digest]*client.TreeOutput{
+	stats, err := c.DownloadFiles(ctx, execRoot, map[digest.Digest]*client.TreeOutput{
 		fooDigest: {Digest: fooDigest, Path: "foo", IsExecutable: true},
 		barDigest: {Digest: barDigest, Path: "bar"},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Errorf("Failed to run DownloadFiles: %v", err)
+	}
+	if stats.LogicalMoved != stats.RealMoved {
+		t.Errorf("c.DownloadFiles: logical (%v) and real (%v) bytes moved different despite compression off", stats.LogicalMoved, stats.RealMoved)
+	}
+	if stats.LogicalMoved != fooDg.Size+barDigest.Size {
+		t.Errorf("c.DownloadFiles: logical (%v) bytes moved different from sum of digests (%v) despite no duplication", stats.LogicalMoved, fooDg.Size+barDigest.Size)
 	}
 
 	if b, err := ioutil.ReadFile(filepath.Join(execRoot, "foo")); err != nil {
@@ -1695,7 +1724,7 @@ func TestDownloadFilesCancel(t *testing.T) {
 			eg, eCtx := errgroup.WithContext(ctx)
 			cCtx, cancel := context.WithCancel(eCtx)
 			eg.Go(func() error {
-				if err := c.DownloadFiles(cCtx, execRoot, map[digest.Digest]*client.TreeOutput{
+				if _, err := c.DownloadFiles(cCtx, execRoot, map[digest.Digest]*client.TreeOutput{
 					fooDigest: {Digest: fooDigest, Path: "foo", IsExecutable: true},
 				}); err != context.Canceled {
 					return fmt.Errorf("Failed to run DownloadFiles: expected context.Canceled, got %v", err)

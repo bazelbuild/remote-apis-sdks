@@ -122,7 +122,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 		return nil, err
 	}
 	actionProto := &repb.Action{}
-	if err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
+	if _, err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
 		return nil, err
 	}
 
@@ -133,7 +133,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 	}
 
 	log.Infof("Reading command from action digest..")
-	if err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
+	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
 		return nil, err
 	}
 	_, inputPaths, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
@@ -148,7 +148,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 			return nil, err
 		}
 		log.Infof("Fetching input tree from input root digest %s into %s", dg, inputRoot)
-		_, err = c.GrpcClient.DownloadDirectory(ctx, dg, inputRoot, client.FileMetadataCache)
+		_, _, err = c.GrpcClient.DownloadDirectory(ctx, dg, inputRoot, client.FileMetadataCache)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +207,7 @@ func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPre
 	log.Infof("Downloading action results of %v to %v.", actionDigest, pathPrefix)
 	// We don't really need an in-memory filemetadata cache for debugging operations.
 	noopCache := filemetadata.NewNoopCache()
-	if err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, pathPrefix, noopCache); err != nil {
+	if _, err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, pathPrefix, noopCache); err != nil {
 		log.Errorf("Failed downloading action outputs: %v.", err)
 	}
 
@@ -226,7 +226,7 @@ func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPre
 			Size: reDg.GetSizeBytes(),
 		}
 		log.Infof("Downloading stdout/stderr to %v.", path)
-		bytes, err := c.GrpcClient.ReadBlob(ctx, *dg)
+		bytes, _, err := c.GrpcClient.ReadBlob(ctx, *dg)
 		if err != nil {
 			log.Errorf("Unable to read blob for %v with digest %v.", path, dg)
 		}
@@ -299,7 +299,7 @@ func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string)
 		return err
 	}
 	log.Infof("Downloading input root %v to %v.", dg, path)
-	_, err = c.GrpcClient.DownloadDirectory(ctx, dg, path, filemetadata.NewNoopCache())
+	_, _, err = c.GrpcClient.DownloadDirectory(ctx, dg, path, filemetadata.NewNoopCache())
 	return err
 }
 
@@ -316,7 +316,7 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 		return "", err
 	}
 	actionProto := &repb.Action{}
-	if err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
+	if _, err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
 		return "", err
 	}
 
@@ -337,7 +337,7 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 	showActionRes.WriteString(fmt.Sprintf("Command Digest: %v\n", cmdDg))
 
 	log.Infof("Reading command from action digest..")
-	if err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
+	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
 		return "", err
 	}
 	for _, ev := range commandProto.GetEnvironmentVariables() {
@@ -416,7 +416,7 @@ func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (
 			return "", err
 		}
 		outDirTree := &repb.Tree{}
-		if err := c.GrpcClient.ReadProto(ctx, dg, outDirTree); err != nil {
+		if _, err := c.GrpcClient.ReadProto(ctx, dg, outDirTree); err != nil {
 			return "", err
 		}
 

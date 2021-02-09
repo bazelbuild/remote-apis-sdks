@@ -60,7 +60,11 @@ func TestExecCacheHit(t *testing.T) {
 			TotalInputBytes:  fooDirDg.Size + cmdDg.Size + acDg.Size + fooDg.Size,
 			OutputFiles:      1,
 			TotalOutputBytes: 18, // "output" + "stdout" + "stderr"
-			OutputDigests:    map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
+			// "output" + "stdout" for both. StdErr is inlined in ActionResult in this test, and ActionResult
+			// isn't done through bytestream so not checked here.
+			LogicalBytesDownloaded: 12,
+			RealBytesDownloaded:    12,
+			OutputDigests:          map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
 		}
 		if diff := cmp.Diff(wantRes, res); diff != "" {
 			t.Errorf("Run() gave result diff (-want +got):\n%s", diff)

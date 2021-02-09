@@ -304,7 +304,7 @@ func TestReadRetries(t *testing.T) {
 				}
 
 				blob := []byte("blob")
-				got, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
+				got, _, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
 				if err != nil {
 					t.Errorf("client.ReadBlob(ctx, digest) gave error %s, want nil", err)
 				}
@@ -337,13 +337,17 @@ func TestReadToFileRetries(t *testing.T) {
 
 				blob := []byte("blob")
 				path := filepath.Join(t.TempDir(), strings.Replace(t.Name(), "/", "_", -1))
-				n, err := f.client.ReadBlobToFile(f.ctx, digest.NewFromBlob(blob), path)
+				stats, err := f.client.ReadBlobToFile(f.ctx, digest.NewFromBlob(blob), path)
 				if err != nil {
 					t.Errorf("client.ReadBlobToFile(ctx, digest) gave error %s, want nil", err)
 				}
-				if int(n) != len(blob) {
-					t.Errorf("client.ReadBlobToFile(ctx, digest) returned %d read bytes, wanted %d", n, len(blob))
+				if stats.LogicalMoved != int64(len(blob)) {
+					t.Errorf("client.ReadBlobToFile(ctx, digest) returned %d read bytes, wanted %d", stats.LogicalMoved, len(blob))
 				}
+				if comp && stats.LogicalMoved == stats.RealMoved {
+					t.Errorf("client.ReadBlobToFile(ctx, digest) = %v - compression on but same real and logical bytes", stats)
+				}
+
 				contents, err := ioutil.ReadFile(path)
 				if err != nil {
 					t.Errorf("error reading from %s: %v", path, err)
