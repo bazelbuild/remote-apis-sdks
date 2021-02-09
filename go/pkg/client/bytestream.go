@@ -75,7 +75,7 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 // large to fit into a byte array.
 func (c *Client) ReadBytes(ctx context.Context, name string) ([]byte, error) {
 	buf := &bytes.Buffer{}
-	_, err := c.readStreamed(ctx, name, 0, 0, buf)
+	_, err := c.readStreamedRetried(ctx, name, 0, 0, buf)
 	return buf.Bytes(), err
 }
 
@@ -95,7 +95,7 @@ func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int
 		return 0, err
 	}
 	defer f.Close()
-	return c.readStreamed(ctx, name, 0, 0, f)
+	return c.readStreamedRetried(ctx, name, 0, 0, f)
 }
 
 // readStreamed reads from a bytestream and copies the result to the provided Writer, starting
@@ -103,50 +103,57 @@ func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int
 // offset must be non-negative, and an error may be returned if the offset is past the end of the
 // stream. The limit must be non-negative, although offset+limit may exceed the length of the
 // stream.
-func (c *Client) readStreamed(ctx context.Context, name string, offset, limit int64, w io.Writer) (n int64, e error) {
-	closure := func() error {
-		stream, err := c.Read(ctx, &bspb.ReadRequest{
-			ResourceName: name,
-			ReadOffset:   offset + n,
-			ReadLimit:    limit,
-		})
-		if err != nil {
-			return err
-		}
+func (c *Client) readStreamed(ctx context.Context, name string, offset, limit int64, w io.Writer) (int64, error) {
+	stream, err := c.Read(ctx, &bspb.ReadRequest{
+		ResourceName: name,
+		ReadOffset:   offset,
+		ReadLimit:    limit,
+	})
+	if err != nil {
+		return 0, err
+	}
 
-		for {
-			var resp *bspb.ReadResponse
-			err := c.CallWithTimeout(ctx, "Read", func(_ context.Context) error {
-				r, err := stream.Recv()
-				resp = r
-				return err
-			})
-			if err == io.EOF {
+	var n int64
+	for {
+		var resp *bspb.ReadResponse
+		err := c.CallWithTimeout(ctx, "Read", func(_ context.Context) error {
+			r, err := stream.Recv()
+			resp = r
+			return err
+		})
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+		log.V(3).Infof("Read: resource:%s offset:%d len(data):%d", name, offset, len(resp.Data))
+		nm, err := w.Write(resp.Data)
+		if err != nil {
+			// Wrapping the error to ensure it may never get retried.
+			return int64(nm), fmt.Errorf("failed to write to output stream: %v", err)
+		}
+		sz := len(resp.Data)
+		if nm != sz {
+			return int64(nm), fmt.Errorf("received %d bytes but could only write %d", sz, nm)
+		}
+		n += int64(sz)
+		if limit > 0 {
+			limit -= int64(sz)
+			if limit <= 0 {
 				break
 			}
-			if err != nil {
-				return err
-			}
-			log.V(3).Infof("Read: resource:%s offset:%d len(data):%d", name, offset+n, len(resp.Data))
-			nm, err := w.Write(resp.Data)
-			if err != nil {
-				// Wrapping the error to ensure it may never get retried.
-				return fmt.Errorf("failed to write to output stream: %v", err)
-			}
-			sz := len(resp.Data)
-			if nm != sz {
-				return fmt.Errorf("received %d bytes but could only write %d", sz, nm)
-			}
-			n += int64(sz)
-			if limit > 0 {
-				limit -= int64(sz)
-				if limit <= 0 {
-					break
-				}
-			}
 		}
-		return nil
 	}
-	e = c.Retrier.Do(ctx, closure)
-	return n, e
+	return n, nil
+}
+
+func (c *Client) readStreamedRetried(ctx context.Context, name string, offset, limit int64, w io.Writer) (int64, error) {
+	var n int64
+	closure := func() error {
+		m, err := c.readStreamed(ctx, name, offset+n, limit, w)
+		n += m
+		return err
+	}
+	return n, c.Retrier.Do(ctx, closure)
 }

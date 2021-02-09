@@ -18,6 +18,7 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/klauspost/compress/zstd"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,6 +32,8 @@ import (
 	oppb "google.golang.org/genproto/googleapis/longrunning"
 )
 
+var zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
+
 type flakyServer struct {
 	// TODO(jsharpe): This is a hack to work around WaitOperation not existing in some versions of
 	// the long running operations API that we need to support.
@@ -39,6 +42,7 @@ type flakyServer struct {
 	numCalls         map[string]int // A counter of calls the server encountered thus far, by method.
 	retriableForever bool           // Set to true to make the flaky server return a retriable error forever, rather than eventually a non-retriable error.
 	sleepDelay       time.Duration  // How long to sleep on each RPC.
+	useBSCompression bool           // Whether to use/expect compression on ByteStream calls.
 }
 
 func (f *flakyServer) incNumCalls(method string) int {
@@ -71,20 +75,17 @@ func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 
 func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	numCalls := f.incNumCalls("Read")
-	if numCalls < 2 {
-		// Send the wrong blob back to be retried.
-		if err := stream.Send(&bspb.ReadResponse{Data: []byte("bl")}); err != nil {
-			return err
-		}
-		return stream.Send(&bspb.ReadResponse{Data: []byte("a")})
-	}
 	if numCalls < 3 {
 		time.Sleep(f.sleepDelay)
 		return status.Error(codes.Canceled, "transient error!")
 	}
 	if numCalls < 4 {
+		b := []byte("bl")
+		if f.useBSCompression {
+			b = zstdEncoder.EncodeAll(b, nil)
+		}
 		// We send the 4 byte test blob in two chunks.
-		if err := stream.Send(&bspb.ReadResponse{Data: []byte("bl")}); err != nil {
+		if err := stream.Send(&bspb.ReadResponse{Data: b}); err != nil {
 			return err
 		}
 		return status.Error(codes.Internal, "another transient error!")
@@ -94,7 +95,11 @@ func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadS
 		time.Sleep(f.sleepDelay)
 		return status.Error(codes.Aborted, "yet another transient error!")
 	}
-	return stream.Send(&bspb.ReadResponse{Data: []byte("ob")})
+	b := []byte("ob")
+	if f.useBSCompression {
+		b = zstdEncoder.EncodeAll(b, nil)
+	}
+	return stream.Send(&bspb.ReadResponse{Data: b})
 }
 
 func (f *flakyServer) flakeAndFail(method string) error {
@@ -248,6 +253,13 @@ func (f *flakyFixture) shutDown() {
 	f.server.Stop()
 }
 
+func compressionBoolToValue(use bool) client.CompressedBytestreamThreshold {
+	if use {
+		return client.CompressedBytestreamThreshold(0)
+	}
+	return client.CompressedBytestreamThreshold(-1)
+}
+
 func TestWriteRetries(t *testing.T) {
 	t.Parallel()
 	for _, sleep := range []bool{false, true} {
@@ -276,58 +288,71 @@ func TestWriteRetries(t *testing.T) {
 func TestReadRetries(t *testing.T) {
 	t.Parallel()
 	for _, sleep := range []bool{false, true} {
-		sleep := sleep
-		t.Run(fmt.Sprintf("sleep=%t", sleep), func(t *testing.T) {
-			t.Parallel()
-			f := setup(t)
-			defer f.shutDown()
-			if sleep {
-				f.fake.sleepDelay = time.Second
-				client.RPCTimeouts(map[string]time.Duration{"default": 500 * time.Millisecond}).Apply(f.client)
-			}
+		for _, comp := range []bool{false, true} {
+			sleep := sleep
+			comp := comp
+			t.Run(fmt.Sprintf("sleep=%t,comp=%t", sleep, comp), func(t *testing.T) {
+				t.Parallel()
+				f := setup(t)
+				defer f.shutDown()
+				f.fake.useBSCompression = comp
+				compOpt := compressionBoolToValue(comp)
+				compOpt.Apply(f.client)
+				if sleep {
+					f.fake.sleepDelay = time.Second
+					client.RPCTimeouts(map[string]time.Duration{"default": 500 * time.Millisecond}).Apply(f.client)
+				}
 
-			blob := []byte("blob")
-			got, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
-			if err != nil {
-				t.Errorf("client.ReadBlob(ctx, digest) gave error %s, want nil", err)
-			}
-			if diff := cmp.Diff(blob, got, cmpopts.EquateEmpty()); diff != "" {
-				t.Errorf("client.ReadBlob(ctx, digest) gave diff (-want, +got):\n%s", diff)
-			}
-		})
+				blob := []byte("blob")
+				got, err := f.client.ReadBlob(f.ctx, digest.NewFromBlob(blob))
+				if err != nil {
+					t.Errorf("client.ReadBlob(ctx, digest) gave error %s, want nil", err)
+				}
+				if diff := cmp.Diff(blob, got, cmpopts.EquateEmpty()); diff != "" {
+					t.Errorf("client.ReadBlob(ctx, digest) gave diff (-want, +got):\n%s", diff)
+				}
+			})
+		}
 	}
 }
 
 func TestReadToFileRetries(t *testing.T) {
 	t.Parallel()
 	for _, sleep := range []bool{false, true} {
-		sleep := sleep
-		t.Run(fmt.Sprintf("sleep=%t", sleep), func(t *testing.T) {
-			t.Parallel()
-			f := setup(t)
-			defer f.shutDown()
-			if sleep {
-				f.fake.sleepDelay = time.Second
-				client.RPCTimeouts(map[string]time.Duration{"default": 500 * time.Millisecond}).Apply(f.client)
-			}
+		for _, comp := range []bool{false, true} {
+			sleep := sleep
+			comp := comp
+			t.Run(fmt.Sprintf("sleep=%t", sleep), func(t *testing.T) {
+				t.Parallel()
+				f := setup(t)
+				defer f.shutDown()
+				f.fake.useBSCompression = comp
+				compOpt := compressionBoolToValue(comp)
+				compOpt.Apply(f.client)
 
-			blob := []byte("blob")
-			path := filepath.Join(t.TempDir(), strings.Replace(t.Name(), "/", "_", -1))
-			n, err := f.client.ReadBlobToFile(f.ctx, digest.NewFromBlob(blob), path)
-			if err != nil {
-				t.Errorf("client.ReadBlobToFile(ctx, digest) gave error %s, want nil", err)
-			}
-			if int(n) != len(blob) {
-				t.Errorf("client.ReadBlobToFile(ctx, digest) returned %d read bytes, wanted %d", n, len(blob))
-			}
-			contents, err := ioutil.ReadFile(path)
-			if err != nil {
-				t.Errorf("error reading from %s: %v", path, err)
-			}
-			if !bytes.Equal(contents, blob) {
-				t.Errorf("expected %s to contain %v, got %v", path, blob, contents)
-			}
-		})
+				if sleep {
+					f.fake.sleepDelay = time.Second
+					client.RPCTimeouts(map[string]time.Duration{"default": 500 * time.Millisecond}).Apply(f.client)
+				}
+
+				blob := []byte("blob")
+				path := filepath.Join(t.TempDir(), strings.Replace(t.Name(), "/", "_", -1))
+				n, err := f.client.ReadBlobToFile(f.ctx, digest.NewFromBlob(blob), path)
+				if err != nil {
+					t.Errorf("client.ReadBlobToFile(ctx, digest) gave error %s, want nil", err)
+				}
+				if int(n) != len(blob) {
+					t.Errorf("client.ReadBlobToFile(ctx, digest) returned %d read bytes, wanted %d", n, len(blob))
+				}
+				contents, err := ioutil.ReadFile(path)
+				if err != nil {
+					t.Errorf("error reading from %s: %v", path, err)
+				}
+				if !bytes.Equal(contents, blob) {
+					t.Errorf("expected %s to contain %v, got %v", path, blob, contents)
+				}
+			})
+		}
 	}
 }
 
