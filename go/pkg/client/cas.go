@@ -47,7 +47,7 @@ type MovedBytesMetadata struct {
 	// versions of the blobs passed through the wire. It does not included
 	// bytes for blobs that were de-duped.
 	LogicalMoved int64
-	// RealMoved is the the sum of sizes in bytes for all blobs passed
+	// RealMoved is the sum of sizes in bytes for all blobs passed
 	// through the wire in the format they were passed through (eg
 	// compressed).
 	RealMoved int64
@@ -947,7 +947,7 @@ func (wt *writerTracker) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// Close closes the pipe - which triggers the the end of the
+// Close closes the pipe - which triggers the end of the
 // digest creation.
 func (wt *writerTracker) Close() error {
 	return wt.pw.Close()
@@ -1414,6 +1414,10 @@ func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequ
 			log.Errorf("Precondition failed: download request not found in input %v.", dg)
 		}
 		stats, ok := bytesMoved[dg]
+		if !ok {
+			log.Errorf("Internal tool error - matching map entry")
+			continue
+		}
 		// If there's no real bytes moved it likely means there was an error moving these.
 		for i, r := range rs {
 			// bytesMoved will be zero for error cases.
