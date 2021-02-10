@@ -28,7 +28,6 @@ import (
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
-	_ "google.golang.org/genproto/googleapis/rpc/errdetails"
 )
 
 // DefaultCompressedBytestreamThreshold is the default threshold, in bytes, for
@@ -102,28 +101,6 @@ type uploadState struct {
 	mu      sync.Mutex
 	clients []chan<- *uploadResponse
 	cancel  func()
-}
-
-// StatusDetailsString returns the error details of the status as a text string.
-func StatusDetailsString(st *status.Status) string {
-	var details []string
-	for _, d := range st.Details() {
-		s := fmt.Sprintf("%+v", d)
-		if pb, ok := d.(proto.Message); ok {
-			s = proto.MarshalTextString(pb)
-		}
-		details = append(details, s)
-	}
-	return strings.Join(details, "; ")
-}
-
-func StatusDetailedError(st *status.Status) error {
-	e := st.Err()
-	details := StatusDetailsString(st)
-	if details != "" {
-		e = fmt.Errorf("%w error details =  %s", e, details)
-	}
-	return e
 }
 
 func (c *Client) findBlobState(ctx context.Context, dgs []digest.Digest) (missing []digest.Digest, present []digest.Digest, err error) {
@@ -680,7 +657,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 				}
 				numErrs++
 				errDg = r.Digest
-				errMsg = StatusDetailedError(status.FromProto(r.Status)).Error()
+				errMsg = r.Status.Message
 			}
 		}
 		reqs = failedReqs
