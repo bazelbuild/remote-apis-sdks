@@ -125,14 +125,14 @@ func (c *Client) executeJob(ctx context.Context, skipCache bool, acDg *repb.Dige
 
 	switch r := op.Result.(type) {
 	case *oppb.Operation_Error:
-		return nil, StatusDetailedError(status.FromProto(r.Error))
+		return nil, status.FromProto(r.Error).Err()
 	case *oppb.Operation_Response:
 		res := new(repb.ExecuteResponse)
 		if err := ptypes.UnmarshalAny(r.Response, res); err != nil {
 			return nil, gerrors.WithMessage(err, "extracting ExecuteResponse from execution operation")
 		}
 		if st := status.FromProto(res.Status); st.Code() != codes.OK {
-			return res.Result, gerrors.WithMessage(StatusDetailedError(st), "job failed with error")
+			return res.Result, gerrors.WithMessage(st.Err(), "job failed with error")
 		}
 		return res.Result, nil
 	default:
@@ -275,9 +275,6 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 	}
 	err = c.Retrier.Do(ctx, func() error { return c.CallWithTimeout(ctx, "Execute", closure) })
 	if err != nil && !opError {
-		if st, ok := status.FromError(err); ok {
-			err = StatusDetailedError(st)
-		}
 		return nil, err
 	}
 
