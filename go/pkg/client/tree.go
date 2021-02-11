@@ -1,6 +1,6 @@
-// Package tree provides functionality for constructing a Merkle tree of uploadable inputs.
 package client
 
+// This module provides functionality for constructing a Merkle tree of uploadable inputs.
 import (
 	"errors"
 	"fmt"
