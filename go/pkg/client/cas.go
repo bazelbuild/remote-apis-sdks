@@ -645,7 +645,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 		for _, r := range resp.Responses {
 			st := status.FromProto(r.Status)
 			if st.Code() != codes.OK {
-				e := st.Err()
+				e := StatusDetailedError(st)
 				if c.Retrier.ShouldRetry(e) {
 					failedReqs = append(failedReqs, &repb.BatchUpdateBlobsRequest_Request{
 						Digest: r.Digest,
@@ -657,7 +657,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 				}
 				numErrs++
 				errDg = r.Digest
-				errMsg = r.Status.Message
+				errMsg = e.Error()
 			}
 		}
 		reqs = failedReqs
