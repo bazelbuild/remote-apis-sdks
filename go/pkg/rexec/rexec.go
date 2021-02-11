@@ -361,9 +361,9 @@ func (ec *Context) DownloadOutErr() {
 }
 
 // DownloadOutputs downloads the outputs of the command in the context to the specified directory.
-func (ec *Context) DownloadOutputs(execRoot string) {
+func (ec *Context) DownloadOutputs(outputDir string) {
 	st := ec.Result.Status
-	stats, res := ec.downloadOutputs(ec.cmd.ExecRoot)
+	stats, res := ec.downloadOutputs(outputDir)
 	ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
 	ec.Metadata.RealBytesDownloaded += stats.RealMoved
 	ec.Result = res

@@ -1483,7 +1483,7 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	// We cannot release the lock after each individual file copy, because
 	// the caller might move the file, and we don't have the contents in memory.
 	bytesMoved := map[digest.Digest]*MovedBytesMetadata{}
-	defer afterDownload([]digest.Digest{dg}, reqs, bytesMoved, err)
+	defer func() { afterDownload([]digest.Digest{dg}, reqs, bytesMoved, err) }()
 	rs := reqs[dg]
 	if len(rs) < 1 {
 		return fmt.Errorf("Failed precondition: cannot find %v in reqs map", dg)
