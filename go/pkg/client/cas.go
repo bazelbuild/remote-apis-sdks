@@ -69,15 +69,9 @@ func (mbm *MovedBytesMetadata) addFrom(other *MovedBytesMetadata) *MovedBytesMet
 
 const logInterval = 25
 
-type requestMetadata struct {
-	toolName     string
-	actionID     string
-	invocationID string
-}
-
 type uploadRequest struct {
 	ue     *uploadinfo.Entry
-	meta   *requestMetadata
+	meta   *ContextMetadata
 	wait   chan<- *uploadResponse
 	cancel bool
 }
@@ -208,50 +202,53 @@ func getUnifiedLabel(labels map[string]bool) string {
 }
 
 // capToLimit ensures total length does not exceed max header size.
-func capToLimit(m *requestMetadata, limit int) {
-	total := len(m.toolName) + len(m.actionID) + len(m.invocationID)
+func capToLimit(m *ContextMetadata, limit int) {
+	total := len(m.ToolName) + len(m.ToolVersion) + len(m.ActionID) + len(m.InvocationID) + len(m.CorrelatedInvocationID)
 	excess := total - limit
 	if excess <= 0 {
 		return
 	}
 	// We ignore the tool name, because in practice this is a
 	// very short constant which makes no sense to truncate.
-	diff := len(m.actionID) - len(m.invocationID)
+	diff := len(m.ActionID) - len(m.InvocationID)
 	if diff > 0 {
 		if diff > excess {
-			m.actionID = m.actionID[:len(m.actionID)-excess]
+			m.ActionID = m.ActionID[:len(m.ActionID)-excess]
 		} else {
-			m.actionID = m.actionID[:len(m.actionID)-diff]
+			m.ActionID = m.ActionID[:len(m.ActionID)-diff]
 			rem := (excess - diff + 1) / 2
-			m.actionID = m.actionID[:len(m.actionID)-rem]
-			m.invocationID = m.invocationID[:len(m.invocationID)-rem]
+			m.ActionID = m.ActionID[:len(m.ActionID)-rem]
+			m.InvocationID = m.InvocationID[:len(m.InvocationID)-rem]
 		}
 	} else {
 		diff = -diff
 		if diff > excess {
-			m.invocationID = m.invocationID[:len(m.invocationID)-excess]
+			m.InvocationID = m.InvocationID[:len(m.InvocationID)-excess]
 		} else {
-			m.invocationID = m.invocationID[:len(m.invocationID)-diff]
+			m.InvocationID = m.InvocationID[:len(m.InvocationID)-diff]
 			rem := (excess - diff + 1) / 2
-			m.invocationID = m.invocationID[:len(m.invocationID)-rem]
-			m.actionID = m.actionID[:len(m.actionID)-rem]
+			m.InvocationID = m.InvocationID[:len(m.InvocationID)-rem]
+			m.ActionID = m.ActionID[:len(m.ActionID)-rem]
 		}
 	}
 }
 
-func getUnifiedMetadata(metas []*requestMetadata) *requestMetadata {
-	toolNames := make(map[string]bool)
+func getUnifiedMetadata(metas []*ContextMetadata) *ContextMetadata {
+	if len(metas) == 0 {
+		return &ContextMetadata{}
+	}
 	actionIDs := make(map[string]bool)
 	invocationIDs := make(map[string]bool)
 	for _, m := range metas {
-		toolNames[m.toolName] = true
-		actionIDs[m.actionID] = true
-		invocationIDs[m.invocationID] = true
+		actionIDs[m.ActionID] = true
+		invocationIDs[m.InvocationID] = true
 	}
-	m := &requestMetadata{
-		toolName:     getUnifiedLabel(toolNames),
-		actionID:     getUnifiedLabel(actionIDs),
-		invocationID: getUnifiedLabel(invocationIDs),
+	m := &ContextMetadata{
+		ToolName:               metas[0].ToolName,
+		ToolVersion:            metas[0].ToolVersion,
+		ActionID:               getUnifiedLabel(actionIDs),
+		InvocationID:           getUnifiedLabel(invocationIDs),
+		CorrelatedInvocationID: metas[0].CorrelatedInvocationID,
 	}
 	// We cap to a bit less than the maximum header size in order to allow
 	// for some proto fields serialization overhead.
@@ -263,7 +260,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 	// Collect new uploads.
 	newStates := make(map[digest.Digest]*uploadState)
 	var newUploads []digest.Digest
-	var metas []*requestMetadata
+	var metas []*ContextMetadata
 	log.V(2).Infof("Upload is processing %d requests", len(reqs))
 	for _, req := range reqs {
 		dg := req.ue.Digest
@@ -291,8 +288,8 @@ func (c *Client) upload(reqs []*uploadRequest) {
 	unifiedMeta := getUnifiedMetadata(metas)
 	var err error
 	ctx := context.Background()
-	if unifiedMeta.actionID != "" {
-		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta.toolName, unifiedMeta.actionID, unifiedMeta.invocationID)
+	if unifiedMeta.ActionID != "" {
+		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta)
 	}
 	if err != nil {
 		for _, st := range newStates {
@@ -497,14 +494,9 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry)
 	if uploads == 0 {
 		return nil, 0, nil
 	}
-	toolName, actionID, invocationID, err := GetContextMetadata(ctx)
+	meta, err := GetContextMetadata(ctx)
 	if err != nil {
 		return nil, 0, err
-	}
-	meta := &requestMetadata{
-		toolName:     toolName,
-		actionID:     actionID,
-		invocationID: invocationID,
 	}
 	wait := make(chan *uploadResponse, uploads)
 	var missing []digest.Digest
@@ -1365,7 +1357,7 @@ type downloadRequest struct {
 	// TODO(olaola): use channels for cancellations instead of embedding download context.
 	context context.Context
 	output  *TreeOutput
-	meta    *requestMetadata
+	meta    *ContextMetadata
 	wait    chan<- *downloadResponse
 }
 
@@ -1518,7 +1510,7 @@ func (c *Client) download(data []*downloadRequest) {
 	// It is possible to have multiple same files download to different locations.
 	// This will download once and copy to the other locations.
 	reqs := make(map[digest.Digest][]*downloadRequest)
-	var metas []*requestMetadata
+	var metas []*ContextMetadata
 	for _, r := range data {
 		rs := reqs[r.digest]
 		rs = append(rs, r)
@@ -1551,8 +1543,8 @@ func (c *Client) download(data []*downloadRequest) {
 	unifiedMeta := getUnifiedMetadata(metas)
 	var err error
 	ctx := context.Background()
-	if unifiedMeta.actionID != "" {
-		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta.toolName, unifiedMeta.actionID, unifiedMeta.invocationID)
+	if unifiedMeta.ActionID != "" {
+		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta)
 	}
 	if err != nil {
 		afterDownload(dgs, reqs, map[digest.Digest]*MovedBytesMetadata{}, err)
@@ -1715,14 +1707,9 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 	if count == 0 {
 		return stats, nil
 	}
-	toolName, actionID, invocationID, err := GetContextMetadata(ctx)
+	meta, err := GetContextMetadata(ctx)
 	if err != nil {
 		return stats, err
-	}
-	meta := &requestMetadata{
-		toolName:     toolName,
-		actionID:     actionID,
-		invocationID: invocationID,
 	}
 	wait := make(chan *downloadResponse, count)
 	for dg, out := range outputs {
