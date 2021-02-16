@@ -128,12 +128,23 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		opts = DefaultTreeSymlinkOpts()
 	}
 	absPath := filepath.Clean(filepath.Join(execRoot, path))
+	meta := cache.Get(absPath)
+	isSymlink := meta.Symlink != nil
+	t := command.FileInputType
+	if isSymlink && opts.Preserved {
+		// An implication of this is that, if a path is a symlink to a
+		// directory, then the symlink attribute takes precedence.
+		t = command.SymlinkInputType
+	} else if meta.IsDirectory {
+		t = command.DirectoryInputType
+	}
+	if shouldIgnore(absPath, t, excl) {
+		return nil
+	}
 	normPath, err := getRelPath(execRoot, absPath)
 	if err != nil {
 		return err
 	}
-	meta := cache.Get(absPath)
-	isSymlink := meta.Symlink != nil
 	symlinkNormDir := ""
 	if isSymlink {
 		symlinkNormDir = filepath.Dir(normPath)
@@ -146,17 +157,6 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		}
 	} else if meta.Err != nil {
 		return meta.Err
-	}
-	t := command.FileInputType
-	if isSymlink && opts.Preserved {
-		// An implication of this is that, if a path is a symlink to a
-		// directory, then the symlink attribute takes precedence.
-		t = command.SymlinkInputType
-	} else if meta.IsDirectory {
-		t = command.DirectoryInputType
-	}
-	if shouldIgnore(absPath, t, excl) {
-		return nil
 	}
 	if t == command.FileInputType {
 		fs[normPath] = &fileSysNode{
