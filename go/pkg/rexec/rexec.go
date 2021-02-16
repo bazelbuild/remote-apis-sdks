@@ -52,7 +52,13 @@ func (c *Client) NewContext(ctx context.Context, cmd *command.Command, opt *comm
 	if err := cmd.Validate(); err != nil {
 		return nil, err
 	}
-	grpcCtx, err := rc.ContextWithMetadata(ctx, cmd.Identifiers.ToolName, cmd.Identifiers.CommandID, cmd.Identifiers.InvocationID)
+	grpcCtx, err := rc.ContextWithMetadata(ctx, &rc.ContextMetadata{
+		ToolName:               cmd.Identifiers.ToolName,
+		ToolVersion:            cmd.Identifiers.ToolVersion,
+		ActionID:               cmd.Identifiers.CommandID,
+		InvocationID:           cmd.Identifiers.InvocationID,
+		CorrelatedInvocationID: cmd.Identifiers.CorrelatedInvocationID,
+	})
 	if err != nil {
 		return nil, err
 	}
