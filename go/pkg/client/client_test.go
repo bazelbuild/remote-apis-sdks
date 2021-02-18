@@ -4,6 +4,9 @@ import (
 	"io/ioutil"
 	"path"
 	"testing"
+
+	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	svpb "github.com/bazelbuild/remote-apis/build/bazel/semver"
 )
 
 const (
@@ -124,4 +127,51 @@ func TestCreateTLSConfig(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestVersionComparison(t *testing.T) {
+	latestSupportedVersion := &svpb.SemVer{Major: 2, Minor: 1}
+	serverCapabilities := &repb.ServerCapabilities{
+		HighApiVersion: latestSupportedVersion,
+	}
+
+	if !highAPIVersionNewerThanOrEqualTo(serverCapabilities, 1, 9) {
+		t.Errorf("Got: !(2.1 >= 1.9")
+	}
+
+	if !highAPIVersionNewerThanOrEqualTo(serverCapabilities, 2, 0) {
+		t.Errorf("Got: !(2.1 >= 2.0")
+	}
+
+	if highAPIVersionNewerThanOrEqualTo(serverCapabilities, 2, 2) {
+		t.Errorf("Got: 2.1 >= 2.2")
+	}
+}
+
+func TestActionSupportsPlatformProperties(t *testing.T) {
+	if supportsActionPlatformProperties(&repb.ServerCapabilities{HighApiVersion: &svpb.SemVer{Major: 2, Minor: 1}}) {
+		t.Errorf("Got platform properties field suppported for v2.1 (expected only for v >= 2.2)")
+	}
+
+	if !supportsActionPlatformProperties(&repb.ServerCapabilities{HighApiVersion: &svpb.SemVer{Major: 2, Minor: 2}}) {
+		t.Errorf("Got platform properties field not suppported for v2.2 (expected for v >= 2.2)")
+	}
+
+	if !supportsActionPlatformProperties(&repb.ServerCapabilities{HighApiVersion: &svpb.SemVer{Major: 2, Minor: 3}}) {
+		t.Errorf("Got platform properties field not suppported for v2.3 (expected for v >= 2.2)")
+	}
+}
+
+func TestCommandUsesOutputPaths(t *testing.T) {
+	if supportsCommandOutputPaths(&repb.ServerCapabilities{HighApiVersion: &svpb.SemVer{Major: 2, Minor: 0}}) {
+		t.Errorf("Got `output_paths` field suppported for v2.0 (expected only for v >= 2.1)")
+	}
+
+	if !supportsCommandOutputPaths(&repb.ServerCapabilities{HighApiVersion: &svpb.SemVer{Major: 2, Minor: 1}}) {
+		t.Errorf("Got `output_paths` field not suppported for v2.1 (expected for v >= 2.1)")
+	}
+
+	if !supportsCommandOutputPaths(&repb.ServerCapabilities{HighApiVersion: &svpb.SemVer{Major: 2, Minor: 2}}) {
+		t.Errorf("Got `output_paths` field not suppported for v2.2 (expected for v >= 2.1)")
+	}
 }
