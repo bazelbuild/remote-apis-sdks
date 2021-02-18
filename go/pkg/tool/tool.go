@@ -470,6 +470,10 @@ func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, []strin
 	// Sort the values by path.
 	paths := make([]string, 0, len(outputs))
 	for path := range outputs {
+		if path == "" {
+			path = "."
+			outputs[path] = outputs[""]
+		}
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
