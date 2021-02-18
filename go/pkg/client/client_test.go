@@ -146,6 +146,14 @@ func TestVersionComparison(t *testing.T) {
 	if highAPIVersionNewerThanOrEqualTo(serverCapabilities, 2, 2) {
 		t.Errorf("Got: 2.1 >= 2.2")
 	}
+
+	if highAPIVersionNewerThanOrEqualTo(&repb.ServerCapabilities{}, 0, 1) {
+		t.Errorf("Got: empty >= 0.1")
+	}
+
+	if highAPIVersionNewerThanOrEqualTo(nil, 0, 1) {
+		t.Errorf("Got: nil >= 0.1")
+	}
 }
 
 func TestActionSupportsPlatformProperties(t *testing.T) {

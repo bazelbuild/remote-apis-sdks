@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -844,7 +843,7 @@ func (c *Client) readBlob(ctx context.Context, dg digest.Digest, offset, limit i
 	}
 	// Pad size so bytes.Buffer does not reallocate.
 	buf := bytes.NewBuffer(make([]byte, 0, sz+bytes.MinRead))
-	stats, err := c.readBlobStreamed(ctx, dg, offset, limit, &bufferWriter{buf})
+	stats, err := c.readBlobStreamed(ctx, dg, offset, limit, buf)
 	return buf.Bytes(), stats, err
 }
 
@@ -856,7 +855,7 @@ func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath stri
 		return nil, err
 	}
 	defer f.Close()
-	return c.readBlobStreamed(ctx, d, 0, 0, &fileWriter{f})
+	return c.readBlobStreamed(ctx, d, 0, 0, f)
 }
 
 // NewCompressedWriteBuffer creates wraps a io.Writer contained compressed contents to write
@@ -945,44 +944,7 @@ func (wt *writerTracker) Close() error {
 	return wt.pw.Close()
 }
 
-type resettableWriter interface {
-	io.Writer
-	Reset() error
-}
-
-type fileWriter struct {
-	f *os.File
-}
-
-func (fw *fileWriter) Write(p []byte) (int, error) {
-	return fw.f.Write(p)
-}
-
-func (fw *fileWriter) Reset() error {
-	err := fw.f.Truncate(0)
-	if err != nil {
-		return err
-	}
-	_, err = fw.f.Seek(0, 0)
-	return err
-}
-
-type bufferWriter struct {
-	b *bytes.Buffer
-}
-
-func (bw *bufferWriter) Write(p []byte) (int, error) {
-	return bw.b.Write(p)
-}
-
-func (bw *bufferWriter) Reset() error {
-	bw.b.Reset()
-	return nil
-}
-
-var DigestMismatchError = errors.New("CAS fetch digest mismatch")
-
-func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, limit int64, w resettableWriter) (*MovedBytesMetadata, error) {
+func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, limit int64, w io.Writer) (*MovedBytesMetadata, error) {
 	stats := &MovedBytesMetadata{}
 	stats.Requested = d.Size
 	if d.Size == 0 {
@@ -992,9 +954,6 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 	sz := d.Size - offset
 	if limit > 0 && limit < sz {
 		sz = limit
-	}
-	if err := w.Reset(); err != nil {
-		return stats, err
 	}
 	wt := newWriteTracker(w)
 	defer func() { stats.LogicalMoved = wt.n }()
@@ -1029,7 +988,7 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 		return stats, err
 	}
 	if wt.n != sz {
-		return stats, fmt.Errorf("%w: partial read of digest %s returned %d bytes", DigestMismatchError, wt.dg, sz)
+		return stats, fmt.Errorf("partial read of digest %s returned %d bytes", wt.dg, sz)
 	}
 
 	// Incomplete reads only, since we can't reliably calculate hash without the full blob
@@ -1044,7 +1003,7 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 		}
 		close(wt.ready)
 		if wt.dg != d {
-			return stats, fmt.Errorf("%w: calculated digest %s != expected digest %s", DigestMismatchError, wt.dg, d)
+			return stats, fmt.Errorf("calculated digest %s != expected digest %s", wt.dg, d)
 		}
 	}
 
