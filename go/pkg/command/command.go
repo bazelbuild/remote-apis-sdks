@@ -481,17 +481,29 @@ type Metadata struct {
 }
 
 // ToREProto converts the Command to an RE API Command proto.
-func (c *Command) ToREProto() *repb.Command {
+// `useOutputPathsField` selects what field/s to fill with the paths of outputs,
+// which will depend on the RE API version.
+func (c *Command) ToREProto(useOutputPathsField bool) *repb.Command {
 	cmdPb := &repb.Command{
-		Arguments:         c.Args,
-		OutputFiles:       make([]string, len(c.OutputFiles)),
-		OutputDirectories: make([]string, len(c.OutputDirs)),
-		WorkingDirectory:  c.WorkingDir,
+		Arguments:        c.Args,
+		WorkingDirectory: c.WorkingDir,
 	}
-	copy(cmdPb.OutputFiles, c.OutputFiles)
-	copy(cmdPb.OutputDirectories, c.OutputDirs)
-	sort.Strings(cmdPb.OutputFiles)
-	sort.Strings(cmdPb.OutputDirectories)
+
+	// In v2.1 of the RE API the `output_{files, directories}` fields were
+	// replaced by a single field: `output_paths`.
+	if useOutputPathsField {
+		cmdPb.OutputPaths = append(c.OutputFiles, c.OutputDirs...)
+		sort.Strings(cmdPb.OutputPaths)
+	} else {
+		cmdPb.OutputFiles = make([]string, len(c.OutputFiles))
+		copy(cmdPb.OutputFiles, c.OutputFiles)
+		sort.Strings(cmdPb.OutputFiles)
+
+		cmdPb.OutputDirectories = make([]string, len(c.OutputDirs))
+		copy(cmdPb.OutputDirectories, c.OutputDirs)
+		sort.Strings(cmdPb.OutputDirectories)
+	}
+
 	for name, val := range c.InputSpec.EnvironmentVariables {
 		cmdPb.EnvironmentVariables = append(cmdPb.EnvironmentVariables, &repb.Command_EnvironmentVariable{Name: name, Value: val})
 	}

@@ -370,7 +370,73 @@ func TestToREProto(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.cmd.FillDefaultFieldValues()
-			gotCmd := tc.cmd.ToREProto()
+			gotCmd := tc.cmd.ToREProto(false)
+			if diff := cmp.Diff(tc.wantCmd, gotCmd, cmpopts.EquateEmpty(), cmp.Comparer(proto.Equal)); diff != "" {
+				t.Errorf("%s: buildCommand gave result diff (-want +got):\n%s", tc.name, diff)
+			}
+		})
+	}
+}
+
+func TestToREProtoWithOutputPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     *Command
+		wantCmd *repb.Command
+	}{
+		{
+			name:    "pass args",
+			cmd:     &Command{Args: []string{"foo", "bar"}},
+			wantCmd: &repb.Command{Arguments: []string{"foo", "bar"}},
+		},
+		{
+			name:    "pass working directory",
+			cmd:     &Command{WorkingDir: "a/b"},
+			wantCmd: &repb.Command{WorkingDirectory: "a/b"},
+		},
+		{
+			name:    "sort output files",
+			cmd:     &Command{OutputFiles: []string{"foo", "bar", "abc"}},
+			wantCmd: &repb.Command{OutputPaths: []string{"abc", "bar", "foo"}},
+		},
+		{
+			name:    "sort output directories",
+			cmd:     &Command{OutputDirs: []string{"foo", "bar", "abc"}},
+			wantCmd: &repb.Command{OutputPaths: []string{"abc", "bar", "foo"}},
+		},
+		{
+			name: "sort environment variables",
+			cmd: &Command{
+				InputSpec: &InputSpec{
+					EnvironmentVariables: map[string]string{"b": "3", "a": "2", "c": "1"},
+				},
+			},
+			wantCmd: &repb.Command{
+				EnvironmentVariables: []*repb.Command_EnvironmentVariable{
+					&repb.Command_EnvironmentVariable{Name: "a", Value: "2"},
+					&repb.Command_EnvironmentVariable{Name: "b", Value: "3"},
+					&repb.Command_EnvironmentVariable{Name: "c", Value: "1"},
+				},
+			},
+		},
+		{
+			name: "sort platform",
+			cmd:  &Command{Platform: map[string]string{"b": "3", "a": "2", "c": "1"}},
+			wantCmd: &repb.Command{
+				Platform: &repb.Platform{
+					Properties: []*repb.Platform_Property{
+						&repb.Platform_Property{Name: "a", Value: "2"},
+						&repb.Platform_Property{Name: "b", Value: "3"},
+						&repb.Platform_Property{Name: "c", Value: "1"},
+					},
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.cmd.FillDefaultFieldValues()
+			gotCmd := tc.cmd.ToREProto(true)
 			if diff := cmp.Diff(tc.wantCmd, gotCmd, cmpopts.EquateEmpty(), cmp.Comparer(proto.Equal)); diff != "" {
 				t.Errorf("%s: buildCommand gave result diff (-want +got):\n%s", tc.name, diff)
 			}
