@@ -897,48 +897,6 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientCo
 	return res, nil
 }
 
-// SupportsActionPlatformProperties returns whether the server's RE API version
-// supports the `Action.platform_properties` field.
-func (c *Client) SupportsActionPlatformProperties() bool {
-	return supportsActionPlatformProperties(c.serverCaps)
-}
-
-// SupportsCommandOutputPaths returns whether the server's RE API version
-// supports the `Command.action_paths` field.
-func (c *Client) SupportsCommandOutputPaths() bool {
-	return supportsCommandOutputPaths(c.serverCaps)
-}
-
-// HighAPIVersionNewerThanOrEqualTo returns whether the latest version reported
-// as supported in ServerCapabilities matches or is more recent than a
-// reference major/minor version.
-func highAPIVersionNewerThanOrEqualTo(serverCapabilities *repb.ServerCapabilities, major int32, minor int32) bool {
-	if serverCapabilities == nil {
-		return false
-	}
-
-	latestSupportedMajor := serverCapabilities.HighApiVersion.GetMajor()
-	latestSupportedMinor := serverCapabilities.HighApiVersion.GetMinor()
-
-	return (latestSupportedMajor > major || (latestSupportedMajor == major && latestSupportedMinor >= minor))
-}
-
-func supportsActionPlatformProperties(serverCapabilities *repb.ServerCapabilities) bool {
-	// According to the RE API spec:
-	// "New in version 2.2: clients SHOULD set these platform properties as well
-	// as those in the [Command][build.bazel.remote.execution.v2.Command].
-	// Servers SHOULD prefer those set here."
-	return highAPIVersionNewerThanOrEqualTo(serverCapabilities, 2, 2)
-}
-
-func supportsCommandOutputPaths(serverCapabilities *repb.ServerCapabilities) bool {
-	// According to the RE API spec:
-	// "[In v2.1 `output_paths`] supersedes the DEPRECATED `output_files` and
-	// `output_directories` fields. If `output_paths` is used, `output_files` and
-	// `output_directories` will be ignored!"
-	return highAPIVersionNewerThanOrEqualTo(serverCapabilities, 2, 1)
-}
-
 // GetOperation wraps the underlying call with specific client options.
 func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest) (res *oppb.Operation, err error) {
 	opts := c.RPCOpts()
