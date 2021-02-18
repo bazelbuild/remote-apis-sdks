@@ -383,6 +383,10 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 	ueList := make(map[digest.Digest]*uploadinfo.Entry)
 	for _, ue := range data {
 		dg := ue.Digest
+		if dg.IsEmpty() {
+			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty blob %s", dg)
+			continue
+		}
 		if _, ok := ueList[dg]; !ok {
 			dgs = append(dgs, dg)
 			ueList[dg] = ue
@@ -501,6 +505,11 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry)
 	var missing []digest.Digest
 	var reqs []*uploadRequest
 	for _, ue := range data {
+		if ue.Digest.IsEmpty() {
+			uploads--
+			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty entry %s", ue.Digest)
+			continue
+		}
 		req := &uploadRequest{
 			ue:   ue,
 			meta: meta,
@@ -565,6 +574,10 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
 	ue := uploadinfo.EntryFromBlob(blob)
 	dg := ue.Digest
+	if dg.IsEmpty() {
+		LogContextInfof(ctx, log.Level(2), "Skipping upload of empty blob %s", dg)
+		return dg, nil
+	}
 	ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 	if err != nil {
 		return dg, err
@@ -1107,6 +1120,9 @@ func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) strin
 // GetDirectoryTree returns the entire directory tree rooted at the given digest (which must target
 // a Directory stored in the CAS).
 func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result []*repb.Directory, err error) {
+	if digest.NewFromProtoUnvalidated(d).IsEmpty() {
+		return []*repb.Directory{&repb.Directory{}}, nil
+	}
 	pageTok := ""
 	result = []*repb.Directory{}
 	closure := func(ctx context.Context) error {
