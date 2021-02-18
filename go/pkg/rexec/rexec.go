@@ -135,7 +135,8 @@ func (ec *Context) computeInputs() error {
 	ec.Metadata.EventTimes[command.EventComputeMerkleTree] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventComputeMerkleTree].To = time.Now() }()
 	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
-	cmdPb := ec.cmd.ToREProto()
+	commandHasOutputPathsField := ec.client.GrpcClient.SupportsCommandOutputPaths()
+	cmdPb := ec.cmd.ToREProto(commandHasOutputPathsField)
 	log.V(2).Infof("%s %s> Command: \n%s\n", cmdID, executionID, proto.MarshalTextString(cmdPb))
 	var err error
 	if ec.cmdUe, err = uploadinfo.EntryFromProto(cmdPb); err != nil {
@@ -158,6 +159,11 @@ func (ec *Context) computeInputs() error {
 		InputRootDigest: root.ToProto(),
 		DoNotCache:      ec.opt.DoNotCache,
 	}
+	// If supported, we attach a copy of the platform properties list to the Action.
+	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
+		acPb.Platform = cmdPb.Platform
+	}
+
 	if ec.cmd.Timeout > 0 {
 		acPb.Timeout = ptypes.DurationProto(ec.cmd.Timeout)
 	}
