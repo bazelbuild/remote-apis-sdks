@@ -1345,6 +1345,23 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			},
 		},
 		{
+			desc: "Symlink",
+			input: []*inputPath{
+				{path: "bar", fileContents: barBlob},
+				{path: "dir1/dir2/bar", isSymlink: true, symlinkTarget: "../../bar"},
+			},
+			paths:     []string{"dir1/dir2/bar"},
+			wantBlobs: [][]byte{barBlob},
+			wantResult: &repb.ActionResult{
+				OutputFiles: []*repb.OutputFile{
+					&repb.OutputFile{Path: "dir1/dir2/bar", Digest: barDgPb},
+				},
+			},
+			wantCacheCalls: map[string]int{
+				"dir1/dir2/bar": 1,
+			},
+		},
+		{
 			desc: "Duplicate file contents",
 			input: []*inputPath{
 				{path: "foo", fileContents: fooBlob, isExecutable: true},
