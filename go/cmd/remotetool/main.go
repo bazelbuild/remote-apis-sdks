@@ -43,6 +43,7 @@ const (
 	reexecuteAction      OpType = "reexecute_action"
 	checkDeterminism     OpType = "check_determinism"
 	uploadBlob           OpType = "upload_blob"
+	uploadTree           OpType = "upload_tree"
 )
 
 var supportedOps = []OpType{
@@ -53,14 +54,16 @@ var supportedOps = []OpType{
 	reexecuteAction,
 	checkDeterminism,
 	uploadBlob,
+	uploadTree,
 }
 
 var (
-	operation    = flag.String("operation", "", fmt.Sprintf("Specifies the operation to perform. Supported values: %v", supportedOps))
-	digest       = flag.String("digest", "", "Digest in <digest/size_bytes> format.")
-	pathPrefix   = flag.String("path", "", "Path to which outputs should be downloaded to.")
-	inputRoot    = flag.String("input_root", "", "For reexecute_action: if specified, override the action inputs with the specified input root.")
-	execAttempts = flag.Int("exec_attempts", 10, "For check_determinism: the number of times to remotely execute the action and check for mismatches.")
+	operation         = flag.String("operation", "", fmt.Sprintf("Specifies the operation to perform. Supported values: %v", supportedOps))
+	digest            = flag.String("digest", "", "Digest in <digest/size_bytes> format.")
+	pathPrefix        = flag.String("path", "", "Path to which outputs should be downloaded to.")
+	inputRoot         = flag.String("input_root", "", "For reexecute_action: if specified, override the action inputs with the specified input root.")
+	execAttempts      = flag.Int("exec_attempts", 10, "For check_determinism: the number of times to remotely execute the action and check for mismatches.")
+	uploadConcurrency = flag.Uint64("upload_concurrency", 1, "The number of concurrent uploads.")
 )
 
 func main() {
@@ -121,7 +124,12 @@ func main() {
 
 	case uploadBlob:
 		if err := c.UploadBlob(ctx, getPathFlag()); err != nil {
-			log.Exitf("error uploading blob for digest %v: %v", getDigestFlag(), err)
+			log.Exitf("error uploading blob from path '%v': %v", getPathFlag(), err)
+		}
+
+	case uploadTree:
+		if err := c.UploadTree(ctx, *uploadConcurrency, getPathFlag()); err != nil {
+			log.Exitf("error uploading tree from path '%v': %v", getPathFlag(), err)
 		}
 
 	default:
