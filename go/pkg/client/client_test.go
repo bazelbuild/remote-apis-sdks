@@ -1,12 +1,15 @@
 package client
 
 import (
+	"context"
 	"io/ioutil"
+	"net"
 	"path"
 	"testing"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	svpb "github.com/bazelbuild/remote-apis/build/bazel/semver"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -64,6 +67,8 @@ HavFSkKMI1EuncwH2ooshIF9ZQqYNpIH7YGxnzDgNXnmeb26FI+b0uuxW74PWZrL
 h4A58eQ+JGSLao6JSmi2T0tZ
 -----END PRIVATE KEY-----
 `
+
+	instance = "instance"
 )
 
 func TestCreateTLSConfig(t *testing.T) {
@@ -181,5 +186,48 @@ func TestCommandUsesOutputPaths(t *testing.T) {
 
 	if !supportsCommandOutputPaths(&repb.ServerCapabilities{HighApiVersion: &svpb.SemVer{Major: 2, Minor: 2}}) {
 		t.Errorf("Got `output_paths` field not suppported for v2.2 (expected for v >= 2.1)")
+	}
+}
+
+func TestNewClient(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	c, err := NewClient(ctx, instance, DialParams{
+		Service:    "server",
+		NoSecurity: true,
+	}, StartupCapabilities(false))
+	if err != nil {
+		t.Fatalf("Error creating client: %v", err)
+	}
+	defer c.Close()
+}
+
+func TestNewClientFromConnection(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	l, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("Cannot listen: %v", err)
+	}
+	conn, err := grpc.Dial(l.Addr().String(), grpc.WithInsecure())
+	if err != nil {
+		t.Fatalf("Cannot establish gRPC connection: %v", err)
+	}
+
+	c, err := NewClientFromConnection(ctx, instance, conn, conn, StartupCapabilities(false))
+	if err != nil {
+		t.Fatalf("Error creating client: %v", err)
+	}
+	defer c.Close()
+
+	_, err = NewClientFromConnection(ctx, instance, nil, conn, StartupCapabilities(false))
+	if err == nil {
+		t.Fatalf("Expected error got nil")
+	}
+
+	_, err = NewClientFromConnection(ctx, instance, conn, nil, StartupCapabilities(false))
+	if err == nil {
+		t.Fatalf("Expected error got nil")
 	}
 }

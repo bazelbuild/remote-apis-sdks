@@ -600,6 +600,17 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 	if err != nil {
 		return nil, err
 	}
+	return NewClientFromConnection(ctx, instanceName, conn, casConn, opts...)
+}
+
+// NewClientFromConnection creates a client from gRPC connections to a remote execution service and a cas service.
+func NewClientFromConnection(ctx context.Context, instanceName string, conn, casConn *grpc.ClientConn, opts ...Opt) (*Client, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connection to remote execution service may not be nil")
+	}
+	if casConn == nil {
+		return nil, fmt.Errorf("connection to CAS service may not be nil")
+	}
 	client := &Client{
 		InstanceName:                  instanceName,
 		actionCache:                   regrpc.NewActionCacheClient(casConn),
