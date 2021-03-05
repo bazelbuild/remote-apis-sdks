@@ -290,7 +290,10 @@ func NewCAS() *CAS {
 func (f *CAS) Clear() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.blobs = make(map[digest.Digest][]byte)
+	f.blobs = map[digest.Digest][]byte{
+		// For https://github.com/bazelbuild/remote-apis/blob/6345202a036a297b22b0a0e7531ef702d05f2130/build/bazel/remote/execution/v2/remote_execution.proto#L249
+		digest.Empty: {},
+	}
 	f.reads = make(map[digest.Digest]int)
 	f.writes = make(map[digest.Digest]int)
 	f.missingReqs = make(map[digest.Digest]int)
