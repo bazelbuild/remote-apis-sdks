@@ -1235,6 +1235,9 @@ func TestDownloadDirectory(t *testing.T) {
 		Files: []*repb.FileNode{
 			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
 		},
+		Directories: []*repb.DirectoryNode{
+			{Name: "empty", Digest: digest.Empty.ToProto()},
+		},
 	}
 	dirBlob, err := proto.Marshal(dir)
 	if err != nil {
@@ -1250,11 +1253,17 @@ func TestDownloadDirectory(t *testing.T) {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
 
-	if diff := cmp.Diff(outputs, map[string]*client.TreeOutput{"foo": {
-		Digest:       fooDigest,
-		Path:         "foo",
-		IsExecutable: true,
-	}}); diff != "" {
+	if diff := cmp.Diff(outputs, map[string]*client.TreeOutput{
+		"empty": {
+			Digest:           digest.Empty,
+			Path:             "empty",
+			IsEmptyDirectory: true,
+		},
+		"foo": {
+			Digest:       fooDigest,
+			Path:         "foo",
+			IsExecutable: true,
+		}}); diff != "" {
 		t.Fatalf("DownloadDirectory() mismatch (-want +got):\n%s", diff)
 	}
 
