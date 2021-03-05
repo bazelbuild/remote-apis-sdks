@@ -4,6 +4,7 @@ package rexec
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -336,11 +337,11 @@ func (ec *Context) ExecuteRemotely() {
 	if ec.resPb != nil {
 		ec.setOutputMetadata()
 		ec.Result = command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
-		log.V(1).Infof("%s %s> Downloading outputs...", cmdID, executionID)
 		if ec.opt.DownloadOutErr {
 			ec.Result = ec.downloadOutErr()
 		}
 		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
+			log.V(1).Infof("%s %s> Downloading outputs...", cmdID, executionID)
 			stats, res := ec.downloadOutputs(ec.cmd.ExecRoot)
 			ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
 			ec.Metadata.RealBytesDownloaded += stats.RealMoved
@@ -382,6 +383,30 @@ func (ec *Context) DownloadOutputs(outputDir string) {
 	if ec.Result.Err == nil {
 		ec.Result.Status = st
 	}
+}
+
+// GetOutputFileDigests returns a map of output file paths to digests.
+// This function is supposed to be run after a successful cache-hit / remote-execution
+// has been run with the given execution context. If called before the completion of
+// remote-execution, the function returns a nil result.
+func (ec *Context) GetOutputFileDigests(useAbsPath bool) (map[string]digest.Digest, error) {
+	if ec.resPb == nil {
+		return nil, nil
+	}
+
+	ft, err := ec.client.GrpcClient.FlattenActionOutputs(ec.ctx, ec.resPb)
+	if err != nil {
+		return nil, err
+	}
+	res := map[string]digest.Digest{}
+	for p, t := range ft {
+		fp := p
+		if useAbsPath {
+			fp = filepath.Join(ec.cmd.ExecRoot, p)
+		}
+		res[fp] = t.Digest
+	}
+	return res, nil
 }
 
 func timeFromProto(tPb *tspb.Timestamp) time.Time {
