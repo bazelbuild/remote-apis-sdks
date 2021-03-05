@@ -357,6 +357,66 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 	}
 }
 
+func TestGetOutputFileDigests(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fooPath := filepath.Join(e.ExecRoot, "foo")
+	fooBlob := []byte("hello")
+	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
+		t.Fatalf("failed to write input file %s", fooBlob)
+	}
+	cmd := &command.Command{
+		Args:        []string{"tool"},
+		ExecRoot:    e.ExecRoot,
+		InputSpec:   &command.InputSpec{Inputs: []string{"foo"}},
+		OutputFiles: []string{"a/b/out"},
+	}
+	opt := &command.ExecutionOptions{AcceptCached: true, DownloadOutputs: false, DownloadOutErr: false}
+	oe := outerr.NewRecordingOutErr()
+	ec, err := e.Client.NewContext(context.Background(), cmd, opt, oe)
+	if err != nil {
+		t.Fatalf("failed creating execution context: %v", err)
+	}
+	outBlob := []byte("out!")
+	wantRes := &command.Result{Status: command.CacheHitResultStatus}
+	e.Set(cmd, opt, wantRes, &fakes.OutputFile{Path: "a/b/out", Contents: string(outBlob)},
+		fakes.StdOut("stdout"), fakes.StdErrRaw("stderr"))
+
+	ec.GetCachedResult()
+
+	tests := []struct {
+		useAbsPath bool
+		name       string
+		want       map[string]digest.Digest
+	}{
+		{
+			name:       "relative paths",
+			useAbsPath: false,
+			want: map[string]digest.Digest{
+				"a/b/out": digest.NewFromBlob(outBlob),
+			},
+		},
+		{
+			name:       "absolute paths",
+			useAbsPath: true,
+			want: map[string]digest.Digest{
+				filepath.Join(e.ExecRoot, "a/b/out"): digest.NewFromBlob(outBlob),
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ec.GetOutputFileDigests(tc.useAbsPath)
+			if err != nil {
+				t.Fatalf("GetOutputFileDigests(%v) failed: %v", tc.useAbsPath, err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Fatalf("GetOutputFileDigests(%v) returned diff (-want +got):\n%s", tc.useAbsPath, diff)
+			}
+		})
+	}
+}
+
 func TestUpdateRemoteCache(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
