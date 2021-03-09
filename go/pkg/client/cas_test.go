@@ -1105,7 +1105,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 		t.Fatalf("failed to make temp dir: %v", err)
 	}
 	defer os.RemoveAll(execRoot)
-	_, err = c.DownloadActionOutputs(ctx, ar, execRoot, cache)
+	_, err = c.DownloadActionOutputs(ctx, ar, execRoot, "", cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
@@ -1166,6 +1166,195 @@ func TestDownloadActionOutputs(t *testing.T) {
 		},
 		{
 			path:          "x/bar",
+			symlinkTarget: "../dir/a/bar",
+		},
+	}
+	for _, out := range wantOutputs {
+		path := filepath.Join(execRoot, out.path)
+		fi, err := os.Lstat(path)
+		if err != nil {
+			t.Errorf("expected output %s is missing", path)
+		}
+		if out.fileDigest != nil {
+			fmd := cache.Get(path)
+			if fmd == nil {
+				t.Errorf("cache does not contain metadata for path: %v", path)
+			} else {
+				if diff := cmp.Diff(*out.fileDigest, fmd.Digest); diff != "" {
+					t.Errorf("invalid digeset in cache for path %v, (-want +got): %v", path, diff)
+				}
+			}
+		}
+		if out.symlinkTarget != "" {
+			if fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("expected %s to be a symlink, got %v", path, fi.Mode())
+			}
+			target, e := os.Readlink(path)
+			if e != nil {
+				t.Errorf("expected %s to be a symlink, got error reading symlink: %v", path, err)
+			}
+			if target != out.symlinkTarget {
+				t.Errorf("expected %s to be a symlink to %s, got %s", path, out.symlinkTarget, target)
+			}
+		} else if out.isEmptyDirectory {
+			if !fi.Mode().IsDir() {
+				t.Errorf("expected %s to be a directory, got %s", path, fi.Mode())
+			}
+			files, err := ioutil.ReadDir(path)
+			if err != nil {
+				t.Errorf("expected %s to be a directory, got error reading directory: %v", path, err)
+			}
+			if len(files) != 0 {
+				t.Errorf("expected %s to be an empty directory, got contents: %v", path, files)
+			}
+		} else {
+			contents, err := ioutil.ReadFile(path)
+			if err != nil {
+				t.Errorf("error reading from %s: %v", path, err)
+			}
+			if !bytes.Equal(contents, out.contents) {
+				t.Errorf("expected %s to contain %v, got %v", path, out.contents, contents)
+			}
+			// TODO(olaola): verify the file is executable, if required.
+			// Doing this naively failed go test in CI.
+		}
+	}
+}
+
+func TestDownloadActionOutputsWithWorkingDir(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+	cache := filemetadata.NewSingleFlightCache()
+
+	fooDigest := fake.Put([]byte("foo"))
+	barDigest := fake.Put([]byte("bar"))
+	dirB := &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "foo", Digest: fooDigest.ToProto(), IsExecutable: true},
+		},
+	}
+	bDigest := digest.TestNewFromMessage(dirB)
+	dirA := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "b", Digest: bDigest.ToProto()},
+			{Name: "e2", Digest: digest.Empty.ToProto()},
+		},
+		Files: []*repb.FileNode{
+			{Name: "bar", Digest: barDigest.ToProto()},
+		},
+	}
+	aDigest := digest.TestNewFromMessage(dirA)
+	root := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "a", Digest: aDigest.ToProto()},
+			{Name: "b", Digest: bDigest.ToProto()},
+			{Name: "e1", Digest: digest.Empty.ToProto()},
+		},
+	}
+	tree := &repb.Tree{
+		Root:     root,
+		Children: []*repb.Directory{dirA, dirB, &repb.Directory{}},
+	}
+	treeBlob, err := proto.Marshal(tree)
+	if err != nil {
+		t.Fatalf("failed marshalling Tree: %s", err)
+	}
+	treeA := &repb.Tree{
+		Root:     dirA,
+		Children: []*repb.Directory{dirB, &repb.Directory{}},
+	}
+	treeABlob, err := proto.Marshal(treeA)
+	if err != nil {
+		t.Fatalf("failed marshalling Tree: %s", err)
+	}
+	treeDigest := fake.Put(treeBlob)
+	treeADigest := fake.Put(treeABlob)
+	ar := &repb.ActionResult{
+		OutputFiles: []*repb.OutputFile{
+			&repb.OutputFile{Path: "../foo", Digest: fooDigest.ToProto()}},
+		OutputFileSymlinks: []*repb.OutputSymlink{
+			&repb.OutputSymlink{Path: "x/bar", Target: "../dir/a/bar"}},
+		OutputDirectorySymlinks: []*repb.OutputSymlink{
+			&repb.OutputSymlink{Path: "x/a", Target: "../dir/a"}},
+		OutputDirectories: []*repb.OutputDirectory{
+			&repb.OutputDirectory{Path: "dir", TreeDigest: treeDigest.ToProto()},
+			&repb.OutputDirectory{Path: "dir2", TreeDigest: treeADigest.ToProto()},
+		},
+	}
+	execRoot, err := ioutil.TempDir("", "DownloadOuts")
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	wd := "wd"
+	if err := os.Mkdir(filepath.Join(execRoot, wd), os.ModePerm); err != nil {
+		t.Fatalf("failed to create working directory %v: %v", wd, err)
+	}
+	defer os.RemoveAll(execRoot)
+	_, err = c.DownloadActionOutputs(ctx, ar, execRoot, wd, cache)
+	if err != nil {
+		t.Errorf("error in DownloadActionOutputs: %s", err)
+	}
+	wantOutputs := []struct {
+		path             string
+		isExecutable     bool
+		contents         []byte
+		symlinkTarget    string
+		isEmptyDirectory bool
+		fileDigest       *digest.Digest
+	}{
+		{
+			path:             "wd/dir/e1",
+			isEmptyDirectory: true,
+		},
+		{
+			path:             "wd/dir/a/e2",
+			isEmptyDirectory: true,
+		},
+		{
+			path:         "wd/dir/a/b/foo",
+			isExecutable: true,
+			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
+		},
+		{
+			path:     "wd/dir/a/bar",
+			contents: []byte("bar"),
+		},
+		{
+			path:         "wd/dir/b/foo",
+			isExecutable: true,
+			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
+		},
+		{
+			path:             "wd/dir2/e2",
+			isEmptyDirectory: true,
+		},
+		{
+			path:         "wd/dir2/b/foo",
+			isExecutable: true,
+			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
+		},
+		{
+			path:     "wd/dir2/bar",
+			contents: []byte("bar"),
+		},
+		{
+			path:       "foo",
+			contents:   []byte("foo"),
+			fileDigest: &fooDigest,
+		},
+		{
+			path:          "wd/x/a",
+			symlinkTarget: "../dir/a",
+		},
+		{
+			path:          "wd/x/bar",
 			symlinkTarget: "../dir/a/bar",
 		},
 	}
@@ -1296,7 +1485,7 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 			c := e.Client.GrpcClient
 			ub.Apply(c)
 
-			_, err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			_, err := c.DownloadActionOutputs(ctx, ar, execRoot, "", filemetadata.NewSingleFlightCache())
 			if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found") {
 				t.Errorf("expected 'not found' error in DownloadActionOutputs, got: %v", err)
 			}
@@ -1406,7 +1595,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 				t.Fatalf("failed to make temp dir: %v", err)
 			}
 			defer os.RemoveAll(execRoot)
-			_, err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			_, err = c.DownloadActionOutputs(ctx, ar, execRoot, "", filemetadata.NewSingleFlightCache())
 			if err != nil {
 				t.Errorf("error in DownloadActionOutputs: %s", err)
 			}
@@ -1480,7 +1669,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 						}
 
 						execRoot := t.TempDir()
-						if _, err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
+						if _, err := c.DownloadActionOutputs(eCtx, ar, execRoot, "", filemetadata.NewSingleFlightCache()); err != nil {
 							return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 						}
 						for _, i := range input {
@@ -1565,7 +1754,7 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 		ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name + "_copy", Digest: dgPb})
 
 		execRoot := t.TempDir()
-		if _, err := c.DownloadActionOutputs(pCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
+		if _, err := c.DownloadActionOutputs(pCtx, ar, execRoot, "", filemetadata.NewSingleFlightCache()); err != nil {
 			return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 		}
 		for _, path := range []string{name, name + "_copy"} {
@@ -1601,7 +1790,7 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 			}
 
 			execRoot := t.TempDir()
-			stats, err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			stats, err := c.DownloadActionOutputs(eCtx, ar, execRoot, "", filemetadata.NewSingleFlightCache())
 			if err != nil {
 				return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 			}
