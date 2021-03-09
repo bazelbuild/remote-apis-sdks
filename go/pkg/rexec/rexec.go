@@ -127,12 +127,11 @@ func (ec *Context) downloadOutErr() *command.Result {
 	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
-func (ec *Context) downloadOutputs(execRoot string) (*rc.MovedBytesMetadata, *command.Result) {
+func (ec *Context) downloadOutputs(outDir string) (*rc.MovedBytesMetadata, *command.Result) {
 	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
-	outDir := filepath.Join(execRoot, ec.cmd.WorkingDir)
-	if ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
-		outDir = execRoot
+	if !ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
+		outDir = filepath.Join(outDir, ec.cmd.WorkingDir)
 	}
 	stats, err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, outDir, ec.client.FileMetadataCache)
 	if err != nil {
