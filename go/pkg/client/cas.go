@@ -1321,15 +1321,15 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 	return fullStats, nil
 }
 
-func copyFile(srcExecRoot, dstExecRoot, from, to string, mode os.FileMode) error {
-	src := filepath.Join(srcExecRoot, from)
+func copyFile(srcOutDir, dstOutDir, from, to string, mode os.FileMode) error {
+	src := filepath.Join(srcOutDir, from)
 	s, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
-	dst := filepath.Join(dstExecRoot, to)
+	dst := filepath.Join(dstOutDir, to)
 	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
 		return err
