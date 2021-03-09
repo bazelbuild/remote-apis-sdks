@@ -130,7 +130,11 @@ func (ec *Context) downloadOutErr() *command.Result {
 func (ec *Context) downloadOutputs(execRoot string) (*rc.MovedBytesMetadata, *command.Result) {
 	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
-	stats, err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, filepath.Join(execRoot, ec.cmd.WorkingDir), ec.client.FileMetadataCache)
+	outDir := filepath.Join(execRoot, ec.cmd.WorkingDir)
+	if ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
+		outDir = execRoot
+	}
+	stats, err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, outDir, ec.client.FileMetadataCache)
 	if err != nil {
 		return &rc.MovedBytesMetadata{}, command.NewRemoteErrorResult(err)
 	}
