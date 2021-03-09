@@ -227,7 +227,7 @@ func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPre
 	log.Infof("Downloading action results of %v to %v.", actionDigest, pathPrefix)
 	// We don't really need an in-memory filemetadata cache for debugging operations.
 	noopCache := filemetadata.NewNoopCache()
-	if _, err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, pathPrefix, cmd.WorkingDir, noopCache); err != nil {
+	if _, err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, filepath.Join(pathPrefix, cmd.WorkingDir), noopCache); err != nil {
 		log.Errorf("Failed downloading action outputs: %v.", err)
 	}
 

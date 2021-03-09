@@ -127,10 +127,10 @@ func (ec *Context) downloadOutErr() *command.Result {
 	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
-func (ec *Context) downloadOutputs(execRoot, workingDir string) (*rc.MovedBytesMetadata, *command.Result) {
+func (ec *Context) downloadOutputs(execRoot string) (*rc.MovedBytesMetadata, *command.Result) {
 	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
-	stats, err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, execRoot, ec.cmd.WorkingDir, ec.client.FileMetadataCache)
+	stats, err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, filepath.Join(execRoot, ec.cmd.WorkingDir), ec.client.FileMetadataCache)
 	if err != nil {
 		return &rc.MovedBytesMetadata{}, command.NewRemoteErrorResult(err)
 	}
@@ -217,7 +217,7 @@ func (ec *Context) GetCachedResult() {
 			ec.Result = ec.downloadOutErr()
 		}
 		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
-			stats, res := ec.downloadOutputs(ec.cmd.ExecRoot, ec.cmd.WorkingDir)
+			stats, res := ec.downloadOutputs(ec.cmd.ExecRoot)
 			ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
 			ec.Metadata.RealBytesDownloaded += stats.RealMoved
 			ec.Result = res
@@ -342,7 +342,7 @@ func (ec *Context) ExecuteRemotely() {
 		}
 		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
 			log.V(1).Infof("%s %s> Downloading outputs...", cmdID, executionID)
-			stats, res := ec.downloadOutputs(ec.cmd.ExecRoot, ec.cmd.WorkingDir)
+			stats, res := ec.downloadOutputs(ec.cmd.ExecRoot)
 			ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
 			ec.Metadata.RealBytesDownloaded += stats.RealMoved
 			ec.Result = res
@@ -376,7 +376,7 @@ func (ec *Context) DownloadOutErr() {
 // DownloadOutputs downloads the outputs of the command in the context to the specified directory.
 func (ec *Context) DownloadOutputs(outputDir string) {
 	st := ec.Result.Status
-	stats, res := ec.downloadOutputs(outputDir, ec.cmd.WorkingDir)
+	stats, res := ec.downloadOutputs(outputDir)
 	ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
 	ec.Metadata.RealBytesDownloaded += stats.RealMoved
 	ec.Result = res

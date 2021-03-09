@@ -1105,7 +1105,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 		t.Fatalf("failed to make temp dir: %v", err)
 	}
 	defer os.RemoveAll(execRoot)
-	_, err = c.DownloadActionOutputs(ctx, ar, execRoot, "", cache)
+	_, err = c.DownloadActionOutputs(ctx, ar, execRoot, cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
@@ -1294,7 +1294,7 @@ func TestDownloadActionOutputsWithWorkingDir(t *testing.T) {
 		t.Fatalf("failed to create working directory %v: %v", wd, err)
 	}
 	defer os.RemoveAll(execRoot)
-	_, err = c.DownloadActionOutputs(ctx, ar, execRoot, wd, cache)
+	_, err = c.DownloadActionOutputs(ctx, ar, filepath.Join(execRoot, wd), cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
@@ -1485,7 +1485,7 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 			c := e.Client.GrpcClient
 			ub.Apply(c)
 
-			_, err := c.DownloadActionOutputs(ctx, ar, execRoot, "", filemetadata.NewSingleFlightCache())
+			_, err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found") {
 				t.Errorf("expected 'not found' error in DownloadActionOutputs, got: %v", err)
 			}
@@ -1595,7 +1595,7 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 				t.Fatalf("failed to make temp dir: %v", err)
 			}
 			defer os.RemoveAll(execRoot)
-			_, err = c.DownloadActionOutputs(ctx, ar, execRoot, "", filemetadata.NewSingleFlightCache())
+			_, err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if err != nil {
 				t.Errorf("error in DownloadActionOutputs: %s", err)
 			}
@@ -1669,7 +1669,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 						}
 
 						execRoot := t.TempDir()
-						if _, err := c.DownloadActionOutputs(eCtx, ar, execRoot, "", filemetadata.NewSingleFlightCache()); err != nil {
+						if _, err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
 							return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 						}
 						for _, i := range input {
@@ -1754,7 +1754,7 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 		ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name + "_copy", Digest: dgPb})
 
 		execRoot := t.TempDir()
-		if _, err := c.DownloadActionOutputs(pCtx, ar, execRoot, "", filemetadata.NewSingleFlightCache()); err != nil {
+		if _, err := c.DownloadActionOutputs(pCtx, ar, execRoot, filemetadata.NewSingleFlightCache()); err != nil {
 			return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 		}
 		for _, path := range []string{name, name + "_copy"} {
@@ -1790,7 +1790,7 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 			}
 
 			execRoot := t.TempDir()
-			stats, err := c.DownloadActionOutputs(eCtx, ar, execRoot, "", filemetadata.NewSingleFlightCache())
+			stats, err := c.DownloadActionOutputs(eCtx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if err != nil {
 				return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 			}
