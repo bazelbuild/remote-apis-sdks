@@ -464,12 +464,16 @@ func getRelPath(base, path string) (string, error) {
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
 // The paths have to be relative to execRoot.
 // It also populates the remote ActionResult, packaging output directories as trees where required.
-func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache filemetadata.Cache) (map[digest.Digest]*uploadinfo.Entry, *repb.ActionResult, error) {
+func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []string, cache filemetadata.Cache) (map[digest.Digest]*uploadinfo.Entry, *repb.ActionResult, error) {
 	outs := make(map[digest.Digest]*uploadinfo.Entry)
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {
-		absPath := filepath.Clean(filepath.Join(execRoot, path))
-		normPath, err := getRelPath(execRoot, absPath)
+		absPath := filepath.Clean(filepath.Join(execRoot, workingDir, path))
+		_, err := getRelPath(execRoot, absPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		normPath, err := filepath.Rel(filepath.Join(execRoot, workingDir), absPath)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -249,7 +249,11 @@ func (ec *Context) UpdateCachedResult() {
 	ec.Metadata.EventTimes[command.EventUpdateCachedResult] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventUpdateCachedResult].To = time.Now() }()
 	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
-	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, outPaths, ec.client.FileMetadataCache)
+	wd := ""
+	if !ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
+		wd = ec.cmd.WorkingDir
+	}
+	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, wd, outPaths, ec.client.FileMetadataCache)
 	if err != nil {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
