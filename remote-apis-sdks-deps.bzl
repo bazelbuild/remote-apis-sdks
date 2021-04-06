@@ -35,12 +35,6 @@ def remote_apis_sdks_go_deps():
     )
     _maybe(
         go_repository,
-        name = "org_golang_x_oauth2",
-        commit = "9f3314589c9a9136388751d9adae6b0ed400978a",
-        importpath = "golang.org/x/oauth2",
-    )
-    _maybe(
-        go_repository,
         name = "com_github_golang_glog",
         commit = "23def4e6c14b4da8ac2ed8007337bc5eb5007998",
         importpath = "github.com/golang/glog",
@@ -60,15 +54,15 @@ def remote_apis_sdks_go_deps():
     )
     _maybe(
         go_repository,
-        name = "org_golang_x_sync",
-        commit = "112230192c580c3556b8cee6403af37a4fc5f28c",
-        importpath = "golang.org/x/sync",
+        name = "org_golang_x_oauth2",
+        commit = "9f3314589c9a9136388751d9adae6b0ed400978a",
+        importpath = "golang.org/x/oauth2",
     )
     _maybe(
         go_repository,
-        name = "org_golang_x_text",
-        importpath = "golang.org/x/text",
-        commit = "a9a820217f98f7c8a207ec1e45a874e1fe12c478",
+        name = "org_golang_x_sync",
+        commit = "112230192c580c3556b8cee6403af37a4fc5f28c",
+        importpath = "golang.org/x/sync",
     )
     _maybe(
         go_repository,
@@ -87,12 +81,6 @@ def remote_apis_sdks_go_deps():
         name = "com_github_bazelbuild_remote_apis",
         importpath = "github.com/bazelbuild/remote-apis",
         commit = "0943dc4e70e1414735a85a3167557392c177ff45",  # 2021-03-09,
-    )
-    _maybe(
-        go_repository,
-        name = "com_github_kylelemons_godebug",
-        commit = "9ff306d4fbead574800b66369df5b6144732d58e",
-        importpath = "github.com/kylelemons/godebug",
     )
     _maybe(
         go_repository,
