@@ -60,12 +60,6 @@ http_archive(
     urls = ["https://github.com/googleapis/googleapis/archive/143084a2624b6591ee1f9d23e7f5241856642f4d.zip"],
 )
 
-go_repository(
-    name = "com_github_bazelbuild_remote_apis",
-    importpath = "github.com/bazelbuild/remote-apis",
-    commit = "9e72daff42c941baaf43a4c370e2607a984c58a7", # 2020-12-09
-)
-
 load("@com_github_bazelbuild_remote_apis//:repository_rules.bzl", "switched_rules_by_language")
 
 switched_rules_by_language(
