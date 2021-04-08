@@ -1,13 +1,9 @@
 package filemetadata
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"sync/atomic"
-
-	"golang.org/x/sync/semaphore"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache"
 )
@@ -21,29 +17,11 @@ type fmCache struct {
 	Backend     *cache.Cache
 	cacheHits   uint64
 	cacheMisses uint64
-
-	// Semaphore to limit the number of parallel hash calculation.
-	computeSema *semaphore.Weighted
-}
-
-type Option func(c *fmCache)
-
-func MacConcurrentCompute(n int) Option {
-	return func(c *fmCache) {
-		c.computeSema = semaphore.NewWeighted(int64(n))
-	}
 }
 
 // NewSingleFlightCache returns a singleton-backed in-memory cache, with no validation.
-func NewSingleFlightCache(opts ...Option) Cache {
-	c := &fmCache{
-		Backend:     cache.GetInstance(),
-		computeSema: semaphore.NewWeighted(int64(runtime.NumCPU())),
-	}
-	for _, opt := range opts {
-		opt(c)
-	}
-	return c
+func NewSingleFlightCache() Cache {
+	return &fmCache{Backend: cache.GetInstance()}
 }
 
 // Get retrieves the metadata of the file with the given filename, whether from cache or by
@@ -110,11 +88,6 @@ func (c *fmCache) check() error {
 func (c *fmCache) loadMetadata(filename string) (*Metadata, bool, error) {
 	cacheHit := true
 	val, err := c.Backend.LoadOrStore(namespace, filename, func() (interface{}, error) {
-		if err := c.computeSema.Acquire(context.Background(), 1); err != nil {
-			return nil, err
-		}
-		defer c.computeSema.Release(1)
-
 		cacheHit = false
 		return Compute(filename), nil
 	})
