@@ -14,6 +14,7 @@ go_library(
     deps = [
         "//go/pkg/cache:go_default_library",
         "//go/pkg/digest:go_default_library",
+        "@org_golang_x_sync//semaphore:go_default_library",
     ],
 )
 
