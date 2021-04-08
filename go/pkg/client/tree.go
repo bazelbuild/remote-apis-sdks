@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -123,7 +126,7 @@ func preprocessSymlink(execRoot, symlinkNormDir string, meta *filemetadata.Symli
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs *concurrentFileSysNodeMap, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
 	if opts == nil {
 		opts = DefaultTreeSymlinkOpts()
 	}
@@ -159,25 +162,25 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 		return meta.Err
 	}
 	if t == command.FileInputType {
-		fs[normPath] = &fileSysNode{
+		fs.set(normPath, &fileSysNode{
 			file: &fileNode{
 				ue:           uploadinfo.EntryFromFile(meta.Digest, absPath),
 				isExecutable: meta.IsExecutable,
 			},
-		}
+		})
 		return nil
 	} else if t == command.SymlinkInputType {
 		relTarget, err := getTargetRelPath(execRoot, symlinkNormDir, meta.Symlink.Target)
 		if err != nil {
 			return err
 		}
-		fs[normPath] = &fileSysNode{
+		fs.set(normPath, &fileSysNode{
 			// We cannot directly use meta.Symlink.Target, because it could be
 			// an absolute path. Since the remote worker will map the exec root
 			// to a different directory, we must strip away the local exec root.
 			// See https://github.com/bazelbuild/remote-apis-sdks/pull/229#discussion_r524830458
 			symlink: &symlinkNode{target: relTarget},
-		}
+		})
 		if meta.Symlink.IsDangling || !opts.FollowsTarget {
 			return nil
 		}
@@ -190,21 +193,39 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs 
 	}
 
 	if len(files) == 0 {
-		fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+		fs.set(normPath, &fileSysNode{emptyDirectoryMarker: true})
 		return nil
 	}
+
+	var eg errgroup.Group
 	for _, f := range files {
-		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, cache, opts); e != nil {
-			return e
-		}
+		f := f
+		eg.Go(func() error {
+			return loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, cache, opts)
+		})
 	}
-	return nil
+	return eg.Wait()
+}
+
+type concurrentFileSysNodeMap struct {
+	mu sync.RWMutex
+	fs map[string]*fileSysNode
+}
+
+func (m *concurrentFileSysNodeMap) set(key string, fs *fileSysNode) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fs[key] = fs
 }
 
 // ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as uploadinfo.Entrys
 func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache filemetadata.Cache) (root digest.Digest, inputs []*uploadinfo.Entry, stats *TreeStats, err error) {
 	stats = &TreeStats{}
-	fs := make(map[string]*fileSysNode)
+
+	fs := concurrentFileSysNodeMap{
+		fs: make(map[string]*fileSysNode),
+	}
+
 	for _, i := range is.VirtualInputs {
 		if i.Path == "" {
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
@@ -216,25 +237,25 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 			return digest.Empty, nil, nil, err
 		}
 		if i.IsEmptyDirectory {
-			fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+			fs.set(normPath, &fileSysNode{emptyDirectoryMarker: true})
 			continue
 		}
-		fs[normPath] = &fileSysNode{
+		fs.set(normPath, &fileSysNode{
 			file: &fileNode{
 				ue:           uploadinfo.EntryFromBlob(i.Contents),
 				isExecutable: i.IsExecutable,
 			},
-		}
+		})
 	}
 	for _, i := range is.Inputs {
 		if i == "" {
 			return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
 		}
-		if e := loadFiles(execRoot, is.InputExclusions, i, fs, cache, c.TreeSymlinkOpts); e != nil {
+		if e := loadFiles(execRoot, is.InputExclusions, i, &fs, cache, c.TreeSymlinkOpts); e != nil {
 			return digest.Empty, nil, nil, e
 		}
 	}
-	ft := buildTree(fs)
+	ft := buildTree(fs.fs)
 	var blobs map[digest.Digest]*uploadinfo.Entry
 	root, blobs, err = packageTree(ft, stats)
 	if err != nil {
@@ -488,11 +509,13 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache f
 			continue
 		}
 		// A directory.
-		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, nil, "", fs, cache, c.TreeSymlinkOpts); e != nil {
+		fs := concurrentFileSysNodeMap{
+			fs: make(map[string]*fileSysNode),
+		}
+		if e := loadFiles(absPath, nil, "", &fs, cache, c.TreeSymlinkOpts); e != nil {
 			return nil, nil, e
 		}
-		ft := buildTree(fs)
+		ft := buildTree(fs.fs)
 
 		treePb := &repb.Tree{}
 		rootDir, childDirs, files, err := packageDirectories(ft)
