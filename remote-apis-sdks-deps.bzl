@@ -101,3 +101,9 @@ def remote_apis_sdks_go_deps():
         importpath = "github.com/mostynb/zstdpool-syncpool",
         tag = "v0.0.3",
     )
+    _maybe(
+        go_repository,
+        name = "com_github_karrick_godirwalk",
+        importpath = "github.com/karrick/godirwalk",
+        tag = "v1.16.1",
+    )
