@@ -3,8 +3,11 @@ package filemetadata
 
 import (
 	"os"
+	"runtime"
+	"sync"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/karrick/godirwalk"
 )
 
 // SymlinkMetadata contains details if the given path is a symlink.
@@ -20,7 +23,14 @@ type Metadata struct {
 	IsDirectory  bool
 	Err          error
 	Symlink      *SymlinkMetadata
+
+	Children []string
 }
+
+var (
+	childrenBuffer   []byte
+	childrenBufferMu sync.Mutex
+)
 
 // FileError is the error returned by the Compute function.
 type FileError struct {
@@ -74,6 +84,15 @@ func Compute(filename string) *Metadata {
 	md.IsExecutable = (mode & 0100) != 0
 	if mode.IsDir() {
 		md.IsDirectory = true
+		childrenBufferMu.Lock()
+		// Scratch buffer isn't used on windows.
+		if childrenBuffer == nil && runtime.GOOS != "windows" {
+			childrenBuffer = make([]byte, godirwalk.MinimumScratchBufferSize)
+		}
+		files, err := godirwalk.ReadDirnames(filename, childrenBuffer)
+		childrenBufferMu.Unlock()
+		md.Children = files
+		md.Err = err
 		return md
 	}
 	md.Digest, md.Err = digest.NewFromFile(filename)

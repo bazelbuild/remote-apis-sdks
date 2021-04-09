@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/karrick/godirwalk"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -122,9 +120,6 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 		opts = DefaultTreeSymlinkOpts()
 	}
 
-	// Only initialize if we read dirs.
-	var readDirScratchBuffer []byte
-
 	for len(filesToProcess) != 0 {
 		path := filesToProcess[0]
 		filesToProcess = filesToProcess[1:]
@@ -175,20 +170,11 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 				return meta.Err
 			}
 
-			if readDirScratchBuffer == nil && runtime.GOOS != "windows" {
-				readDirScratchBuffer = make([]byte, godirwalk.MinimumScratchBufferSize)
-			}
-
-			files, err := godirwalk.ReadDirnames(absPath, readDirScratchBuffer)
-			if err != nil {
-				return err
-			}
-
-			if len(files) == 0 {
+			if len(meta.Children) == 0 {
 				fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
 				continue
 			}
-			for _, f := range files {
+			for _, f := range meta.Children {
 				filesToProcess = append(filesToProcess, filepath.Join(normPath, f))
 			}
 		default:
