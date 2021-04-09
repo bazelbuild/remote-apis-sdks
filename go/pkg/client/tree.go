@@ -2,12 +2,15 @@ package client
 
 // This module provides functionality for constructing a Merkle tree of uploadable inputs.
 import (
+	"crypto"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -195,8 +198,57 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 	return nil
 }
 
+func makeKey(is *command.InputSpec) string {
+	h := crypto.SHA256.New()
+	sort.Strings(is.Inputs)
+	for _, s := range is.Inputs {
+		h.Write([]byte(s))
+	}
+	sort.Slice(is.VirtualInputs, func(i, j int) bool { return is.VirtualInputs[i].Path < is.VirtualInputs[j].Path })
+	for _, s := range is.VirtualInputs {
+		h.Write([]byte(s.Path))
+		h.Write(s.Contents)
+	}
+	arr := h.Sum(nil)
+	return hex.EncodeToString(arr[:])
+}
+
+type result struct {
+	root   digest.Digest
+	inputs []uploadinfo.Entry
+	stats  TreeStats
+	err    error
+}
+
+var treeCache map[string]result = map[string]result{}
+var treeCacheMu sync.RWMutex
+
 // ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as uploadinfo.Entrys
 func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache filemetadata.Cache) (root digest.Digest, inputs []*uploadinfo.Entry, stats *TreeStats, err error) {
+	cacheKey := makeKey(is)
+	treeCacheMu.RLock()
+	r, ok := treeCache[cacheKey]
+	treeCacheMu.RUnlock()
+	if ok {
+		inpCopy := []*uploadinfo.Entry{}
+		for _, i := range r.inputs {
+			newIn := i
+			inpCopy = append(inpCopy, &newIn)
+		}
+		return r.root, inpCopy, &r.stats, r.err
+	} else {
+		defer func() {
+			inpCopy := []uploadinfo.Entry{}
+			for _, i := range inputs {
+				newIn := *i
+				inpCopy = append(inpCopy, newIn)
+			}
+			treeCacheMu.Lock()
+			treeCache[cacheKey] = result{root, inpCopy, *stats, err}
+			treeCacheMu.Unlock()
+		}()
+	}
+
 	stats = &TreeStats{}
 	fs := make(map[string]*fileSysNode)
 	for _, i := range is.VirtualInputs {
