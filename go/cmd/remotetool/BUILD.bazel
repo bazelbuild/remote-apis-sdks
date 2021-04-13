@@ -6,6 +6,9 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/cmd/remotetool",
     visibility = ["//visibility:private"],
     deps = [
+        "//go/pkg/client:go_default_library",
+        "//go/pkg/command:go_default_library",
+        "//go/pkg/filemetadata:go_default_library",
         "//go/pkg/flags:go_default_library",
         "//go/pkg/outerr:go_default_library",
         "//go/pkg/tool:go_default_library",
