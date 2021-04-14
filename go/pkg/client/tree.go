@@ -4,7 +4,7 @@ package client
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -87,115 +87,120 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 	return false
 }
 
-// getTargetRelPath returns the part of the target relative to the symlink's
-// directory, iff the target is under execRoot. Otherwise it returns an error.
-func getTargetRelPath(execRoot, symlinkNormDir, target string) (string, error) {
-	symlinkAbsDir := filepath.Clean(filepath.Join(execRoot, symlinkNormDir))
-	if !filepath.IsAbs(target) {
-		target = filepath.Clean(filepath.Join(symlinkAbsDir, target))
+func getRelPath(base, path string) (string, error) {
+	rel, err := filepath.Rel(base, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("path %v is not under %v", path, base)
 	}
-	if _, err := getRelPath(execRoot, target); err != nil {
-		return "", err
-	}
-	return filepath.Rel(symlinkAbsDir, target)
+	return rel, nil
 }
 
-// preprocessSymlink returns two things: if the routine should continue, and if
-// there is an error to be reported back.
-func preprocessSymlink(execRoot, symlinkNormDir string, meta *filemetadata.SymlinkMetadata, opts *TreeSymlinkOpts) (bool, error) {
-	if meta.IsDangling {
-		// For now, we do not treat a dangling symlink as an error. In the case
-		// where the symlink is not preserved (i.e. needs to be converted to a
-		// file), we simply ignore this path in the finalized tree.
-		return opts.Preserved, nil
-	}
-	if !opts.Preserved {
-		// We will convert the symlink to a normal file, so it doesn't matter
-		// where target is under execRoot or not.
-		return true, nil
+// getTargetRelPath returns both the target's path relative to exec root
+// and relative to the symlink's dir, iff the target is under execRoot.
+// Otherwise it returns an error.
+func getTargetRelPath(execRoot, path string, symMeta *filemetadata.SymlinkMetadata) (relExecRoot string, relSymlinkDir string, err error) {
+	symlinkAbsDir := filepath.Join(execRoot, filepath.Dir(path))
+	target := symMeta.Target
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(symlinkAbsDir, target)
 	}
 
-	if _, err := getTargetRelPath(execRoot, symlinkNormDir, meta.Target); err != nil {
-		return false, err
+	relExecRoot, err = getRelPath(execRoot, target)
+	if err != nil {
+		return "", "", err
 	}
-	return true, nil
+
+	relSymlinkDir, err = filepath.Rel(symlinkAbsDir, target)
+	return relExecRoot, relSymlinkDir, err
 }
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, path string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
+func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
 	if opts == nil {
 		opts = DefaultTreeSymlinkOpts()
 	}
-	absPath := filepath.Clean(filepath.Join(execRoot, path))
-	meta := cache.Get(absPath)
-	isSymlink := meta.Symlink != nil
-	t := command.FileInputType
-	if isSymlink && opts.Preserved {
+
+	for len(filesToProcess) != 0 {
+		path := filesToProcess[0]
+		filesToProcess = filesToProcess[1:]
+
+		absPath := filepath.Join(execRoot, path)
+
+		meta := cache.Get(absPath)
+
+		normPath, err := getRelPath(execRoot, absPath)
+		if err != nil {
+			return err
+		}
+
+		switch {
 		// An implication of this is that, if a path is a symlink to a
 		// directory, then the symlink attribute takes precedence.
-		t = command.SymlinkInputType
-	} else if meta.IsDirectory {
-		t = command.DirectoryInputType
-	}
-	if shouldIgnore(absPath, t, excl) {
-		return nil
-	}
-	normPath, err := getRelPath(execRoot, absPath)
-	if err != nil {
-		return err
-	}
-	symlinkNormDir := ""
-	if isSymlink {
-		symlinkNormDir = filepath.Dir(normPath)
-		cont, err := preprocessSymlink(execRoot, symlinkNormDir, meta.Symlink, opts)
-		if err != nil {
-			return err
-		}
-		if !cont {
-			return nil
-		}
-	} else if meta.Err != nil {
-		return meta.Err
-	}
-	if t == command.FileInputType {
-		fs[normPath] = &fileSysNode{
-			file: &fileNode{
-				ue:           uploadinfo.EntryFromFile(meta.Digest, absPath),
-				isExecutable: meta.IsExecutable,
-			},
-		}
-		return nil
-	} else if t == command.SymlinkInputType {
-		relTarget, err := getTargetRelPath(execRoot, symlinkNormDir, meta.Symlink.Target)
-		if err != nil {
-			return err
-		}
-		fs[normPath] = &fileSysNode{
-			// We cannot directly use meta.Symlink.Target, because it could be
-			// an absolute path. Since the remote worker will map the exec root
-			// to a different directory, we must strip away the local exec root.
-			// See https://github.com/bazelbuild/remote-apis-sdks/pull/229#discussion_r524830458
-			symlink: &symlinkNode{target: relTarget},
-		}
-		if meta.Symlink.IsDangling || !opts.FollowsTarget {
-			return nil
-		}
-		return loadFiles(execRoot, excl, filepath.Clean(filepath.Join(symlinkNormDir, relTarget)), fs, cache, opts)
-	}
-	// Directory
-	files, err := ioutil.ReadDir(absPath)
-	if err != nil {
-		return err
-	}
+		case meta.Symlink != nil && meta.Symlink.IsDangling && !opts.Preserved:
+			// For now, we do not treat a dangling symlink as an error. In the case
+			// where the symlink is not preserved (i.e. needs to be converted to a
+			// file), we simply ignore this path in the finalized tree.
+			continue
+		case meta.Symlink != nil && opts.Preserved:
+			if shouldIgnore(absPath, command.SymlinkInputType, excl) {
+				continue
+			}
+			targetExecRoot, targetSymDir, err := getTargetRelPath(execRoot, normPath, meta.Symlink)
+			if err != nil {
+				return err
+			}
 
-	if len(files) == 0 {
-		fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
-		return nil
-	}
-	for _, f := range files {
-		if e := loadFiles(execRoot, excl, filepath.Join(normPath, f.Name()), fs, cache, opts); e != nil {
-			return e
+			fs[normPath] = &fileSysNode{
+				// We cannot directly use meta.Symlink.Target, because it could be
+				// an absolute path. Since the remote worker will map the exec root
+				// to a different directory, we must strip away the local exec root.
+				// See https://github.com/bazelbuild/remote-apis-sdks/pull/229#discussion_r524830458
+				symlink: &symlinkNode{target: targetSymDir},
+			}
+
+			if !meta.Symlink.IsDangling && opts.FollowsTarget {
+				// getTargetRelPath validates this target is under execRoot,
+				// and the iteration loop will get the relative path to execRoot,
+				filesToProcess = append(filesToProcess, targetExecRoot)
+			}
+		case meta.IsDirectory:
+			if shouldIgnore(absPath, command.DirectoryInputType, excl) {
+				continue
+			} else if meta.Err != nil {
+				return meta.Err
+			}
+
+			f, err := os.Open(absPath)
+			if err != nil {
+				return err
+			}
+
+			files, err := f.Readdirnames(-1)
+			if err != nil {
+				return err
+			}
+
+			if len(files) == 0 {
+				fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+				continue
+			}
+			for _, f := range files {
+				filesToProcess = append(filesToProcess, filepath.Join(normPath, f))
+			}
+		default:
+			if shouldIgnore(absPath, command.FileInputType, excl) {
+				continue
+			} else if meta.Err != nil {
+				return meta.Err
+			}
+
+			fs[normPath] = &fileSysNode{
+				file: &fileNode{
+					ue:           uploadinfo.EntryFromFile(meta.Digest, absPath),
+					isExecutable: meta.IsExecutable,
+				},
+			}
 		}
 	}
 	return nil
@@ -210,7 +215,7 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
 		}
 		path := i.Path
-		absPath := filepath.Clean(filepath.Join(execRoot, path))
+		absPath := filepath.Join(execRoot, path)
 		normPath, err := getRelPath(execRoot, absPath)
 		if err != nil {
 			return digest.Empty, nil, nil, err
@@ -226,13 +231,12 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 			},
 		}
 	}
-	for _, i := range is.Inputs {
-		if i == "" {
-			return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
-		}
-		if e := loadFiles(execRoot, is.InputExclusions, i, fs, cache, c.TreeSymlinkOpts); e != nil {
-			return digest.Empty, nil, nil, e
-		}
+
+	if len(is.Inputs) == 1 && is.Inputs[0] == "" {
+		return digest.Empty, nil, nil, errors.New("empty Input, use \".\" for entire exec root")
+	}
+	if e := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, c.TreeSymlinkOpts); e != nil {
+		return digest.Empty, nil, nil, e
 	}
 	ft := buildTree(fs)
 	var blobs map[digest.Digest]*uploadinfo.Entry
@@ -453,14 +457,6 @@ func packageDirectories(t *treeNode) (root *repb.Directory, children map[digest.
 	return root, children, files, nil
 }
 
-func getRelPath(base, path string) (string, error) {
-	rel, err := filepath.Rel(base, path)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path %v is not under %v", path, base)
-	}
-	return rel, nil
-}
-
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
 // The paths have to be relative to execRoot.
 // It also populates the remote ActionResult, packaging output directories as trees where required.
@@ -468,7 +464,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache f
 	outs := make(map[digest.Digest]*uploadinfo.Entry)
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {
-		absPath := filepath.Clean(filepath.Join(execRoot, path))
+		absPath := filepath.Join(execRoot, path)
 		normPath, err := getRelPath(execRoot, absPath)
 		if err != nil {
 			return nil, nil, err
@@ -489,7 +485,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache f
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, nil, "", fs, cache, c.TreeSymlinkOpts); e != nil {
+		if e := loadFiles(absPath, nil, []string{""}, fs, cache, c.TreeSymlinkOpts); e != nil {
 			return nil, nil, e
 		}
 		ft := buildTree(fs)
