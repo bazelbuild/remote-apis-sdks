@@ -40,7 +40,7 @@ type Server struct {
 }
 
 // NewServer creates a server that is ready to accept requests.
-func NewServer(t *testing.T) (s *Server, err error) {
+func NewServer(t testing.TB) (s *Server, err error) {
 	cas := NewCAS()
 	ac := NewActionCache()
 	s = &Server{Exec: NewExec(t, ac, cas), CAS: cas, ActionCache: ac}
@@ -84,13 +84,13 @@ type TestEnv struct {
 	Client   *rexec.Client
 	Server   *Server
 	ExecRoot string
-	t        *testing.T
+	t        testing.TB
 }
 
 // NewTestEnv initializes a TestEnv containing a fake server, a client connected to it,
 // and a temporary directory used as execution root for inputs and outputs.
 // It returns the new env and a cleanup function that should be called in the end of the test.
-func NewTestEnv(t *testing.T) (*TestEnv, func()) {
+func NewTestEnv(t testing.TB) (*TestEnv, func()) {
 	t.Helper()
 	// Set up temp directory.
 	execRoot, err := ioutil.TempDir("", strings.ReplaceAll(t.Name(), string(filepath.Separator), "_"))

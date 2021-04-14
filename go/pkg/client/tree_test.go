@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1571,5 +1572,43 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on tree children:\n%s", diff)
 			}
 		})
+	}
+}
+
+func randomBytes(randGen *rand.Rand, n int) []byte {
+	b := make([]byte, n)
+	randGen.Read(b)
+	return b
+}
+
+func BenchmarkComputeMerkleTree(b *testing.B) {
+	e, cleanup := fakes.NewTestEnv(b)
+	defer cleanup()
+
+	randGen := rand.New(rand.NewSource(0))
+	construct(e.ExecRoot, []*inputPath{
+		{path: "a", fileContents: randomBytes(randGen, 2048)},
+		{path: "b", fileContents: randomBytes(randGen, 9999)},
+		{path: "c", fileContents: randomBytes(randGen, 1024)},
+		{path: "d/a", fileContents: randomBytes(randGen, 4444)},
+		{path: "d/b", fileContents: randomBytes(randGen, 7491)},
+		{path: "d/c", emptyDir: true},
+		{path: "d/d/a", fileContents: randomBytes(randGen, 5912)},
+		{path: "d/d/b", fileContents: randomBytes(randGen, 9157)},
+		{path: "d/d/c", isSymlink: true, symlinkTarget: "../../b"},
+		{path: "d/d/d", fileContents: randomBytes(randGen, 5381)},
+	})
+
+	inputSpec := &command.InputSpec{
+		Inputs: []string{"a", "b", "c", "d/a", "d/b", "d/c", "d/d/a", "d/d/b", "d/d/c", "d/d/d"},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fmc := filemetadata.NewSingleFlightCache()
+		_, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(e.ExecRoot, inputSpec, fmc)
+		if err != nil {
+			b.Errorf("Failed to compute merkle tree: %v", err)
+		}
 	}
 }

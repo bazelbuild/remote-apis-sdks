@@ -38,13 +38,13 @@ type Exec struct {
 	// Number of Execute calls.
 	numExecCalls int
 	// Used for errors.
-	t *testing.T
+	t testing.TB
 	// The digest of the fake action.
 	adg digest.Digest
 }
 
 // NewExec returns a new empty Exec.
-func NewExec(t *testing.T, ac *ActionCache, cas *CAS) *Exec {
+func NewExec(t testing.TB, ac *ActionCache, cas *CAS) *Exec {
 	c := &Exec{t: t, ac: ac, cas: cas}
 	c.Clear()
 	return c
