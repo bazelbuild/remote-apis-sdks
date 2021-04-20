@@ -34,6 +34,12 @@ type Client struct {
 // ClientConfig is a config for Client.
 // See DefaultClientConfig() for the default values.
 type ClientConfig struct {
+	// The connection to RBE to use.
+	// Overrides DialParams.
+	Conn *grpc.ClientConn
+
+	// Parameters to create a connection.
+	// Ignored if Conn is not nill.
 	DialParams client.DialParams
 
 	// TODO(nodir): add conifg values here.
@@ -57,8 +63,11 @@ func DefaultClientConfig() ClientConfig {
 
 // Validate returns a non-nil error if the config is invalid.
 func (c *ClientConfig) Validate() error {
-	if c.DialParams.Service == "" {
-		return errors.Errorf("DialParams.Service is unspecified")
+	if c.Conn == nil {
+		// Validate DialParams only if Conn is not specified.
+		if c.DialParams.Service == "" {
+			return errors.Errorf("DialParams.Service is unspecified")
+		}
 	}
 
 	return nil
@@ -78,9 +87,12 @@ func NewClientWithConfig(ctx context.Context, instanceName string, config Client
 		return nil, errors.Wrap(err, "invalid config")
 	}
 
-	conn, err := client.Dial(ctx, config.DialParams.Service, config.DialParams)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to dial")
+	conn := config.Conn
+	if conn == nil {
+		var err error
+		if conn, err = client.Dial(ctx, config.DialParams.Service, config.DialParams); err != nil {
+			return nil, errors.Wrap(err, "failed to dial")
+		}
 	}
 
 	client := &Client{

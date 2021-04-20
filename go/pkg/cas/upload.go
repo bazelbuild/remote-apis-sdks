@@ -9,6 +9,8 @@ import "context"
 type UploadInput struct {
 	// Path to the file or a directory to upload.
 	// If empty, the Content is uploaded instead.
+	//
+	// Must be absolute or relative to CWD.
 	Path string
 
 	// Contents to upload.
