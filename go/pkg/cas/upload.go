@@ -13,11 +13,11 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 // It can be either a reference to a file/dir (see Path) or it can be an
 // in-memory blob (see Content).
 type UploadInput struct {
-	// Path is the file or a directory to upload.
+	// Path to the file or a directory to upload.
 	// If empty, the Content is uploaded instead.
 	Path string
 
-	// Content is the contents to upload.
+	// Contents to upload.
 	// Ignored if Path is not empty.
 	Content []byte
 
