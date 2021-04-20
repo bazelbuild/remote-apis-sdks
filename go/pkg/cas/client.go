@@ -42,7 +42,7 @@ type ClientConfig struct {
 
 	// Parameters to create a connection.
 	// Ignored if Conn is not nill.
-	DialParams client.DialParams
+	DialParams *client.DialParams
 
 	// TODO(nodir): add conifg values here.
 	// TODO(nodir): add per-RPC timeouts.
@@ -57,7 +57,7 @@ type ClientConfig struct {
 //   client, err := NewClientWithConfig(ctx, cfg)
 func DefaultClientConfig() ClientConfig {
 	return ClientConfig{
-		DialParams: client.DialParams{
+		DialParams: &client.DialParams{
 			Service: "remotebuildexecution.googleapis.com:443",
 		},
 	}
@@ -67,7 +67,10 @@ func DefaultClientConfig() ClientConfig {
 func (c *ClientConfig) Validate() error {
 	if c.Conn == nil {
 		// Validate DialParams only if Conn is not specified.
-		if c.DialParams.Service == "" {
+		switch {
+		case c.DialParams == nil:
+			return errors.Errorf("DialParams is unspecified")
+		case c.DialParams.Service == "":
 			return errors.Errorf("DialParams.Service is unspecified")
 		}
 	}
@@ -90,9 +93,13 @@ func NewClientWithConfig(ctx context.Context, instanceName string, config Client
 	}
 
 	conn := config.Conn
-	if conn == nil {
+	if conn != nil {
+		// Forcefully clear DialParams to avoid possible confusion in runtime
+		// by having both Conn and DialParams set in Client.ClientConfig.
+		config.DialParams = nil
+	} else {
 		var err error
-		if conn, err = client.Dial(ctx, config.DialParams.Service, config.DialParams); err != nil {
+		if conn, err = client.Dial(ctx, config.DialParams.Service, *config.DialParams); err != nil {
 			return nil, errors.Wrap(err, "failed to dial")
 		}
 	}
