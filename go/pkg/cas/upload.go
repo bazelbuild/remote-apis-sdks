@@ -2,12 +2,6 @@ package cas
 
 import "context"
 
-// Upload uploads all inputs. It exits when inputC is closed or ctx is canceled.
-func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats *TransferStats, err error) {
-	// TODO(nodir): implement.
-	panic("not implemented")
-}
-
 // UploadInput is one of inputs to Client.Upload function.
 //
 // It can be either a reference to a file/dir (see Path) or it can be an
@@ -39,4 +33,10 @@ type TransferStats struct {
 type DigestStat struct {
 	Digests int64 // number of unique digests
 	Bytes   int64 // total sum of of digest sizes
+}
+
+// Upload uploads all inputs. It exits when inputC is closed or ctx is canceled.
+func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats *TransferStats, err error) {
+	// TODO(nodir): implement.
+	panic("not implemented")
 }
