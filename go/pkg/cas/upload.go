@@ -10,8 +10,8 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 
 // UploadInput is one of inputs to Client.Upload function.
 //
-// It can be either a reference to a file (see Path) or an in-memory blob (see
-// Content).
+// It can be either a reference to a file/dir (see Path) or it can be an
+// in-memory blob (see Content).
 type UploadInput struct {
 	// Path is the file or a directory to upload.
 	// If empty, the Content is uploaded instead.

@@ -1,4 +1,4 @@
-// Package cas implements efficient client for Content Addressable Storage.
+// Package cas implements an efficient client for Content Addressable Storage.
 package cas
 
 import (
