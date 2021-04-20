@@ -20,10 +20,10 @@ import (
 //
 // All fields are considered immutable, and should not be changed.
 type Client struct {
-	// InstanceName is the full name of the RBE instance.
+	// The full name of the RBE instance.
 	InstanceName string
 
-	// ClientConfig is the configuration that the client was created with.
+	// The configuration that the client was created with.
 	ClientConfig
 
 	conn       *grpc.ClientConn
