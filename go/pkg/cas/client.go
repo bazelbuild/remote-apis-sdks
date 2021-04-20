@@ -9,7 +9,6 @@ import (
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
@@ -20,13 +19,13 @@ import (
 //
 // All fields are considered immutable, and should not be changed.
 type Client struct {
+	conn *grpc.ClientConn
 	// The full name of the RBE instance.
 	InstanceName string
 
 	// The configuration that the client was created with.
 	ClientConfig
 
-	conn       *grpc.ClientConn
 	byteStream bspb.ByteStreamClient
 	cas        repb.ContentAddressableStorageClient
 }
@@ -34,16 +33,6 @@ type Client struct {
 // ClientConfig is a config for Client.
 // See DefaultClientConfig() for the default values.
 type ClientConfig struct {
-	// The connection to RBE to use.
-	//
-	// WARNING: setting this field overrides DialParams completely - DialParams
-	// will be ignored.
-	Conn *grpc.ClientConn
-
-	// Parameters to create a connection.
-	// Ignored if Conn is not nill.
-	DialParams *client.DialParams
-
 	// TODO(nodir): add conifg values here.
 	// TODO(nodir): add per-RPC timeouts.
 	// TODO(nodir): add retries.
@@ -56,52 +45,29 @@ type ClientConfig struct {
 //   ... mutate cfg ...
 //   client, err := NewClientWithConfig(ctx, cfg)
 func DefaultClientConfig() ClientConfig {
-	return ClientConfig{
-		DialParams: &client.DialParams{
-			Service: "remotebuildexecution.googleapis.com:443",
-		},
-	}
+	return ClientConfig{}
 }
 
 // Validate returns a non-nil error if the config is invalid.
 func (c *ClientConfig) Validate() error {
-	if c.Conn == nil {
-		// Validate DialParams only if Conn is not specified.
-		switch {
-		case c.DialParams == nil:
-			return errors.Errorf("DialParams is unspecified")
-		case c.DialParams.Service == "":
-			return errors.Errorf("DialParams.Service is unspecified")
-		}
-	}
-
 	return nil
 }
 
 // NewClient creates a new client with the default configuration.
-func NewClient(ctx context.Context, instanceName string) (*Client, error) {
-	return NewClientWithConfig(ctx, instanceName, DefaultClientConfig())
+// Use client.Dial to create a connection.
+func NewClient(ctx context.Context, conn *grpc.ClientConn, instanceName string) (*Client, error) {
+	return NewClientWithConfig(ctx, conn, instanceName, DefaultClientConfig())
 }
 
 // NewClientWithConfig creates a new client and accepts a configuration.
-func NewClientWithConfig(ctx context.Context, instanceName string, config ClientConfig) (*Client, error) {
-	if instanceName == "" {
-		return nil, fmt.Errorf("instance name is unspecified")
-	}
-	if err := config.Validate(); err != nil {
+func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceName string, config ClientConfig) (*Client, error) {
+	switch err := config.Validate(); {
+	case err != nil:
 		return nil, errors.Wrap(err, "invalid config")
-	}
-
-	conn := config.Conn
-	if conn != nil {
-		// Forcefully clear DialParams to avoid possible confusion in runtime
-		// by having both Conn and DialParams set in Client.ClientConfig.
-		config.DialParams = nil
-	} else {
-		var err error
-		if conn, err = client.Dial(ctx, config.DialParams.Service, *config.DialParams); err != nil {
-			return nil, errors.Wrap(err, "failed to dial")
-		}
+	case conn == nil:
+		return nil, fmt.Errorf("conn is unspecified")
+	case instanceName == "":
+		return nil, fmt.Errorf("instance name is unspecified")
 	}
 
 	client := &Client{
