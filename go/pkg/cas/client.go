@@ -35,7 +35,9 @@ type Client struct {
 // See DefaultClientConfig() for the default values.
 type ClientConfig struct {
 	// The connection to RBE to use.
-	// Overrides DialParams.
+	//
+	// WARNING: setting this field overrides DialParams completely - DialParams
+	// will be ignored.
 	Conn *grpc.ClientConn
 
 	// Parameters to create a connection.
