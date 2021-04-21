@@ -70,7 +70,7 @@ func DefaultClientConfig() ClientConfig {
 		// https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-queue-depth
 		FSConcurrency: 64,
 
-		SmallFileThreshold: 1024 * 1024, // 1MiB
+		SmallFileThreshold: 1024 * 1024,       // 1MiB
 		LargeFileThreshold: 256 * 1024 * 1024, // 256MiB
 
 		// GCE docs recommend 4MB IO size for large files.
