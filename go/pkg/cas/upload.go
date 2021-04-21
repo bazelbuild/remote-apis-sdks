@@ -45,7 +45,7 @@ type UploadInput struct {
 	// TODO(nodir): add PreserveSymlinks.
 }
 
-// FilePredicate is a condition for a file.
+// FilePredicate is a condition for a file/dir.
 type FilePredicate func(absName string, mode os.FileMode) bool
 
 // TransferStats is upload/download statistics.

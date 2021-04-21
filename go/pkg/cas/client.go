@@ -46,8 +46,8 @@ type ClientConfig struct {
 	SmallFileThreshold int64
 
 	// If a file is larger than or equal to this threshold, then it is considered
-	// large. Large file IO concurrency limits are much tighter than other files,
-	// and locality is prioritized: the file is read for the first and second
+	// large. For such files, IO concurrency limits are much tighter and
+	// locality is prioritized: the file is read for the first and second
 	// times with minimal delay between the two.
 	LargeFileThreshold int64
 
@@ -70,12 +70,12 @@ func DefaultClientConfig() ClientConfig {
 		// https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-queue-depth
 		FSConcurrency: 64,
 
-		SmallFileThreshold: 1024 * 1024,
-		LargeFileThreshold: 256 * 1024 * 1024,
+		SmallFileThreshold: 1024 * 1024, // 1MiB
+		LargeFileThreshold: 256 * 1024 * 1024, // 256MiB
 
 		// GCE docs recommend 4MB IO size for large files.
 		// https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-size
-		FileIOSize: 4 * 1024 * 1024,
+		FileIOSize: 4 * 1024 * 1024, // 4MiB
 	}
 }
 
