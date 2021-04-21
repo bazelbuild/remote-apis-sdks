@@ -3,7 +3,6 @@ package cas
 import (
 	"context"
 	"io/ioutil"
-	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -43,15 +42,6 @@ func TestFS(t *testing.T) {
 		},
 	})
 
-	rootWithoutAItem := uploadItemFromDirMsg(absRoot, &repb.Directory{
-		Files: []*repb.FileNode{
-			{Name: "b", Digest: bItem.Digest},
-		},
-		Directories: []*repb.DirectoryNode{
-			{Name: "subdir", Digest: subdirItem.Digest},
-		},
-	})
-
 	mediumItem := uploadItemFromBlob(filepath.Join(absTestData, "medium-dir", "medium"), []byte("medium"))
 	mediumDirItem := uploadItemFromDirMsg(filepath.Join(absTestData, "medium-dir"), &repb.Directory{
 		Files: []*repb.FileNode{{
@@ -79,25 +69,6 @@ func TestFS(t *testing.T) {
 			desc:                "medium",
 			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "medium-dir")}}, // relative path
 			wantScheduledChecks: []*uploadItem{mediumDirItem, mediumItem},
-		},
-		{
-			desc: "FilePredicate for descendants",
-			inputs: []*UploadInput{{
-				Path: filepath.Join("testdata", "root"),
-				Predicate: func(absName string, mode os.FileMode) bool {
-					return filepath.Base(absName) != "a"
-				},
-			}},
-			wantScheduledChecks: []*uploadItem{rootWithoutAItem, bItem, subdirItem, cItem},
-		},
-		{
-			desc: "FilePredicate for root",
-			inputs: []*UploadInput{{
-				Path: filepath.Join("testdata", "root"),
-				Predicate: func(absName string, mode os.FileMode) bool {
-					return filepath.Base(absName) != "root"
-				},
-			}},
 		},
 	}
 

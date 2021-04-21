@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"sync"
 
@@ -35,11 +34,7 @@ type UploadInput struct {
 	// Ignored if Path is not empty.
 	Content []byte
 
-	// If not nil and returns false for a file, then it is not uploaded.
-	//
-	// The function participates in a cache key, so try to reuse the same functions.
-	Predicate FilePredicate
-
+	// TODO(nodir): add Predicate.
 	// TODO(nodir): add AllowDanglingSymlinks
 	// TODO(nodir): add PreserveSymlinks.
 }
@@ -72,7 +67,7 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 		Client: c,
 		eg:     eg,
 
-		fsCache: map[fsCacheKey]*fsCacheValue{},
+		fsCache: map[string]*fsCacheValue{},
 		fsSem:   semaphore.NewWeighted(int64(c.FSConcurrency)),
 	}
 
@@ -113,7 +108,7 @@ type uploader struct {
 	// TODO(nodir): consider sync.Map.
 	muFsCache sync.Mutex
 	// fsCache contains already-processed files.
-	fsCache map[fsCacheKey]*fsCacheValue
+	fsCache map[string]*fsCacheValue
 
 	// fsSem controls concurrency of file IO.
 	// TODO(nodir): ensure it does not hurt streaming.
@@ -142,19 +137,8 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		return errors.Wrapf(err, "lstat failed")
 	}
 
-	// visitFile below assumes the file passes the predicate, so evaluate it here.
-	if in.Predicate != nil && !in.Predicate(absPath, info.Mode()) {
-		return nil
-	}
-
-	_, err = u.visitFile(ctx, absPath, info, in.Predicate)
+	_, err = u.visitFile(ctx, absPath, info)
 	return err
-}
-
-// fsCacheKey is the key type for uploader.fsCache.
-type fsCacheKey struct {
-	AbsPath      string
-	PredicatePtr uintptr
 }
 
 // fsCacheValue is the value type for uploader.fsCache.
@@ -166,22 +150,21 @@ type fsCacheValue struct {
 
 // visitFile visits the file/dir depending on its type (regular, dir, symlink).
 // Visits each file only once per predicate function.
-func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo, predicate FilePredicate) (dirEntry interface{}, err error) {
-	cacheKey := fsCacheKey{AbsPath: absPath, PredicatePtr: reflect.ValueOf(predicate).Pointer()}
+func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo) (dirEntry interface{}, err error) {
 	u.muFsCache.Lock()
-	e, ok := u.fsCache[cacheKey]
+	e, ok := u.fsCache[absPath]
 	if !ok {
 		e = &fsCacheValue{}
-		u.fsCache[cacheKey] = e
+		u.fsCache[absPath] = e
 	}
 	u.muFsCache.Unlock()
 
 	e.compute.Do(func() {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			e.node, e.err = u.visitSymlink(ctx, absPath, predicate)
+			e.node, e.err = u.visitSymlink(ctx, absPath)
 		case info.Mode().IsDir():
-			e.node, e.err = u.visitDir(ctx, absPath, predicate)
+			e.node, e.err = u.visitDir(ctx, absPath)
 		case info.Mode().IsRegular():
 			e.node, e.err = u.visitRegularFile(ctx, absPath, info)
 		default:
@@ -289,7 +272,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 // visitDir reads a directory and its descendants, subject to the
 // predicate. The function blocks until each descendant is visited, but the
 // visitation happens concurrently, using u.eg.
-func (u *uploader) visitDir(ctx context.Context, absPath string, predicate FilePredicate) (*repb.DirectoryNode, error) {
+func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.DirectoryNode, error) {
 	var mu sync.Mutex
 	dir := &repb.Directory{}
 	var subErr error
@@ -322,13 +305,10 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, predicate FileP
 			for _, info := range infos {
 				info := info
 				absChild := filepath.Join(absPath, info.Name())
-				if predicate != nil && !predicate(absChild, info.Mode()) {
-					continue
-				}
 				wg.Add(1)
 				u.eg.Go(func() error {
 					defer wg.Done()
-					node, err := u.visitFile(ctx, absChild, info, predicate)
+					node, err := u.visitFile(ctx, absChild, info)
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil {
@@ -374,7 +354,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, predicate FileP
 
 // visitSymlink converts a symlink to a SymlinkNode and schedules visitation
 // of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, absPath string, predicate FilePredicate) (*repb.SymlinkNode, error) {
+func (u *uploader) visitSymlink(ctx context.Context, absPath string) (*repb.SymlinkNode, error) {
 	// TODO(nodir): implement
 	panic("not supported")
 }
