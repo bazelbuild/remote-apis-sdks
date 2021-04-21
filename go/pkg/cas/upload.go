@@ -305,7 +305,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 
 			for _, info := range infos {
 				info := info
-				absChild := filepath.Join(absPath, info.Name())
+				absChild := joinFilePathsFast(absPath, info.Name())
 				wg.Add(1)
 				u.eg.Go(func() error {
 					defer wg.Done()
@@ -413,4 +413,12 @@ func uploadItemFromBlob(title string, blob []byte) *uploadItem {
 		item.Title = fmt.Sprintf("digest %s/%d", item.Digest.Hash, item.Digest.SizeBytes)
 	}
 	return item
+}
+
+const pathSep = string(filepath.Separator)
+
+// joinFilePathsFast is a faster version of filepath.Join because it does not
+// call filepath.Clean.
+func joinFilePathsFast(a, b string) string {
+	return a + pathSep + b
 }

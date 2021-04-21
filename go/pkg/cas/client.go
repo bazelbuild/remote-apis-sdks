@@ -48,8 +48,7 @@ type ClientConfig struct {
 	// LargeFileThreshold is a size threshold to categorize a file as large. For
 	// such files, IO concurrency limits are much tighter and locality is
 	// prioritized: the file is read for the first and second times with minimal
-	// delay between
-	// the two.
+	// delay between the two.
 	LargeFileThreshold int64
 
 	// FileIOSize is the size of file reads.
