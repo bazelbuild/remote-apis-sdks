@@ -28,12 +28,32 @@ type Client struct {
 
 	byteStream bspb.ByteStreamClient
 	cas        repb.ContentAddressableStorageClient
+
+	// Mockable functions.
+
+	testScheduleCheck func(ctx context.Context, item *uploadItem) error
 }
 
 // ClientConfig is a config for Client.
 // See DefaultClientConfig() for the default values.
 type ClientConfig struct {
-	// TODO(nodir): add conifg values here.
+	// Maximum number of concurrent file system operations.
+	// TODO(nodir): ensure this does not hurt streaming performance
+	FSConcurrency int
+
+	// If a file is smaller than or equal to this threshold, then it is buffered
+	// entirely (read only once).
+	SmallFileThreshold int64
+
+	// If a file is larger than or equal to this threshold, then it is considered
+	// large. For such files, IO concurrency limits are much tighter and
+	// locality is prioritized: the file is read for the first and second
+	// times with minimal delay between the two.
+	LargeFileThreshold int64
+
+	// The size of file reads.
+	FileIOSize int64
+
 	// TODO(nodir): add per-RPC timeouts.
 	// TODO(nodir): add retries.
 }
@@ -45,12 +65,39 @@ type ClientConfig struct {
 //   ... mutate cfg ...
 //   client, err := NewClientWithConfig(ctx, cfg)
 func DefaultClientConfig() ClientConfig {
-	return ClientConfig{}
+	return ClientConfig{
+		// GCE docs recommend at least 32 concurrent IOs.
+		// https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-queue-depth
+		FSConcurrency: 64,
+
+		SmallFileThreshold: 1024 * 1024, // 1MiB
+		LargeFileThreshold: 256 * 1024 * 1024, // 256MiB
+
+		// GCE docs recommend 4MB IO size for large files.
+		// https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-size
+		FileIOSize: 4 * 1024 * 1024, // 4MiB
+	}
 }
 
 // Validate returns a non-nil error if the config is invalid.
 func (c *ClientConfig) Validate() error {
-	return nil
+	switch {
+	case c.FSConcurrency <= 0:
+		return fmt.Errorf("FSConcurrency must be positive")
+
+	case c.SmallFileThreshold <= 0:
+		return fmt.Errorf("SmallFileThreshold must not be negative")
+	case c.LargeFileThreshold < 0:
+		return fmt.Errorf("LargeFileThreshold must be positive")
+	case c.SmallFileThreshold >= c.LargeFileThreshold:
+		return fmt.Errorf("SmallFileThreshold must be smaller than LargeFileThreshold")
+
+	case c.FileIOSize <= 0:
+		return fmt.Errorf("FileIOSize must be positive")
+
+	default:
+		return nil
+	}
 }
 
 // NewClient creates a new client with the default configuration.
