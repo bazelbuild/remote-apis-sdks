@@ -27,7 +27,7 @@ func newByteReader(content []byte) *byteReader {
 }
 
 func (r *byteReader) Seek(offset int64, whence int) (int64, error) {
-	if offset != 0 || whence != io.SeekCurrent {
+	if offset != 0 || whence != io.SeekStart {
 		return 0, fmt.Errorf("unsupported")
 	}
 	r.Reader = bytes.NewReader(r.content)

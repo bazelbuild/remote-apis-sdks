@@ -105,7 +105,7 @@ type uploader struct {
 	stats TransferStats
 
 	// muFsCache protects fsCache.
-	// TODO(nodir): consider sync.Map.
+	// TODO(nodir): consider sync.Map and sync.RWMutex.
 	muFsCache sync.Mutex
 	// fsCache contains already-processed files.
 	fsCache map[string]*fsCacheValue
@@ -251,6 +251,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		// file ASAP.
 		// Also we are not going to use BatchUploads anyway, so we can take
 		// advantage of ByteStream's built-in presence check.
+		// https://github.com/bazelbuild/remote-apis/blob/0cd22f7b466ced15d7803e8845d08d3e8d2c51bc/build/bazel/remote/execution/v2/remote_execution.proto#L250-L254
 
 		item.Open = func() (readSeekCloser, error) {
 			_, err := f.Seek(0, io.SeekStart)
@@ -324,6 +325,8 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 					case *repb.SymlinkNode:
 						dir.Symlinks = append(dir.Symlinks, node)
 					default:
+						// This condition is impossible because all functions in this file
+						// return one of the three types above.
 						panic("impossible")
 					}
 					return nil

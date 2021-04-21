@@ -87,9 +87,9 @@ func (c *ClientConfig) Validate() error {
 	case c.FSConcurrency <= 0:
 		return fmt.Errorf("FSConcurrency must be positive")
 
-	case c.SmallFileThreshold <= 0:
-		return fmt.Errorf("SmallFileThreshold must not be negative")
-	case c.LargeFileThreshold < 0:
+	case c.SmallFileThreshold < 0:
+		return fmt.Errorf("SmallFileThreshold must be non-negative")
+	case c.LargeFileThreshold <= 0:
 		return fmt.Errorf("LargeFileThreshold must be positive")
 	case c.SmallFileThreshold >= c.LargeFileThreshold:
 		return fmt.Errorf("SmallFileThreshold must be smaller than LargeFileThreshold")
