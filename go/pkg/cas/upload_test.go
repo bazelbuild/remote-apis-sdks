@@ -119,13 +119,7 @@ func TestFS(t *testing.T) {
 			client.SmallFileThreshold = 5
 			client.LargeFileThreshold = 10
 
-			inputC := make(chan *UploadInput, 1)
-			for _, in := range tc.inputs {
-				inputC <- in
-			}
-			close(inputC)
-
-			if _, err := client.Upload(ctx, inputC); err != nil {
+			if _, err := client.Upload(ctx, inputChanFrom(tc.inputs...)); err != nil {
 				t.Fatalf("failed to upload: %s", err)
 			}
 
@@ -155,4 +149,13 @@ func mustReadAll(item *uploadItem) []byte {
 		panic(err)
 	}
 	return data
+}
+
+func inputChanFrom(inputs ...*UploadInput) chan *UploadInput {
+	inputC := make(chan *UploadInput, 1)
+	for _, in := range inputs {
+		inputC <- in
+	}
+	close(inputC)
+	return inputC
 }
