@@ -2,7 +2,6 @@ package cas
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -46,7 +45,7 @@ type UploadInput struct {
 }
 
 // FilePredicate is a condition for a file/dir.
-type FilePredicate func(absName string, mode os.FileMode) bool
+type FilePredicate func(absPath string, mode os.FileMode) bool
 
 // TransferStats is upload/download statistics.
 type TransferStats struct {
@@ -73,7 +72,8 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 		Client: c,
 		eg:     eg,
 
-		fsSem: semaphore.NewWeighted(int64(c.FSConcurrency)),
+		fsCache: map[fsCacheKey]*fsCacheValue{},
+		fsSem:   semaphore.NewWeighted(int64(c.FSConcurrency)),
 	}
 
 	// Start processing input.
@@ -86,7 +86,7 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 				if !ok {
 					return nil
 				}
-				u.eg.Go(func() error {
+				eg.Go(func() error {
 					return errors.Wrapf(u.startProcessing(ctx, in), "%q", in.Path)
 				})
 			}
@@ -109,13 +109,16 @@ type uploader struct {
 	eg    *errgroup.Group
 	stats TransferStats
 
-	// already-processed files.
-	// Types fsCacheKey and fsCacheValue are used for keys/values respectively.
-	fsCache sync.Map
-	// controls concurrency of file IO.
+	// muFsCache protects fsCache.
+	// TODO(nodir): consider sync.Map.
+	muFsCache sync.Mutex
+	// fsCache contains already-processed files.
+	fsCache map[fsCacheKey]*fsCacheValue
+
+	// fsSem controls concurrency of file IO.
 	// TODO(nodir): ensure it does not hurt streaming.
 	fsSem *semaphore.Weighted
-	// ensures only one large file is read at a time.
+	// muLargeFile ensures only one large file is read at a time.
 	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
 	muLargeFile sync.Mutex
 }
@@ -130,13 +133,13 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 	// Compute the absolute path only once per directory tree.
 	absPath, err := filepath.Abs(in.Path)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to get absolute path")
 	}
 
 	// Do not use os.Stat() here. We want to know if it is a symlink.
 	info, err := os.Lstat(absPath)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "lstat failed")
 	}
 
 	// visitFile below assumes the file passes the predicate, so evaluate it here.
@@ -150,36 +153,42 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 
 // fsCacheKey is the key type for uploader.fsCache.
 type fsCacheKey struct {
-	AbsName      string
+	AbsPath      string
 	PredicatePtr uintptr
 }
 
 // fsCacheValue is the value type for uploader.fsCache.
 type fsCacheValue struct {
-	compute  sync.Once
-	dirEntry proto.Message // *repb.FileNode, *repb.DirectoryNode or *repb.SymlinkNode.
-	err      error
+	compute sync.Once
+	node    proto.Message // *repb.FileNode, *repb.DirectoryNode or *repb.SymlinkNode.
+	err     error
 }
 
 // visitFile visits the file/dir depending on its type (regular, dir, symlink).
 // Visits each file only once per predicate function.
-func (u *uploader) visitFile(ctx context.Context, absName string, info os.FileInfo, predicate FilePredicate) (dirEntry interface{}, err error) {
-	cacheKey := fsCacheKey{AbsName: absName, PredicatePtr: reflect.ValueOf(predicate).Pointer()}
-	entryRaw, _ := u.fsCache.LoadOrStore(cacheKey, &fsCacheValue{})
-	e := entryRaw.(*fsCacheValue)
+func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo, predicate FilePredicate) (dirEntry interface{}, err error) {
+	cacheKey := fsCacheKey{AbsPath: absPath, PredicatePtr: reflect.ValueOf(predicate).Pointer()}
+	u.muFsCache.Lock()
+	e, ok := u.fsCache[cacheKey]
+	if !ok {
+		e = &fsCacheValue{}
+		u.fsCache[cacheKey] = e
+	}
+	u.muFsCache.Unlock()
+
 	e.compute.Do(func() {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			e.dirEntry, e.err = u.visitSymlink(ctx, absName, predicate)
+			e.node, e.err = u.visitSymlink(ctx, absPath, predicate)
 		case info.Mode().IsDir():
-			e.dirEntry, e.err = u.visitDir(ctx, absName, predicate)
+			e.node, e.err = u.visitDir(ctx, absPath, predicate)
 		case info.Mode().IsRegular():
-			e.dirEntry, e.err = u.visitRegularFile(ctx, absName, info)
+			e.node, e.err = u.visitRegularFile(ctx, absPath, info)
 		default:
 			e.err = fmt.Errorf("unexpected file mode %s", info.Mode())
 		}
 	})
-	return e.dirEntry, e.err
+	return e.node, e.err
 }
 
 // visitRegularFile computes the hash of a regular file and schedules a presence
@@ -201,7 +210,7 @@ func (u *uploader) visitFile(ctx context.Context, absName string, info os.FileIn
 //    network disks. Reading many large files concurrently appears to saturate
 //    the network and slows down the progress.
 //    See also ClientConfig.LargeFileThreshold.
-func (u *uploader) visitRegularFile(ctx context.Context, absName string, info os.FileInfo) (*repb.FileNode, error) {
+func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os.FileInfo) (*repb.FileNode, error) {
 	isLarge := info.Size() >= u.LargeFileThreshold
 
 	// Lock the mutex before acquiring a semaphore to avoid hogging the latter.
@@ -216,7 +225,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absName string, info os
 	}
 	defer u.fsSem.Release(1)
 
-	f, err := os.Open(absName)
+	f, err := os.Open(absPath)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +233,6 @@ func (u *uploader) visitRegularFile(ctx context.Context, absName string, info os
 
 	ret := &repb.FileNode{
 		Name:         info.Name(),
-		Digest:       &repb.Digest{SizeBytes: info.Size()},
 		IsExecutable: (info.Mode() & 0100) != 0,
 	}
 
@@ -234,7 +242,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absName string, info os
 		if err != nil {
 			return nil, err
 		}
-		item := uploadItemFromBlob(absName, contents)
+		item := uploadItemFromBlob(absPath, contents)
 		ret.Digest = item.Digest
 		return ret, u.scheduleCheck(ctx, item)
 	}
@@ -242,16 +250,16 @@ func (u *uploader) visitRegularFile(ctx context.Context, absName string, info os
 	// It is a medium or large file.
 
 	// Compute the hash.
-	h := digest.HashFn.New()
 	// TODO(nodir): reuse the buffer.
 	buf := make([]byte, u.FileIOSize)
-	if _, err := io.CopyBuffer(h, f, buf); err != nil {
-		return nil, err
+	dig, err := digest.NewFromReaderWithBuffer(f, buf)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to compute hash")
 	}
-	ret.Digest.Hash = hex.EncodeToString(h.Sum(nil))
+	ret.Digest = dig.ToProto()
 
 	item := &uploadItem{
-		Title:  absName,
+		Title:  absPath,
 		Digest: ret.Digest,
 	}
 
@@ -270,10 +278,10 @@ func (u *uploader) visitRegularFile(ctx context.Context, absName string, info os
 	}
 
 	// Schedule a check and close the file (in defer).
-	// item.open will reopen the file.
+	// item.Open will reopen the file.
 
 	item.Open = func() (readSeekCloser, error) {
-		return os.Open(absName)
+		return os.Open(absPath)
 	}
 	return ret, u.scheduleCheck(ctx, item)
 }
@@ -281,7 +289,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absName string, info os
 // visitDir reads a directory and its descendants, subject to the
 // predicate. The function blocks until each descendant is visited, but the
 // visitation happens concurrently, using u.eg.
-func (u *uploader) visitDir(ctx context.Context, absName string, predicate FilePredicate) (*repb.DirectoryNode, error) {
+func (u *uploader) visitDir(ctx context.Context, absPath string, predicate FilePredicate) (*repb.DirectoryNode, error) {
 	var mu sync.Mutex
 	dir := &repb.Directory{}
 	var subErr error
@@ -295,7 +303,7 @@ func (u *uploader) visitDir(ctx context.Context, absName string, predicate FileP
 		}
 		defer u.fsSem.Release(1)
 
-		f, err := os.Open(absName)
+		f, err := os.Open(absPath)
 		if err != nil {
 			return err
 		}
@@ -313,7 +321,7 @@ func (u *uploader) visitDir(ctx context.Context, absName string, predicate FileP
 
 			for _, info := range infos {
 				info := info
-				absChild := filepath.Join(absName, info.Name())
+				absChild := filepath.Join(absPath, info.Name())
 				if predicate != nil && !predicate(absChild, info.Mode()) {
 					continue
 				}
@@ -351,22 +359,22 @@ func (u *uploader) visitDir(ctx context.Context, absName string, predicate FileP
 	// Wait for children.
 	wg.Wait()
 	if subErr != nil {
-		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", absName)
+		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", absPath)
 	}
 
-	item := uploadItemFromDirMsg(absName, dir)
+	item := uploadItemFromDirMsg(absPath, dir)
 	if err := u.scheduleCheck(ctx, item); err != nil {
 		return nil, err
 	}
 	return &repb.DirectoryNode{
-		Name:   filepath.Base(absName),
+		Name:   filepath.Base(absPath),
 		Digest: item.Digest,
 	}, nil
 }
 
 // visitSymlink converts a symlink to a SymlinkNode and schedules visitation
 // of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, absName string, predicate FilePredicate) (*repb.SymlinkNode, error) {
+func (u *uploader) visitSymlink(ctx context.Context, absPath string, predicate FilePredicate) (*repb.SymlinkNode, error) {
 	// TODO(nodir): implement
 	panic("not supported")
 }
@@ -419,7 +427,7 @@ func uploadItemFromBlob(title string, blob []byte) *uploadItem {
 		},
 	}
 	if item.Title == "" {
-		item.Title = fmt.Sprintf("blob %s", item.Digest.Hash)
+		item.Title = fmt.Sprintf("digest %s/%d", item.Digest.Hash, item.Digest.SizeBytes)
 	}
 	return item
 }

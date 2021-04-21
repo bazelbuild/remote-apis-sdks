@@ -18,7 +18,7 @@ func TestFS(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	absTestData, err := filepath.Abs(filepath.Join("testdata"))
+	absTestData, err := filepath.Abs("testdata")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestFS(t *testing.T) {
 		{
 			desc:                "blob",
 			inputs:              []*UploadInput{{Content: []byte("foo")}},
-			wantScheduledChecks: []*uploadItem{uploadItemFromBlob("blob 2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae", []byte("foo"))},
+			wantScheduledChecks: []*uploadItem{uploadItemFromBlob("digest 2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae/3", []byte("foo"))},
 		},
 		{
 			desc:                "medium",
@@ -98,7 +98,6 @@ func TestFS(t *testing.T) {
 					return filepath.Base(absName) != "root"
 				},
 			}},
-			wantScheduledChecks: nil,
 		},
 	}
 
@@ -152,7 +151,7 @@ func mustReadAll(item *uploadItem) []byte {
 }
 
 func inputChanFrom(inputs ...*UploadInput) chan *UploadInput {
-	inputC := make(chan *UploadInput, 1)
+	inputC := make(chan *UploadInput, len(inputs))
 	for _, in := range inputs {
 		inputC <- in
 	}
