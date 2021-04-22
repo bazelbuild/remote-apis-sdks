@@ -147,8 +147,16 @@ func NewFromFile(path string) (Digest, error) {
 // NewFromReader computes a file digest from a reader.
 // It returns an error if there was a problem reading the file.
 func NewFromReader(r io.Reader) (Digest, error) {
+	// 32KiB is the buffer size used by io.Copy.
+	return NewFromReaderWithBuffer(r, make([]byte, 32*1024))
+}
+
+// NewFromReaderWithBuffer computes a file digest from a reader, using the
+// given buffer.
+// It returns an error if there was a problem reading the file.
+func NewFromReaderWithBuffer(r io.Reader, buf []byte) (Digest, error) {
 	h := HashFn.New()
-	size, err := io.Copy(h, r)
+	size, err := io.CopyBuffer(h, r, buf)
 	if err != nil {
 		return Empty, err
 	}
