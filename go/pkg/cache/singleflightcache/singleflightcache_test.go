@@ -66,44 +66,15 @@ func TestSingleFlightStore(t *testing.T) {
 
 func TestValFnFailure(t *testing.T) {
 	c := &Cache{}
-	val, err := c.LoadOrStore(key1, func() (interface{}, error) { return nil, errors.New("error") })
+	fnErr := errors.New("error")
+	val, err := c.LoadOrStore(key1, func() (interface{}, error) { return nil, fnErr })
 	if err == nil {
 		t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
 	}
 
 	val, err = c.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
-	if err != nil {
-		t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
-	}
-	if val != val1 {
-		t.Errorf("LoadOrStore(%v) loaded wrong value: got %v, want %v", key1, val, val1)
-	}
-}
-
-func TestValFnMultipleFailure(t *testing.T) {
-	c := &Cache{}
-
-	wg := &sync.WaitGroup{}
-	want := errors.New("error")
-	var ops uint64
-	load := func() {
-		_, got := c.LoadOrStore(key1, func() (interface{}, error) {
-			atomic.AddUint64(&ops, 1)
-			return nil, want
-		})
-		if want != got {
-			t.Errorf("LoadOrStore(%v) = _,%v, want _,%v", key1, got, want)
-		}
-		wg.Done()
-	}
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go load()
-	}
-	wg.Wait()
-
-	if ops != 50 {
-		t.Errorf("Wrong number of loads executed: got %v, want 50", ops)
+	if err != fnErr {
+		t.Errorf("LoadOrStore(%v) didn't fail: (%v, %v)", key1, val, err)
 	}
 }
 
@@ -170,9 +141,7 @@ func TestStore(t *testing.T) {
 	var mu sync.Mutex
 	load := func() {
 		mu.Lock()
-		if err := c.Store(key3, val3); err != nil {
-			t.Errorf("Store(%v) failed: %v", key3, err)
-		}
+		c.Store(key3, val3)
 		// LoadOrStore should load the already loaded value "val3" and shouldn't
 		// overwrite "val1" to "key3".
 		val, err := c.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
@@ -210,9 +179,7 @@ func TestStoreOverwrite(t *testing.T) {
 		t.Errorf("LoadOrStore(%v) = %v, want %v", key3, val, val1)
 	}
 
-	if err := c.Store(key3, val3); err != nil {
-		t.Errorf("Store(%v) failed: %v", key3, err)
-	}
+	c.Store(key3, val3)
 
 	// LoadOrStore should load the already loaded value "val3" and shouldn't
 	// overwrite "val1" to "key3".

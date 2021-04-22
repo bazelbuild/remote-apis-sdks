@@ -51,7 +51,8 @@ func (c *fmCache) Delete(filename string) error {
 	if err != nil {
 		return err
 	}
-	return c.Backend.Delete(namespace, abs)
+	c.Backend.Delete(namespace, abs)
+	return nil
 }
 
 // Update updates the cache entry for the filename with the given value.
@@ -60,12 +61,13 @@ func (c *fmCache) Update(filename string, cacheEntry *Metadata) error {
 	if err != nil {
 		return err
 	}
-	return c.Backend.Store(namespace, absFilename, cacheEntry)
+	c.Backend.Store(namespace, absFilename, cacheEntry)
+	return nil
 }
 
 // Reset clears the cache.
 func (c *fmCache) Reset() {
-	c.Backend.Reset()
+	c.Backend.Reset(namespace)
 }
 
 // GetCacheHits returns the number of cache hits.
