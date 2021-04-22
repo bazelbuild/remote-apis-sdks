@@ -324,7 +324,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 					default:
 						// This condition is impossible because all functions in this file
 						// return one of the three types above.
-						panic("impossible")
+						panic(fmt.Sprintf("unexpected node type %T", node))
 					}
 					return nil
 				})
