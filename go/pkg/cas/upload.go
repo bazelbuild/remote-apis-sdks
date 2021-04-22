@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache/singleflightcache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -64,8 +65,7 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 		Client: c,
 		eg:     eg,
 
-		fsCache: map[string]*fsCacheValue{},
-		fsSem:   semaphore.NewWeighted(int64(c.FSConcurrency)),
+		fsSem: semaphore.NewWeighted(int64(c.FSConcurrency)),
 	}
 
 	// Start processing input.
@@ -101,11 +101,8 @@ type uploader struct {
 	eg    *errgroup.Group
 	stats TransferStats
 
-	// muFsCache protects fsCache.
-	// TODO(nodir): consider sync.Map and sync.RWMutex.
-	muFsCache sync.Mutex
 	// fsCache contains already-processed files.
-	fsCache map[string]*fsCacheValue
+	fsCache singleflightcache.Cache
 
 	// fsSem controls concurrency of file IO.
 	// TODO(nodir): ensure it does not hurt streaming.
@@ -138,37 +135,21 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 	return err
 }
 
-// fsCacheValue is the value type for uploader.fsCache.
-type fsCacheValue struct {
-	compute sync.Once
-	node    proto.Message // *repb.FileNode, *repb.DirectoryNode or *repb.SymlinkNode.
-	err     error
-}
-
 // visitFile visits the file/dir depending on its type (regular, dir, symlink).
 // Visits each file only once.
 func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo) (dirEntry interface{}, err error) {
-	u.muFsCache.Lock()
-	e, ok := u.fsCache[absPath]
-	if !ok {
-		e = &fsCacheValue{}
-		u.fsCache[absPath] = e
-	}
-	u.muFsCache.Unlock()
-
-	e.compute.Do(func() {
+	return u.fsCache.LoadOrStore(absPath, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			e.node, e.err = u.visitSymlink(ctx, absPath)
+			return u.visitSymlink(ctx, absPath)
 		case info.Mode().IsDir():
-			e.node, e.err = u.visitDir(ctx, absPath)
+			return u.visitDir(ctx, absPath)
 		case info.Mode().IsRegular():
-			e.node, e.err = u.visitRegularFile(ctx, absPath, info)
+			return u.visitRegularFile(ctx, absPath, info)
 		default:
-			e.err = fmt.Errorf("unexpected file mode %s", info.Mode())
+			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
 		}
 	})
-	return e.node, e.err
 }
 
 // visitRegularFile computes the hash of a regular file and schedules a presence
