@@ -39,9 +39,6 @@ type UploadInput struct {
 	// TODO(nodir): add PreserveSymlinks.
 }
 
-// FilePredicate is a condition for a file/dir.
-type FilePredicate func(absPath string, mode os.FileMode) bool
-
 // TransferStats is upload/download statistics.
 type TransferStats struct {
 	CacheHits   DigestStat
@@ -149,7 +146,7 @@ type fsCacheValue struct {
 }
 
 // visitFile visits the file/dir depending on its type (regular, dir, symlink).
-// Visits each file only once per predicate function.
+// Visits each file only once.
 func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo) (dirEntry interface{}, err error) {
 	u.muFsCache.Lock()
 	e, ok := u.fsCache[absPath]
@@ -270,9 +267,9 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	return ret, u.scheduleCheck(ctx, item)
 }
 
-// visitDir reads a directory and its descendants, subject to the
-// predicate. The function blocks until each descendant is visited, but the
-// visitation happens concurrently, using u.eg.
+// visitDir reads a directory and its descendants. The function blocks until
+// each descendant is visited, but the visitation happens concurrently, using
+// u.eg.
 func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.DirectoryNode, error) {
 	var mu sync.Mutex
 	dir := &repb.Directory{}
