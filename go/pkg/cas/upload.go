@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/api/support/bundler"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache/singleflightcache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -68,8 +70,30 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 		fsSem: semaphore.NewWeighted(int64(c.FSConcurrency)),
 	}
 
+	// Initialize checkBundler, which checks if a blob is present on the server.
+	u.checkBundler = bundler.NewBundler(&uploadItem{}, func(items interface{}) {
+		// Handle errors and context cancelation via errgroup.
+		eg.Go(func() error {
+			return u.check(ctx, items.([]*uploadItem))
+		})
+	})
+	// Given that all digests are small (no more than 40 bytes), the count limit
+	// is the bottleneck.
+	// We might run into the request size limits only if we have >100K digests.
+	u.checkBundler.BundleCountThreshold = u.FindMissingBlobsBatchSize
+
 	// Start processing input.
 	eg.Go(func() error {
+		// Before exiting this main goroutine, ensure all the work has been completed.
+		// Just waiting for u.eg isn't enough because some work may be temporarily
+		// in a bundler.
+		defer func() {
+			u.wgFS.Wait()
+
+			// checkBundler can be flushed only after FS walk is done.
+			u.checkBundler.Flush()
+		}()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -78,9 +102,9 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 				if !ok {
 					return nil
 				}
-				eg.Go(func() error {
-					return errors.Wrapf(u.startProcessing(ctx, in), "%q", in.Path)
-				})
+				if err := u.startProcessing(ctx, in); err != nil {
+					return err
+				}
 			}
 		}
 	})
@@ -101,6 +125,8 @@ type uploader struct {
 	eg    *errgroup.Group
 	stats TransferStats
 
+	// wgFS is used to wait for all FS walking to finish.
+	wgFS sync.WaitGroup
 	// fsCache contains already-processed files.
 	fsCache singleflightcache.Cache
 
@@ -110,6 +136,11 @@ type uploader struct {
 	// muLargeFile ensures only one large file is read at a time.
 	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
 	muLargeFile sync.Mutex
+
+	// checkBundler bundles digests that need to be checked for presence on the
+	// server.
+	checkBundler *bundler.Bundler
+	seenDigests  sync.Map // TODO: consider making it more global
 }
 
 // startProcessing adds the item to the appropriate stage depending on its type.
@@ -119,20 +150,26 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		return u.scheduleCheck(ctx, uploadItemFromBlob("", in.Content))
 	}
 
-	// Compute the absolute path only once per directory tree.
-	absPath, err := filepath.Abs(in.Path)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get absolute path")
-	}
+	// Schedule a file system walk.
+	u.wgFS.Add(1)
+	u.eg.Go(func() error {
+		defer u.wgFS.Done()
+		// Compute the absolute path only once per directory tree.
+		absPath, err := filepath.Abs(in.Path)
+		if err != nil {
+			return errors.Wrapf(err, "failed to get absolute path")
+		}
 
-	// Do not use os.Stat() here. We want to know if it is a symlink.
-	info, err := os.Lstat(absPath)
-	if err != nil {
-		return errors.Wrapf(err, "lstat failed")
-	}
+		// Do not use os.Stat() here. We want to know if it is a symlink.
+		info, err := os.Lstat(absPath)
+		if err != nil {
+			return errors.Wrapf(err, "lstat failed")
+		}
 
-	_, err = u.visitFile(ctx, absPath, info)
-	return err
+		_, err = u.visitFile(ctx, absPath, info)
+		return err
+	})
+	return nil
 }
 
 // visitFile visits the file/dir depending on its type (regular, dir, symlink).
@@ -255,7 +292,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 	var mu sync.Mutex
 	dir := &repb.Directory{}
 	var subErr error
-	var wg sync.WaitGroup
+	var wgChildren sync.WaitGroup
 
 	// This sub-function exist to avoid holding the semaphore while waiting for
 	// children.
@@ -284,9 +321,11 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 			for _, info := range infos {
 				info := info
 				absChild := joinFilePathsFast(absPath, info.Name())
-				wg.Add(1)
+				wgChildren.Add(1)
+				u.wgFS.Add(1)
 				u.eg.Go(func() error {
-					defer wg.Done()
+					defer wgChildren.Done()
+					defer u.wgFS.Done()
 					node, err := u.visitFile(ctx, absChild, info)
 					mu.Lock()
 					defer mu.Unlock()
@@ -317,8 +356,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 		return nil, err
 	}
 
-	// Wait for children.
-	wg.Wait()
+	wgChildren.Wait()
 	if subErr != nil {
 		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", absPath)
 	}
@@ -352,6 +390,56 @@ type uploadItem struct {
 func (u *uploader) scheduleCheck(ctx context.Context, item *uploadItem) error {
 	if u.testScheduleCheck != nil {
 		return u.testScheduleCheck(ctx, item)
+	}
+
+	// Do not check the same digest twice.
+	cacheKey := digest.NewFromProtoUnvalidated(item.Digest)
+	if _, ok := u.seenDigests.LoadOrStore(cacheKey, struct{}{}); ok {
+		return nil
+	}
+	return u.checkBundler.AddWait(ctx, item, 0)
+}
+
+// check checks which items are present on the server, and schedules upload for
+// the missing ones.
+func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
+	req := &repb.FindMissingBlobsRequest{
+		InstanceName: u.InstanceName,
+		BlobDigests:  make([]*repb.Digest, len(items)),
+	}
+	byDigest := make(map[digest.Digest]*uploadItem, len(items))
+	totalBytes := int64(0)
+	for i, item := range items {
+		req.BlobDigests[i] = item.Digest
+		byDigest[digest.NewFromProtoUnvalidated(item.Digest)] = item
+		totalBytes += item.Digest.SizeBytes
+	}
+
+	// TODO(nodir): add retries.
+	// TODO(nodir): add per-RPC timeouts.
+	res, err := u.cas.FindMissingBlobs(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	missingBytes := int64(0)
+	for _, d := range res.MissingBlobDigests {
+		missingBytes += d.SizeBytes
+		item := byDigest[digest.NewFromProtoUnvalidated(d)]
+		if err := u.scheduleUpload(ctx, item); err != nil {
+			return err
+		}
+	}
+	atomic.AddInt64(&u.stats.CacheMisses.Digests, int64(len(res.MissingBlobDigests)))
+	atomic.AddInt64(&u.stats.CacheMisses.Bytes, missingBytes)
+	atomic.AddInt64(&u.stats.CacheHits.Digests, int64(len(items)-len(res.MissingBlobDigests)))
+	atomic.AddInt64(&u.stats.CacheHits.Bytes, totalBytes-missingBytes)
+	return nil
+}
+
+func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
+	if u.testScheduleUpload != nil {
+		return u.testScheduleUpload(ctx, item)
 	}
 
 	// TODO(nodir): implement.

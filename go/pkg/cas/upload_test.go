@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	"google.golang.org/grpc"
+
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
@@ -103,6 +105,76 @@ func TestFS(t *testing.T) {
 	}
 }
 
+func TestChecks(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	var mu sync.Mutex
+	var gotDigestChecks []*repb.Digest
+	var gotRequestSizes []int
+	var gotScheduleUploadCalls []*uploadItem
+	cas := &fakeCAS{
+		findMissingBlobs: func(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			gotDigestChecks = append(gotDigestChecks, in.BlobDigests...)
+			gotRequestSizes = append(gotRequestSizes, len(in.BlobDigests))
+			return &repb.FindMissingBlobsResponse{MissingBlobDigests: in.BlobDigests[:1]}, nil
+		},
+	}
+	client := &Client{
+		InstanceName: "projects/p/instances/i",
+		ClientConfig: DefaultClientConfig(),
+		cas:          cas,
+		testScheduleUpload: func(ctx context.Context, item *uploadItem) error {
+			mu.Lock()
+			defer mu.Unlock()
+			gotScheduleUploadCalls = append(gotScheduleUploadCalls, item)
+			return nil
+		},
+	}
+	client.FindMissingBlobsBatchSize = 2
+
+	inputC := inputChanFrom(
+		&UploadInput{Content: []byte("a")},
+		&UploadInput{Content: []byte("b")},
+		&UploadInput{Content: []byte("c")},
+		&UploadInput{Content: []byte("d")},
+	)
+	if _, err := client.Upload(ctx, inputC); err != nil {
+		t.Fatalf("failed to upload: %s", err)
+	}
+
+	wantDigestChecks := []*repb.Digest{
+		{Hash: "18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4", SizeBytes: 1},
+		{Hash: "2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6", SizeBytes: 1},
+		{Hash: "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d", SizeBytes: 1},
+		{Hash: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", SizeBytes: 1},
+	}
+	sort.Slice(gotDigestChecks, func(i, j int) bool {
+		return gotDigestChecks[i].Hash < gotDigestChecks[j].Hash
+	})
+	if diff := cmp.Diff(wantDigestChecks, gotDigestChecks); diff != "" {
+		t.Error(diff)
+	}
+	if diff := cmp.Diff([]int{2, 2}, gotRequestSizes); diff != "" {
+		t.Error(diff)
+	}
+
+	wantDigestUploads := []string{
+		"2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6", // c
+		"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", // a
+	}
+	gotDigestUploads := make([]string, len(gotScheduleUploadCalls))
+	for i, req := range gotScheduleUploadCalls {
+		gotDigestUploads[i] = req.Digest.Hash
+	}
+	sort.Strings(gotDigestUploads)
+	if diff := cmp.Diff(wantDigestUploads, gotDigestUploads); diff != "" {
+		t.Error(diff)
+	}
+}
+
 func compareUploadItems(x, y *uploadItem) bool {
 	return x.Title == y.Title &&
 		proto.Equal(x.Digest, y.Digest) &&
@@ -128,4 +200,13 @@ func inputChanFrom(inputs ...*UploadInput) chan *UploadInput {
 	}
 	close(inputC)
 	return inputC
+}
+
+type fakeCAS struct {
+	repb.ContentAddressableStorageClient
+	findMissingBlobs func(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error)
+}
+
+func (c *fakeCAS) FindMissingBlobs(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error) {
+	return c.findMissingBlobs(ctx, in, opts...)
 }
