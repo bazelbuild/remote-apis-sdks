@@ -25,11 +25,6 @@ func (c *Cache) Reset(ns string) {
 	c.caches.Delete(ns)
 }
 
-// ResetAll resets the cache.
-func (c *Cache) ResetAll() {
-	*c = Cache{}
-}
-
 func (c *Cache) getNSCache(ns string) *singleflightcache.Cache {
 	// Load first to avoid instantiating a new cache for LoadOrStore.
 	nsCache, ok := c.caches.Load(ns)
