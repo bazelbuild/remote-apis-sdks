@@ -56,7 +56,9 @@ func TestFS(t *testing.T) {
 		}},
 	})
 
-	withSymlinksItemPreserved := uploadItemFromDirMsg(filepath.Join(absTestData, "with-symlinks"), &repb.Directory{
+	putSymlink(t, filepath.Join(tmpDir, "with-symlinks", "file"), filepath.Join("..", "root", "a"))
+	putSymlink(t, filepath.Join(tmpDir, "with-symlinks", "dir"), filepath.Join("..", "root", "subdir"))
+	withSymlinksItemPreserved := uploadItemFromDirMsg(filepath.Join(tmpDir, "with-symlinks"), &repb.Directory{
 		Symlinks: []*repb.SymlinkNode{
 			{
 				Name:   "file",
@@ -69,7 +71,7 @@ func TestFS(t *testing.T) {
 		},
 	})
 
-	withSymlinksItemNotPreserved := uploadItemFromDirMsg(filepath.Join(absTestData, "with-symlinks"), &repb.Directory{
+	withSymlinksItemNotPreserved := uploadItemFromDirMsg(filepath.Join(tmpDir, "with-symlinks"), &repb.Directory{
 		Files: []*repb.FileNode{
 			{Name: "a", Digest: aItem.Digest},
 		},
@@ -78,7 +80,8 @@ func TestFS(t *testing.T) {
 		},
 	})
 
-	withDanglingSymlinksItem := uploadItemFromDirMsg(filepath.Join(absTestData, "with-dangling-symlink"), &repb.Directory{
+	putSymlink(t, filepath.Join(tmpDir, "with-dangling-symlink", "dangling"), "non-existent")
+	withDanglingSymlinksItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "with-dangling-symlink"), &repb.Directory{
 		Symlinks: []*repb.SymlinkNode{
 			{Name: "dangling", Target: "non-existent"},
 		},
@@ -107,22 +110,22 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc:                "symlinks-preserved",
-			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "with-symlinks"), PreserveSymlinks: true}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks"), PreserveSymlinks: true}},
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
 		},
 		{
 			desc:                "symlinks-not-preserved",
-			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "with-symlinks")}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
 		},
 		{
 			desc:                "dangling-symlinks-disallow",
-			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "with-dangling-symlinks")}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
 			expectedErrContains: "no such file or directory",
 		},
 		{
 			desc:                "dangling-symlinks-allow",
-			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "with-dangling-symlink"), PreserveSymlinks: true, AllowDanglingSymlinks: true}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink"), PreserveSymlinks: true, AllowDanglingSymlinks: true}},
 			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
 		},
 	}
@@ -279,6 +282,15 @@ func putFile(t *testing.T, path, contents string) {
 		t.Fatal(err)
 	}
 	if err := ioutil.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func putSymlink(t *testing.T, path, target string) {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
 		t.Fatal(err)
 	}
 }
