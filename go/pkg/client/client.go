@@ -618,7 +618,6 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 		cas:                           regrpc.NewContentAddressableStorageClient(casConn),
 		execution:                     regrpc.NewExecutionClient(conn),
 		operations:                    opgrpc.NewOperationsClient(conn),
-		rpcTimeouts:                   DefaultRPCTimeouts,
 		Connection:                    conn,
 		CASConnection:                 casConn,
 		CompressedBytestreamThreshold: DefaultCompressedBytestreamThreshold,
@@ -665,6 +664,9 @@ func (d RPCTimeouts) Apply(c *Client) {
 	c.rpcTimeouts = map[string]time.Duration(d)
 }
 
+// DefaultRPCTimeouts are timeouts for each RPCs.
+//
+// Deprecated: specify appropriate timeout in each application.
 var DefaultRPCTimeouts = map[string]time.Duration{
 	"default":          20 * time.Second,
 	"GetCapabilities":  5 * time.Second,
