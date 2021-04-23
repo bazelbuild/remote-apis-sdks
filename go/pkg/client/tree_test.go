@@ -135,11 +135,6 @@ func (c *callCountingMetadataCache) Update(path string, ce *filemetadata.Metadat
 	return c.cache.Update(path, ce)
 }
 
-func (c *callCountingMetadataCache) Reset() {
-	c.t.Helper()
-	c.cache.Reset()
-}
-
 func (c *callCountingMetadataCache) GetCacheHits() uint64 {
 	return 0
 }

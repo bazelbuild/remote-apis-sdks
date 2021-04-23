@@ -10,6 +10,7 @@ import (
 
 // Cache is a cache that supports single-flight value computation.
 type Cache struct {
+	mu    sync.RWMutex // protects `store` field itself
 	store sync.Map
 }
 
@@ -23,6 +24,8 @@ type entry struct {
 // to store instead of the value directly. It ensures that the function is only executed once for
 // concurrent callers of the LoadOrStore function.
 func (c *Cache) LoadOrStore(key interface{}, valFn func() (interface{}, error)) (interface{}, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	eUntyped, _ := c.store.LoadOrStore(key, &entry{})
 	e := eUntyped.(*entry)
 	e.compute.Do(func() {
@@ -35,6 +38,8 @@ func (c *Cache) LoadOrStore(key interface{}, valFn func() (interface{}, error)) 
 // Store accepts a value instead of a valFn since it is intended to be only used in
 // cases where updates are lightweight and do not involve computing the cache value.
 func (c *Cache) Store(key interface{}, val interface{}) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	e := &entry{val: val}
 	e.compute.Do(func() {}) // mark as computed
 	c.store.Store(key, e)
@@ -42,5 +47,14 @@ func (c *Cache) Store(key interface{}, val interface{}) {
 
 // Delete removes a key from the cache.
 func (c *Cache) Delete(key interface{}) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	c.store.Delete(key)
+}
+
+// Reset invalidates all cache entries.
+func (c *Cache) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.store = sync.Map{}
 }
