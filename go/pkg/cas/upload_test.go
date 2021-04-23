@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	"github.com/golang/protobuf/proto"
@@ -153,6 +155,7 @@ func TestFS(t *testing.T) {
 			client.AllowDanglingSymlinks = tc.allowDanglingSymlinks
 			client.SmallFileThreshold = 5
 			client.LargeFileThreshold = 10
+			client.init()
 
 			_, err := client.Upload(ctx, inputChanFrom(tc.inputs...))
 			if tc.wantErr != nil {
@@ -175,35 +178,49 @@ func TestFS(t *testing.T) {
 	}
 }
 
-func TestChecks(t *testing.T) {
+func TestSmallBlobs(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
 	var mu sync.Mutex
 	var gotDigestChecks []*repb.Digest
-	var gotRequestSizes []int
-	var gotScheduleUploadCalls []*uploadItem
+	var gotDigestCheckRequestSizes []int
+	var gotUploadBlobReqs []*repb.BatchUpdateBlobsRequest_Request
+	failCBlob := true // blob "c" is uploaded below.
 	cas := &fakeCAS{
 		findMissingBlobs: func(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			gotDigestChecks = append(gotDigestChecks, in.BlobDigests...)
-			gotRequestSizes = append(gotRequestSizes, len(in.BlobDigests))
+			gotDigestCheckRequestSizes = append(gotDigestCheckRequestSizes, len(in.BlobDigests))
 			return &repb.FindMissingBlobsResponse{MissingBlobDigests: in.BlobDigests[:1]}, nil
+		},
+		batchUpdateBlobs: func(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
+			mu.Lock()
+			defer mu.Unlock()
+
+			gotUploadBlobReqs = append(gotUploadBlobReqs, in.Requests...)
+
+			res := &repb.BatchUpdateBlobsResponse{
+				Responses: make([]*repb.BatchUpdateBlobsResponse_Response, len(in.Requests)),
+			}
+			for i, r := range in.Requests {
+				res.Responses[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest}
+				if string(r.Data) == "c" && failCBlob {
+					res.Responses[i].Status = status.New(codes.Internal, "internal retrible error").Proto()
+					failCBlob = false
+				}
+			}
+			return res, nil
 		},
 	}
 	client := &Client{
 		InstanceName: "projects/p/instances/i",
 		ClientConfig: DefaultClientConfig(),
 		cas:          cas,
-		testScheduleUpload: func(ctx context.Context, item *uploadItem) error {
-			mu.Lock()
-			defer mu.Unlock()
-			gotScheduleUploadCalls = append(gotScheduleUploadCalls, item)
-			return nil
-		},
 	}
 	client.FindMissingBlobsBatchSize = 2
+	client.init()
 
 	inputC := inputChanFrom(
 		&UploadInput{Content: []byte("a")},
@@ -227,20 +244,29 @@ func TestChecks(t *testing.T) {
 	if diff := cmp.Diff(wantDigestChecks, gotDigestChecks, cmp.Comparer(proto.Equal)); diff != "" {
 		t.Error(diff)
 	}
-	if diff := cmp.Diff([]int{2, 2}, gotRequestSizes); diff != "" {
+	if diff := cmp.Diff([]int{2, 2}, gotDigestCheckRequestSizes); diff != "" {
 		t.Error(diff)
 	}
 
-	wantDigestUploads := []string{
-		"2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6", // c
-		"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", // a
+	wantUploadBlobsReqs := []*repb.BatchUpdateBlobsRequest_Request{
+		{
+			Digest: &repb.Digest{Hash: "2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6", SizeBytes: 1},
+			Data:   []byte("c"),
+		},
+		// We expect two requets for c because the first one failed transiently.
+		{
+			Digest: &repb.Digest{Hash: "2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6", SizeBytes: 1},
+			Data:   []byte("c"),
+		},
+		{
+			Digest: &repb.Digest{Hash: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", SizeBytes: 1},
+			Data:   []byte("a"),
+		},
 	}
-	gotDigestUploads := make([]string, len(gotScheduleUploadCalls))
-	for i, req := range gotScheduleUploadCalls {
-		gotDigestUploads[i] = req.Digest.Hash
-	}
-	sort.Strings(gotDigestUploads)
-	if diff := cmp.Diff(wantDigestUploads, gotDigestUploads); diff != "" {
+	sort.Slice(gotUploadBlobReqs, func(i, j int) bool {
+		return gotUploadBlobReqs[i].Digest.Hash < gotUploadBlobReqs[j].Digest.Hash
+	})
+	if diff := cmp.Diff(wantUploadBlobsReqs, gotUploadBlobReqs, cmp.Comparer(proto.Equal)); diff != "" {
 		t.Error(diff)
 	}
 }
@@ -252,11 +278,7 @@ func compareUploadItems(x, y *uploadItem) bool {
 }
 
 func mustReadAll(item *uploadItem) []byte {
-	r, err := item.Open()
-	if err != nil {
-		panic(err)
-	}
-	data, err := ioutil.ReadAll(r)
+	data, err := item.ReadAll()
 	if err != nil {
 		panic(err)
 	}
@@ -275,10 +297,15 @@ func inputChanFrom(inputs ...*UploadInput) chan *UploadInput {
 type fakeCAS struct {
 	repb.ContentAddressableStorageClient
 	findMissingBlobs func(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error)
+	batchUpdateBlobs func(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error)
 }
 
 func (c *fakeCAS) FindMissingBlobs(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error) {
 	return c.findMissingBlobs(ctx, in, opts...)
+}
+
+func (c *fakeCAS) BatchUpdateBlobs(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
+	return c.batchUpdateBlobs(ctx, in, opts...)
 }
 
 func putFile(t *testing.T, path, contents string) {
