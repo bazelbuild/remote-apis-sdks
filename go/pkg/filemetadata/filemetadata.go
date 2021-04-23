@@ -85,7 +85,6 @@ type Cache interface {
 	Get(path string) *Metadata
 	Delete(filename string) error
 	Update(path string, cacheEntry *Metadata) error
-	Reset()
 	GetCacheHits() uint64
 	GetCacheMisses() uint64
 }
@@ -107,9 +106,6 @@ func (c *noopCache) Delete(string) error {
 func (c *noopCache) Update(string, *Metadata) error {
 	return nil
 }
-
-// Reset clears the cache. It is a noop for the Noop cache.
-func (c *noopCache) Reset() {}
 
 // GetCacheHits returns the number of cache hits. It returns 0 for Noop cache.
 func (c *noopCache) GetCacheHits() uint64 {
