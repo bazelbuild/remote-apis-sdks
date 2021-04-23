@@ -17,7 +17,7 @@ import (
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/api/support/bundler"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache/singleflightcache"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -128,7 +128,7 @@ type uploader struct {
 	// wgFS is used to wait for all FS walking to finish.
 	wgFS sync.WaitGroup
 	// fsCache contains already-processed files.
-	fsCache singleflightcache.Cache
+	fsCache cache.SingleFlight
 
 	// fsSem controls concurrency of file IO.
 	// TODO(nodir): ensure it does not hurt streaming.

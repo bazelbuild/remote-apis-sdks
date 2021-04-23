@@ -4,10 +4,10 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache/singleflightcache"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache"
 )
 
-var globalCache singleflightcache.Cache
+var globalCache cache.SingleFlight
 
 // Reset clears the cache globally.
 // Applies to all Cache instances created by NewSingleFlightCache.
@@ -17,7 +17,7 @@ func ResetGlobalCache() {
 
 // Cache is a store for file digests that supports invalidation.
 type fmCache struct {
-	Backend     *singleflightcache.Cache
+	Backend     *cache.SingleFlight
 	cacheHits   uint64
 	cacheMisses uint64
 }
