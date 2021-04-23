@@ -31,7 +31,8 @@ type Client struct {
 
 	// Mockable functions.
 
-	testScheduleCheck func(ctx context.Context, item *uploadItem) error
+	testScheduleCheck  func(ctx context.Context, item *uploadItem) error
+	testScheduleUpload func(ctx context.Context, item *uploadItem) error
 }
 
 // ClientConfig is a config for Client.
@@ -53,6 +54,10 @@ type ClientConfig struct {
 
 	// FileIOSize is the size of file reads.
 	FileIOSize int64
+
+	// FindMissingBlobsBatchSize is the maximum number of digests to check in a
+	// single FindMissingBlobs RPC.
+	FindMissingBlobsBatchSize int
 
 	// TODO(nodir): add per-RPC timeouts.
 	// TODO(nodir): add retries.
@@ -77,6 +82,8 @@ func DefaultClientConfig() ClientConfig {
 		// GCE docs recommend 4MB IO size for large files.
 		// https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-size
 		FileIOSize: 4 * 1024 * 1024, // 4MiB
+
+		FindMissingBlobsBatchSize: 1000,
 	}
 }
 
@@ -95,6 +102,10 @@ func (c *ClientConfig) Validate() error {
 
 	case c.FileIOSize <= 0:
 		return fmt.Errorf("FileIOSize must be positive")
+
+	// Do not allow more than 100K, otherwise we might run into the request size limits.
+	case c.FindMissingBlobsBatchSize <= 0 || c.FindMissingBlobsBatchSize > 10000:
+		return fmt.Errorf("FindMissingBlobsBatchSize must be in [1, 10000]")
 
 	default:
 		return nil
