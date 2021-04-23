@@ -415,9 +415,12 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 		totalBytes += item.Digest.SizeBytes
 	}
 
-	// TODO(nodir): add retries.
 	// TODO(nodir): add per-RPC timeouts.
-	res, err := u.cas.FindMissingBlobs(ctx, req)
+	var res *repb.FindMissingBlobsResponse
+	err := u.retry(ctx, func() (err error) {
+		res, err = u.cas.FindMissingBlobs(ctx, req)
+		return
+	})
 	if err != nil {
 		return err
 	}

@@ -14,6 +14,7 @@ import (
 
 	log "github.com/golang/glog"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -59,6 +60,27 @@ const UnlimitedAttempts = Attempts(0)
 
 // Always always retries, regardless of error.
 func Always(error) bool { return true }
+
+// TransientOnly returns true if the error is transient.
+// It implements ShouldRetry type.
+func TransientOnly(err error) bool {
+	// Retry RPC timeouts. Note that we do *not* retry context cancellations (context.Cancelled);
+	// if the user wants to back out of the call we should let them.
+	if err == context.DeadlineExceeded {
+		return true
+	}
+	s, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	switch s.Code() {
+	case codes.Canceled, codes.Unknown, codes.DeadlineExceeded, codes.Aborted,
+		codes.Internal, codes.Unavailable, codes.Unauthenticated, codes.ResourceExhausted:
+		return true
+	default:
+		return false
+	}
+}
 
 // WithPolicy retries f until either it succeeds, or shouldRetry returns false, or the number of
 // retries is capped by the backoff policy. Returns the error returned by the final attempt. It
