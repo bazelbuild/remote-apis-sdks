@@ -12,7 +12,7 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/pkg/cache:go_default_library",
+        "//go/pkg/cache/singleflightcache:go_default_library",
         "//go/pkg/digest:go_default_library",
     ],
 )
@@ -28,7 +28,7 @@ go_test(
     }),
     embed = [":go_default_library"],
     deps = [
-        "//go/pkg/cache:go_default_library",
+        "//go/pkg/cache/singleflightcache:go_default_library",
         "//go/pkg/digest:go_default_library",
         "//go/pkg/testutil:go_default_library",
         "@com_github_google_go_cmp//cmp:go_default_library",
