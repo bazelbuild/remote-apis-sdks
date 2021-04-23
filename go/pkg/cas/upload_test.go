@@ -154,7 +154,7 @@ func TestChecks(t *testing.T) {
 	sort.Slice(gotDigestChecks, func(i, j int) bool {
 		return gotDigestChecks[i].Hash < gotDigestChecks[j].Hash
 	})
-	if diff := cmp.Diff(wantDigestChecks, gotDigestChecks); diff != "" {
+	if diff := cmp.Diff(wantDigestChecks, gotDigestChecks, cmp.Comparer(proto.Equal)); diff != "" {
 		t.Error(diff)
 	}
 	if diff := cmp.Diff([]int{2, 2}, gotRequestSizes); diff != "" {
