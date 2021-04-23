@@ -37,9 +37,17 @@ type UploadInput struct {
 	// Ignored if Path is not empty.
 	Content []byte
 
+	// PreserveSymlinks specifies whether to preserve symlinks or convert them
+	// to regular files.
+	PreserveSymlinks bool
+
+	// AllowDanglingSymlinks specifies whether to upload dangling links or halt
+	// the upload.
+	//
+	// This field is ignored if PreserveSymlinks is false, which is the default.
+	AllowDanglingSymlinks bool
+
 	// TODO(nodir): add Predicate.
-	// TODO(nodir): add AllowDanglingSymlinks
-	// TODO(nodir): add PreserveSymlinks.
 }
 
 // TransferStats is upload/download statistics.
@@ -163,26 +171,43 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		// Do not use os.Stat() here. We want to know if it is a symlink.
 		info, err := os.Lstat(absPath)
 		if err != nil {
-			return errors.Wrapf(err, "lstat failed")
+			return err
 		}
 
-		_, err = u.visitFile(ctx, absPath, info)
+		key := fsCacheKey{
+			AbsPath:            absPath,
+			PreserveSymlinks:   in.PreserveSymlinks,
+			AllowDanglingLinks: in.AllowDanglingSymlinks,
+		}
+		_, err = u.visitFile(ctx, key, info)
 		return err
 	})
 	return nil
 }
 
+// fsCacheKey is a key in u.fsCache.
+//
+// The fsCacheKey is primarily the absolute path, but also configuration of
+// file traversal.
+type fsCacheKey struct {
+	AbsPath            string
+	PreserveSymlinks   bool
+	AllowDanglingLinks bool
+}
+
 // visitFile visits the file/dir depending on its type (regular, dir, symlink).
+// The absPath is passed as a part of the cache key.
+//
 // Visits each file only once.
-func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo) (dirEntry interface{}, err error) {
-	return u.fsCache.LoadOrStore(absPath, func() (interface{}, error) {
+func (u *uploader) visitFile(ctx context.Context, key fsCacheKey, info os.FileInfo) (dirEntry interface{}, err error) {
+	return u.fsCache.LoadOrStore(key, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			return u.visitSymlink(ctx, absPath)
+			return u.visitSymlink(ctx, key)
 		case info.Mode().IsDir():
-			return u.visitDir(ctx, absPath)
+			return u.visitDir(ctx, key)
 		case info.Mode().IsRegular():
-			return u.visitRegularFile(ctx, absPath, info)
+			return u.visitRegularFile(ctx, key.AbsPath, info)
 		default:
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
 		}
@@ -288,7 +313,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 // visitDir reads a directory and its descendants. The function blocks until
 // each descendant is visited, but the visitation happens concurrently, using
 // u.eg.
-func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.DirectoryNode, error) {
+func (u *uploader) visitDir(ctx context.Context, key fsCacheKey) (*repb.DirectoryNode, error) {
 	var mu sync.Mutex
 	dir := &repb.Directory{}
 	var subErr error
@@ -302,7 +327,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 		}
 		defer u.fsSem.Release(1)
 
-		f, err := os.Open(absPath)
+		f, err := os.Open(key.AbsPath)
 		if err != nil {
 			return err
 		}
@@ -320,13 +345,14 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 
 			for _, info := range infos {
 				info := info
-				absChild := joinFilePathsFast(absPath, info.Name())
+				childKey := key
+				childKey.AbsPath = joinFilePathsFast(key.AbsPath, info.Name())
 				wgChildren.Add(1)
 				u.wgFS.Add(1)
 				u.eg.Go(func() error {
 					defer wgChildren.Done()
 					defer u.wgFS.Done()
-					node, err := u.visitFile(ctx, absChild, info)
+					node, err := u.visitFile(ctx, childKey, info)
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil {
@@ -358,24 +384,67 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 
 	wgChildren.Wait()
 	if subErr != nil {
-		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", absPath)
+		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", key.AbsPath)
 	}
 
-	item := uploadItemFromDirMsg(absPath, dir)
+	item := uploadItemFromDirMsg(key.AbsPath, dir)
 	if err := u.scheduleCheck(ctx, item); err != nil {
 		return nil, err
 	}
 	return &repb.DirectoryNode{
-		Name:   filepath.Base(absPath),
+		Name:   filepath.Base(key.AbsPath),
 		Digest: item.Digest,
 	}, nil
 }
 
-// visitSymlink converts a symlink to a SymlinkNode and schedules visitation
+// visitSymlink converts a symlink to a directory node and schedules visitation
 // of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, absPath string) (*repb.SymlinkNode, error) {
-	// TODO(nodir): implement
-	panic("not supported")
+// If key.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
+// returns the directory node of the target file.
+func (u *uploader) visitSymlink(ctx context.Context, key fsCacheKey) (interface{}, error) {
+	target, err := os.Readlink(key.AbsPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "os.ReadLink")
+	}
+
+	// Determine absolute and relative paths of the target.
+	var absTarget, relTarget string
+	symlinkDir := filepath.Dir(key.AbsPath)
+	target = filepath.Clean(target) // target may end with slash
+	if filepath.IsAbs(target) {
+		absTarget = target
+		if relTarget, err = filepath.Rel(symlinkDir, absTarget); err != nil {
+			return nil, err
+		}
+	} else {
+		relTarget = target
+		absTarget = filepath.Join(symlinkDir, relTarget)
+	}
+
+	symlinkNode := &repb.SymlinkNode{
+		Name:   filepath.Base(key.AbsPath),
+		Target: filepath.ToSlash(relTarget),
+	}
+
+	targetInfo, err := os.Lstat(absTarget)
+	switch {
+	case os.IsNotExist(err) && key.PreserveSymlinks && key.AllowDanglingLinks:
+		// Special case for preserved dangling links.
+		return symlinkNode, nil
+	case err != nil:
+		return nil, err
+	}
+
+	targetKey := key
+	targetKey.AbsPath = absTarget
+	if !key.PreserveSymlinks {
+		return u.visitFile(ctx, targetKey, targetInfo)
+	}
+
+	// Even though we return a SymlinkNode, we still must visit the target file
+	// to ensure it is uploaded.
+	_, err = u.visitFile(ctx, targetKey, targetInfo)
+	return symlinkNode, err
 }
 
 // uploadItem is a blob to potentially upload.

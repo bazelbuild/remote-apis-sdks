@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -55,10 +56,39 @@ func TestFS(t *testing.T) {
 		}},
 	})
 
+	withSymlinksItemPreserved := uploadItemFromDirMsg(filepath.Join(absTestData, "with-symlinks"), &repb.Directory{
+		Symlinks: []*repb.SymlinkNode{
+			{
+				Name:   "file",
+				Target: "../root/a",
+			},
+			{
+				Name:   "dir",
+				Target: "../root/subdir",
+			},
+		},
+	})
+
+	withSymlinksItemNotPreserved := uploadItemFromDirMsg(filepath.Join(absTestData, "with-symlinks"), &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "a", Digest: aItem.Digest},
+		},
+		Directories: []*repb.DirectoryNode{
+			{Name: "subdir", Digest: subdirItem.Digest},
+		},
+	})
+
+	withDanglingSymlinksItem := uploadItemFromDirMsg(filepath.Join(absTestData, "with-dangling-symlink"), &repb.Directory{
+		Symlinks: []*repb.SymlinkNode{
+			{Name: "dangling", Target: "non-existent"},
+		},
+	})
+
 	tests := []struct {
 		desc                string
 		inputs              []*UploadInput
 		wantScheduledChecks []*uploadItem
+		expectedErrContains string
 	}{
 		{
 			desc:                "root",
@@ -75,33 +105,63 @@ func TestFS(t *testing.T) {
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "medium-dir")}},
 			wantScheduledChecks: []*uploadItem{mediumDirItem, mediumItem},
 		},
+		{
+			desc:                "symlinks-preserved",
+			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "with-symlinks"), PreserveSymlinks: true}},
+			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
+		},
+		{
+			desc:                "symlinks-not-preserved",
+			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "with-symlinks")}},
+			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
+		},
+		{
+			desc:                "dangling-symlinks-disallow",
+			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "with-dangling-symlinks")}},
+			expectedErrContains: "no such file or directory",
+		},
+		{
+			desc:                "dangling-symlinks-allow",
+			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "with-dangling-symlink"), PreserveSymlinks: true, AllowDanglingSymlinks: true}},
+			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
 			var mu sync.Mutex
-			var scheduledCheckCalls []*uploadItem
+			var gotScheduledChecks []*uploadItem
 
 			client := &Client{
 				ClientConfig: DefaultClientConfig(),
 				testScheduleCheck: func(ctx context.Context, item *uploadItem) error {
 					mu.Lock()
 					defer mu.Unlock()
-					scheduledCheckCalls = append(scheduledCheckCalls, item)
+					gotScheduledChecks = append(gotScheduledChecks, item)
 					return nil
 				},
 			}
 			client.SmallFileThreshold = 5
 			client.LargeFileThreshold = 10
 
-			if _, err := client.Upload(ctx, inputChanFrom(tc.inputs...)); err != nil {
-				t.Fatalf("failed to upload: %s", err)
+			_, err := client.Upload(ctx, inputChanFrom(tc.inputs...))
+			if tc.expectedErrContains != "" {
+				if err == nil {
+					t.Fatalf("expected to fail with %q", tc.expectedErrContains)
+				}
+				if !strings.Contains(err.Error(), tc.expectedErrContains) {
+					t.Fatalf("want an error to contain %q, got %q", tc.expectedErrContains, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
 			}
 
-			sort.Slice(scheduledCheckCalls, func(i, j int) bool {
-				return scheduledCheckCalls[i].Title < scheduledCheckCalls[j].Title
+			sort.Slice(gotScheduledChecks, func(i, j int) bool {
+				return gotScheduledChecks[i].Title < gotScheduledChecks[j].Title
 			})
-			if diff := cmp.Diff(tc.wantScheduledChecks, scheduledCheckCalls, cmp.Comparer(compareUploadItems)); diff != "" {
+			if diff := cmp.Diff(tc.wantScheduledChecks, gotScheduledChecks, cmp.Comparer(compareUploadItems)); diff != "" {
 				t.Errorf("unexpected scheduled checks (-want +got):\n%s", diff)
 			}
 		})
