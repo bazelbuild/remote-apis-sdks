@@ -10,7 +10,7 @@ import (
 
 // Cache is a cache that supports single-flight value computation.
 type Cache struct {
-	mu    sync.RWMutex // protectes store field itself
+	mu    sync.RWMutex // protects `store` field itself
 	store sync.Map
 }
 
