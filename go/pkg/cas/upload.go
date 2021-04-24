@@ -424,7 +424,7 @@ func (u *uploader) visitSymlink(ctx context.Context, key fsCacheKey) (proto.Mess
 		relTarget = target
 		absTarget = filepath.Join(symlinkDir, relTarget)
 	}
-	// TODO(nodir): add an option to return an error if a symlink outside of
+	// TODO(nodir): add an option to return an error if a symlink taret outside of
 	// execution root is detected.
 
 	symlinkNode := &repb.SymlinkNode{
