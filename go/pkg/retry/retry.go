@@ -75,7 +75,7 @@ func TransientOnly(err error) bool {
 	}
 	switch s.Code() {
 	case codes.Canceled, codes.Unknown, codes.DeadlineExceeded, codes.Aborted,
-		codes.Internal, codes.Unavailable, codes.Unauthenticated, codes.ResourceExhausted:
+		codes.Internal, codes.Unavailable, codes.ResourceExhausted:
 		return true
 	default:
 		return false
