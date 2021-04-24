@@ -3,6 +3,7 @@ package cas
 import (
 	"context"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -19,22 +20,23 @@ func TestFS(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	absTestData, err := filepath.Abs("testdata")
-	if err != nil {
-		t.Fatal(err)
-	}
-	absRoot := filepath.Join(absTestData, "root")
+	tmpDir := t.TempDir()
+	putFile(t, filepath.Join(tmpDir, "root", "a"), "a")
+	aItem := uploadItemFromBlob(filepath.Join(tmpDir, "root", "a"), []byte("a"))
 
-	aItem := uploadItemFromBlob(filepath.Join(absRoot, "a"), []byte("a"))
-	bItem := uploadItemFromBlob(filepath.Join(absRoot, "b"), []byte("b"))
-	cItem := uploadItemFromBlob(filepath.Join(absRoot, "subdir", "c"), []byte("c"))
-	subdirItem := uploadItemFromDirMsg(filepath.Join(absRoot, "subdir"), &repb.Directory{
+	putFile(t, filepath.Join(tmpDir, "root", "b"), "b")
+	bItem := uploadItemFromBlob(filepath.Join(tmpDir, "root", "b"), []byte("b"))
+
+	putFile(t, filepath.Join(tmpDir, "root", "subdir", "c"), "c")
+	cItem := uploadItemFromBlob(filepath.Join(tmpDir, "root", "subdir", "c"), []byte("c"))
+
+	subdirItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "root", "subdir"), &repb.Directory{
 		Files: []*repb.FileNode{{
 			Name:   "c",
 			Digest: cItem.Digest,
 		}},
 	})
-	rootItem := uploadItemFromDirMsg(absRoot, &repb.Directory{
+	rootItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
 		Files: []*repb.FileNode{
 			{Name: "a", Digest: aItem.Digest},
 			{Name: "b", Digest: bItem.Digest},
@@ -44,8 +46,9 @@ func TestFS(t *testing.T) {
 		},
 	})
 
-	mediumItem := uploadItemFromBlob(filepath.Join(absTestData, "medium-dir", "medium"), []byte("medium"))
-	mediumDirItem := uploadItemFromDirMsg(filepath.Join(absTestData, "medium-dir"), &repb.Directory{
+	putFile(t, filepath.Join(tmpDir, "medium-dir", "medium"), "medium")
+	mediumItem := uploadItemFromBlob(filepath.Join(tmpDir, "medium-dir", "medium"), []byte("medium"))
+	mediumDirItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "medium-dir"), &repb.Directory{
 		Files: []*repb.FileNode{{
 			Name:   "medium",
 			Digest: mediumItem.Digest,
@@ -59,7 +62,7 @@ func TestFS(t *testing.T) {
 	}{
 		{
 			desc:                "root",
-			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "root")}}, // relative path
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
 			wantScheduledChecks: []*uploadItem{rootItem, aItem, bItem, subdirItem, cItem},
 		},
 		{
@@ -69,7 +72,7 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc:                "medium",
-			inputs:              []*UploadInput{{Path: filepath.Join("testdata", "medium-dir")}}, // relative path
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "medium-dir")}},
 			wantScheduledChecks: []*uploadItem{mediumDirItem, mediumItem},
 		},
 	}
@@ -154,7 +157,7 @@ func TestChecks(t *testing.T) {
 	sort.Slice(gotDigestChecks, func(i, j int) bool {
 		return gotDigestChecks[i].Hash < gotDigestChecks[j].Hash
 	})
-	if diff := cmp.Diff(wantDigestChecks, gotDigestChecks); diff != "" {
+	if diff := cmp.Diff(wantDigestChecks, gotDigestChecks, cmp.Comparer(proto.Equal)); diff != "" {
 		t.Error(diff)
 	}
 	if diff := cmp.Diff([]int{2, 2}, gotRequestSizes); diff != "" {
@@ -209,4 +212,13 @@ type fakeCAS struct {
 
 func (c *fakeCAS) FindMissingBlobs(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error) {
 	return c.findMissingBlobs(ctx, in, opts...)
+}
+
+func putFile(t *testing.T, path, contents string) {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
 }
