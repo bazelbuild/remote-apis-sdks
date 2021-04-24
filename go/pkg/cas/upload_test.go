@@ -20,12 +20,7 @@ func TestFS(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	tmpDir, err := ioutil.TempDir("", "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
+	tmpDir := t.TempDir()
 	putFile(t, filepath.Join(tmpDir, "root", "a"), "a")
 	aItem := uploadItemFromBlob(filepath.Join(tmpDir, "root", "a"), []byte("a"))
 
