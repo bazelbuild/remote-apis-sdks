@@ -147,6 +147,6 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 	return client, nil
 }
 
-func (c *Client) retry(ctx context.Context, f func() error) error {
+func (c *Client) withRetries(ctx context.Context, f func() error) error {
 	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, f)
 }

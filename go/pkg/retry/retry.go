@@ -24,10 +24,6 @@ const (
 	backoffRange  = 0.4 // backoff is randomized downwards by this factor
 )
 
-// ShouldRetry encapsulates the decision of whether an error is retry-able. If an error should not
-// be retried, the function must return false.
-type ShouldRetry func(error) bool
-
 // BackoffPolicy describes how to back off when retrying, and how many times to retry.
 type BackoffPolicy struct {
 	baseDelay, maxDelay time.Duration
@@ -58,6 +54,10 @@ type Attempts uint
 
 // UnlimitedAttempts is used to specify no limit to the number of attempts.
 const UnlimitedAttempts = Attempts(0)
+
+// ShouldRetry encapsulates the decision of whether an error is retry-able. If an error should not
+// be retried, the function must return false.
+type ShouldRetry func(error) bool
 
 // Always always retries, regardless of error.
 func Always(error) bool { return true }

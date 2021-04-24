@@ -417,7 +417,7 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 
 	// TODO(nodir): add per-RPC timeouts.
 	var res *repb.FindMissingBlobsResponse
-	err := u.retry(ctx, func() (err error) {
+	err := u.withRetries(ctx, func() (err error) {
 		res, err = u.cas.FindMissingBlobs(ctx, req)
 		return
 	})
