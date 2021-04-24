@@ -199,8 +199,8 @@ type fsCacheKey struct {
 // The absPath is passed as a part of the cache key.
 //
 // Visits each file only once.
-func (u *uploader) visitFile(ctx context.Context, key fsCacheKey, info os.FileInfo) (dirEntry interface{}, err error) {
-	return u.fsCache.LoadOrStore(key, func() (interface{}, error) {
+func (u *uploader) visitFile(ctx context.Context, key fsCacheKey, info os.FileInfo) (dirEntry proto.Message, err error) {
+	node, err := u.fsCache.LoadOrStore(key, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
 			return u.visitSymlink(ctx, key)
@@ -212,6 +212,10 @@ func (u *uploader) visitFile(ctx context.Context, key fsCacheKey, info os.FileIn
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
 		}
 	})
+	if err != nil {
+		return nil, err
+	}
+	return node.(proto.Message), nil
 }
 
 // visitRegularFile computes the hash of a regular file and schedules a presence
@@ -401,7 +405,7 @@ func (u *uploader) visitDir(ctx context.Context, key fsCacheKey) (*repb.Director
 // of the target file.
 // If key.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, key fsCacheKey) (interface{}, error) {
+func (u *uploader) visitSymlink(ctx context.Context, key fsCacheKey) (proto.Message, error) {
 	target, err := os.Readlink(key.AbsPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "os.ReadLink")
@@ -432,7 +436,7 @@ func (u *uploader) visitSymlink(ctx context.Context, key fsCacheKey) (interface{
 		// Special case for preserved dangling links.
 		return symlinkNode, nil
 	case err != nil:
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	targetKey := key
