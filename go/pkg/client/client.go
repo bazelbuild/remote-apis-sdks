@@ -21,10 +21,8 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
-	"google.golang.org/grpc/status"
 
 	configpb "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer/proto"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -736,25 +734,8 @@ func (r *Retrier) Do(ctx context.Context, f func() error) error {
 // RetryTransient is a default retry policy for transient status codes.
 func RetryTransient() *Retrier {
 	return &Retrier{
-		Backoff: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
-		ShouldRetry: func(err error) bool {
-			// Retry RPC timeouts. Note that we do *not* retry context cancellations (context.Cancelled);
-			// if the user wants to back out of the call we should let them.
-			if err == context.DeadlineExceeded {
-				return true
-			}
-			s, ok := status.FromError(err)
-			if !ok {
-				return false
-			}
-			switch s.Code() {
-			case codes.Canceled, codes.Unknown, codes.DeadlineExceeded, codes.Aborted,
-				codes.Internal, codes.Unavailable, codes.Unauthenticated, codes.ResourceExhausted:
-				return true
-			default:
-				return false
-			}
-		},
+		Backoff:     retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
+		ShouldRetry: retry.TransientOnly,
 	}
 }
 

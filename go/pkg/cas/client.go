@@ -4,11 +4,13 @@ package cas
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/pkg/errors"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
@@ -59,8 +61,10 @@ type ClientConfig struct {
 	// single FindMissingBlobs RPC.
 	FindMissingBlobsBatchSize int
 
+	// RetryPolicy specifies how to retry requests on transient errors.
+	RetryPolicy retry.BackoffPolicy
+
 	// TODO(nodir): add per-RPC timeouts.
-	// TODO(nodir): add retries.
 }
 
 // DefaultClientConfig returns the default config.
@@ -84,6 +88,8 @@ func DefaultClientConfig() ClientConfig {
 		FileIOSize: 4 * 1024 * 1024, // 4MiB
 
 		FindMissingBlobsBatchSize: 1000,
+
+		RetryPolicy: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
 	}
 }
 
@@ -139,4 +145,8 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 
 	// TODO(nodir): Check capabilities.
 	return client, nil
+}
+
+func (c *Client) withRetries(ctx context.Context, f func() error) error {
+	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, f)
 }
