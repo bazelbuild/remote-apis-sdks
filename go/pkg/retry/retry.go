@@ -7,6 +7,7 @@ package retry
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -66,7 +67,7 @@ func Always(error) bool { return true }
 func TransientOnly(err error) bool {
 	// Retry RPC timeouts. Note that we do *not* retry context cancellations (context.Cancelled);
 	// if the user wants to back out of the call we should let them.
-	if err == context.DeadlineExceeded {
+	if stderrors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	s, ok := status.FromError(err)
