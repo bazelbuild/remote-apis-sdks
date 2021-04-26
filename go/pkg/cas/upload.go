@@ -171,7 +171,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		// Do not use os.Stat() here. We want to know if it is a symlink.
 		info, err := os.Lstat(absPath)
 		if err != nil {
-			return err
+			return errors.WithStack(err)
 		}
 
 		key := fsCacheKey{
