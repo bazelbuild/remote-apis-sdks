@@ -39,7 +39,8 @@ type Client struct {
 	// muLargeFile ensures only one large file is read/written at a time.
 	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
 	muLargeFile sync.Mutex
-	fileIOBufs  sync.Pool
+	// Pools of []byte slices with the length of ClientConfig.FileIOSize.
+	fileIOBufs sync.Pool
 
 	// Mockable functions.
 
