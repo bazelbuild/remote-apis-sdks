@@ -375,7 +375,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 
 // visitSymlink converts a symlink to a directory node and schedules visitation
 // of the target file.
-// If key.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
+// If u.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
 func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Message, error) {
 	target, err := os.Readlink(absPath)
@@ -394,6 +394,8 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Mess
 		}
 	} else {
 		relTarget = target
+		// Note: we can't use joinFilePathsFast here because relTarget may start
+		// with "../".
 		absTarget = filepath.Join(symlinkDir, relTarget)
 	}
 	// TODO(nodir): add an option to return an error if a symlink target outside of
