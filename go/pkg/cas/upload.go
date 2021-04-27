@@ -37,16 +37,6 @@ type UploadInput struct {
 	// Ignored if Path is not empty.
 	Content []byte
 
-	// PreserveSymlinks specifies whether to preserve symlinks or convert them
-	// to regular files.
-	PreserveSymlinks bool
-
-	// AllowDanglingSymlinks specifies whether to upload dangling links or halt
-	// the upload with an error.
-	//
-	// This field is ignored if PreserveSymlinks is false, which is the default.
-	AllowDanglingSymlinks bool
-
 	// TODO(nodir): add Predicate.
 }
 
@@ -174,40 +164,23 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 			return errors.WithStack(err)
 		}
 
-		key := fsCacheKey{
-			AbsPath:            absPath,
-			PreserveSymlinks:   in.PreserveSymlinks,
-			AllowDanglingLinks: in.AllowDanglingSymlinks,
-		}
-		_, err = u.visitFile(ctx, key, info)
+		_, err = u.visitFile(ctx, absPath, info)
 		return err
 	})
 	return nil
 }
 
-// fsCacheKey is a key in u.fsCache.
-//
-// The fsCacheKey is primarily the absolute path, but also configuration of
-// file traversal.
-type fsCacheKey struct {
-	AbsPath            string
-	PreserveSymlinks   bool
-	AllowDanglingLinks bool
-}
-
 // visitFile visits the file/dir depending on its type (regular, dir, symlink).
-// The absPath is passed as a part of the cache key.
-//
 // Visits each file only once.
-func (u *uploader) visitFile(ctx context.Context, key fsCacheKey, info os.FileInfo) (dirEntry proto.Message, err error) {
-	node, err := u.fsCache.LoadOrStore(key, func() (interface{}, error) {
+func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo) (dirEntry proto.Message, err error) {
+	node, err := u.fsCache.LoadOrStore(absPath, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			return u.visitSymlink(ctx, key)
+			return u.visitSymlink(ctx, absPath)
 		case info.Mode().IsDir():
-			return u.visitDir(ctx, key)
+			return u.visitDir(ctx, absPath)
 		case info.Mode().IsRegular():
-			return u.visitRegularFile(ctx, key.AbsPath, info)
+			return u.visitRegularFile(ctx, absPath, info)
 		default:
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
 		}
@@ -317,7 +290,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 // visitDir reads a directory and its descendants. The function blocks until
 // each descendant is visited, but the visitation happens concurrently, using
 // u.eg.
-func (u *uploader) visitDir(ctx context.Context, key fsCacheKey) (*repb.DirectoryNode, error) {
+func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.DirectoryNode, error) {
 	var mu sync.Mutex
 	dir := &repb.Directory{}
 	var subErr error
@@ -331,7 +304,7 @@ func (u *uploader) visitDir(ctx context.Context, key fsCacheKey) (*repb.Director
 		}
 		defer u.fsSem.Release(1)
 
-		f, err := os.Open(key.AbsPath)
+		f, err := os.Open(absPath)
 		if err != nil {
 			return err
 		}
@@ -349,14 +322,13 @@ func (u *uploader) visitDir(ctx context.Context, key fsCacheKey) (*repb.Director
 
 			for _, info := range infos {
 				info := info
-				childKey := key
-				childKey.AbsPath = joinFilePathsFast(key.AbsPath, info.Name())
+				absChild := joinFilePathsFast(absPath, info.Name())
 				wgChildren.Add(1)
 				u.wgFS.Add(1)
 				u.eg.Go(func() error {
 					defer wgChildren.Done()
 					defer u.wgFS.Done()
-					node, err := u.visitFile(ctx, childKey, info)
+					node, err := u.visitFile(ctx, absChild, info)
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil {
@@ -388,15 +360,15 @@ func (u *uploader) visitDir(ctx context.Context, key fsCacheKey) (*repb.Director
 
 	wgChildren.Wait()
 	if subErr != nil {
-		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", key.AbsPath)
+		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", absPath)
 	}
 
-	item := uploadItemFromDirMsg(key.AbsPath, dir)
+	item := uploadItemFromDirMsg(absPath, dir)
 	if err := u.scheduleCheck(ctx, item); err != nil {
 		return nil, err
 	}
 	return &repb.DirectoryNode{
-		Name:   filepath.Base(key.AbsPath),
+		Name:   filepath.Base(absPath),
 		Digest: item.Digest,
 	}, nil
 }
@@ -405,15 +377,15 @@ func (u *uploader) visitDir(ctx context.Context, key fsCacheKey) (*repb.Director
 // of the target file.
 // If key.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, key fsCacheKey) (proto.Message, error) {
-	target, err := os.Readlink(key.AbsPath)
+func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Message, error) {
+	target, err := os.Readlink(absPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "os.ReadLink")
 	}
 
 	// Determine absolute and relative paths of the target.
 	var absTarget, relTarget string
-	symlinkDir := filepath.Dir(key.AbsPath)
+	symlinkDir := filepath.Dir(absPath)
 	target = filepath.Clean(target) // target may end with slash
 	if filepath.IsAbs(target) {
 		absTarget = target
@@ -428,23 +400,22 @@ func (u *uploader) visitSymlink(ctx context.Context, key fsCacheKey) (proto.Mess
 	// execution root is detected.
 
 	symlinkNode := &repb.SymlinkNode{
-		Name:   filepath.Base(key.AbsPath),
+		Name:   filepath.Base(absPath),
 		Target: filepath.ToSlash(relTarget),
 	}
 
 	targetInfo, err := os.Lstat(absTarget)
 	switch {
-	case os.IsNotExist(err) && key.PreserveSymlinks && key.AllowDanglingLinks:
+	case os.IsNotExist(err) && u.PreserveSymlinks && u.AllowDanglingSymlinks:
 		// Special case for preserved dangling links.
 		return symlinkNode, nil
 	case err != nil:
 		return nil, errors.WithStack(err)
 	}
 
-	targetKey := key
-	targetKey.AbsPath = absTarget
-      node, err := u.visitFile(ctx, targetKey, targetInfo)
-	if key.PreserveSymlinks {
+	node, err := u.visitFile(ctx, absTarget, targetInfo)
+	if u.PreserveSymlinks {
+		// Note: even though we throw away `node`, it was still important to visit the target.
 		return symlinkNode, err
 	}
 	return node, err

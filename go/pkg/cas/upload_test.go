@@ -88,10 +88,12 @@ func TestFS(t *testing.T) {
 	})
 
 	tests := []struct {
-		desc                string
-		inputs              []*UploadInput
-		wantScheduledChecks []*uploadItem
-		expectedErrContains string
+		desc                  string
+		inputs                []*UploadInput
+		wantScheduledChecks   []*uploadItem
+		expectNotFoundErr     string // TODO(nodir): use errors.Is instead, when we switch to errors package.
+		preserveSymlinks      bool
+		allowDanglingSymlinks bool
 	}{
 		{
 			desc:                "root",
@@ -110,7 +112,8 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc:                "symlinks-preserved",
-			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks"), PreserveSymlinks: true}},
+			preserveSymlinks:    true,
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
 		},
 		{
@@ -119,14 +122,16 @@ func TestFS(t *testing.T) {
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
 		},
 		{
-			desc:                "dangling-symlinks-disallow",
-			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
-			expectedErrContains: "no such file or directory",
+			desc:              "dangling-symlinks-disallow",
+			inputs:            []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
+			expectNotFoundErr: "no such file or directory",
 		},
 		{
-			desc:                "dangling-symlinks-allow",
-			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink"), PreserveSymlinks: true, AllowDanglingSymlinks: true}},
-			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
+			desc:                  "dangling-symlinks-allow",
+			preserveSymlinks:      true,
+			allowDanglingSymlinks: true,
+			inputs:                []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
+			wantScheduledChecks:   []*uploadItem{withDanglingSymlinksItem},
 		},
 	}
 
@@ -144,16 +149,18 @@ func TestFS(t *testing.T) {
 					return nil
 				},
 			}
+			client.PreserveSymlinks = tc.preserveSymlinks
+			client.AllowDanglingSymlinks = tc.allowDanglingSymlinks
 			client.SmallFileThreshold = 5
 			client.LargeFileThreshold = 10
 
 			_, err := client.Upload(ctx, inputChanFrom(tc.inputs...))
-			if tc.expectedErrContains != "" {
+			if tc.expectNotFoundErr != "" {
 				if err == nil {
-					t.Fatalf("expected to fail with %q", tc.expectedErrContains)
+					t.Fatalf("expected to fail with %q", tc.expectNotFoundErr)
 				}
-				if !strings.Contains(err.Error(), tc.expectedErrContains) {
-					t.Fatalf("want an error to contain %q, got %q", tc.expectedErrContains, err)
+				if !strings.Contains(err.Error(), tc.expectNotFoundErr) {
+					t.Fatalf("want an error to contain %q, got %q", tc.expectNotFoundErr, err)
 				}
 				return
 			}

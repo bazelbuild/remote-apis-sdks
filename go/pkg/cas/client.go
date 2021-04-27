@@ -64,6 +64,16 @@ type ClientConfig struct {
 	// RetryPolicy specifies how to retry requests on transient errors.
 	RetryPolicy retry.BackoffPolicy
 
+	// PreserveSymlinks specifies whether to preserve symlinks or convert them
+	// to regular files.
+	PreserveSymlinks bool
+
+	// AllowDanglingSymlinks specifies whether to upload dangling links or halt
+	// the upload with an error.
+	//
+	// This field is ignored if PreserveSymlinks is false, which is the default.
+	AllowDanglingSymlinks bool
+
 	// TODO(nodir): add per-RPC timeouts.
 }
 
