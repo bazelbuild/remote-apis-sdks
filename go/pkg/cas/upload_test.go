@@ -14,6 +14,7 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
+	"github.com/pkg/errors"
 )
 
 func TestFS(t *testing.T) {
@@ -55,10 +56,44 @@ func TestFS(t *testing.T) {
 		}},
 	})
 
+	putSymlink(t, filepath.Join(tmpDir, "with-symlinks", "file"), filepath.Join("..", "root", "a"))
+	putSymlink(t, filepath.Join(tmpDir, "with-symlinks", "dir"), filepath.Join("..", "root", "subdir"))
+	withSymlinksItemPreserved := uploadItemFromDirMsg(filepath.Join(tmpDir, "with-symlinks"), &repb.Directory{
+		Symlinks: []*repb.SymlinkNode{
+			{
+				Name:   "file",
+				Target: "../root/a",
+			},
+			{
+				Name:   "dir",
+				Target: "../root/subdir",
+			},
+		},
+	})
+
+	withSymlinksItemNotPreserved := uploadItemFromDirMsg(filepath.Join(tmpDir, "with-symlinks"), &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "a", Digest: aItem.Digest},
+		},
+		Directories: []*repb.DirectoryNode{
+			{Name: "subdir", Digest: subdirItem.Digest},
+		},
+	})
+
+	putSymlink(t, filepath.Join(tmpDir, "with-dangling-symlink", "dangling"), "non-existent")
+	withDanglingSymlinksItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "with-dangling-symlink"), &repb.Directory{
+		Symlinks: []*repb.SymlinkNode{
+			{Name: "dangling", Target: "non-existent"},
+		},
+	})
+
 	tests := []struct {
-		desc                string
-		inputs              []*UploadInput
-		wantScheduledChecks []*uploadItem
+		desc                  string
+		inputs                []*UploadInput
+		wantScheduledChecks   []*uploadItem
+		wantErr               error
+		preserveSymlinks      bool
+		allowDanglingSymlinks bool
 	}{
 		{
 			desc:                "root",
@@ -75,33 +110,65 @@ func TestFS(t *testing.T) {
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "medium-dir")}},
 			wantScheduledChecks: []*uploadItem{mediumDirItem, mediumItem},
 		},
+		{
+			desc:                "symlinks-preserved",
+			preserveSymlinks:    true,
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
+		},
+		{
+			desc:                "symlinks-not-preserved",
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
+		},
+		{
+			desc:    "dangling-symlinks-disallow",
+			inputs:  []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
+			wantErr: os.ErrNotExist,
+		},
+		{
+			desc:                  "dangling-symlinks-allow",
+			preserveSymlinks:      true,
+			allowDanglingSymlinks: true,
+			inputs:                []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
+			wantScheduledChecks:   []*uploadItem{withDanglingSymlinksItem},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
 			var mu sync.Mutex
-			var scheduledCheckCalls []*uploadItem
+			var gotScheduledChecks []*uploadItem
 
 			client := &Client{
 				ClientConfig: DefaultClientConfig(),
 				testScheduleCheck: func(ctx context.Context, item *uploadItem) error {
 					mu.Lock()
 					defer mu.Unlock()
-					scheduledCheckCalls = append(scheduledCheckCalls, item)
+					gotScheduledChecks = append(gotScheduledChecks, item)
 					return nil
 				},
 			}
+			client.PreserveSymlinks = tc.preserveSymlinks
+			client.AllowDanglingSymlinks = tc.allowDanglingSymlinks
 			client.SmallFileThreshold = 5
 			client.LargeFileThreshold = 10
 
-			if _, err := client.Upload(ctx, inputChanFrom(tc.inputs...)); err != nil {
-				t.Fatalf("failed to upload: %s", err)
+			_, err := client.Upload(ctx, inputChanFrom(tc.inputs...))
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("error mismatch: want %q, got %q", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
 			}
 
-			sort.Slice(scheduledCheckCalls, func(i, j int) bool {
-				return scheduledCheckCalls[i].Title < scheduledCheckCalls[j].Title
+			sort.Slice(gotScheduledChecks, func(i, j int) bool {
+				return gotScheduledChecks[i].Title < gotScheduledChecks[j].Title
 			})
-			if diff := cmp.Diff(tc.wantScheduledChecks, scheduledCheckCalls, cmp.Comparer(compareUploadItems)); diff != "" {
+			if diff := cmp.Diff(tc.wantScheduledChecks, gotScheduledChecks, cmp.Comparer(compareUploadItems)); diff != "" {
 				t.Errorf("unexpected scheduled checks (-want +got):\n%s", diff)
 			}
 		})
@@ -219,6 +286,15 @@ func putFile(t *testing.T, path, contents string) {
 		t.Fatal(err)
 	}
 	if err := ioutil.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func putSymlink(t *testing.T, path, target string) {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
 		t.Fatal(err)
 	}
 }

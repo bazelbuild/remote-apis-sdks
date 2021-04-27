@@ -38,8 +38,6 @@ type UploadInput struct {
 	Content []byte
 
 	// TODO(nodir): add Predicate.
-	// TODO(nodir): add AllowDanglingSymlinks
-	// TODO(nodir): add PreserveSymlinks.
 }
 
 // TransferStats is upload/download statistics.
@@ -163,7 +161,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		// Do not use os.Stat() here. We want to know if it is a symlink.
 		info, err := os.Lstat(absPath)
 		if err != nil {
-			return errors.Wrapf(err, "lstat failed")
+			return errors.WithStack(err)
 		}
 
 		_, err = u.visitFile(ctx, absPath, info)
@@ -174,8 +172,8 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 
 // visitFile visits the file/dir depending on its type (regular, dir, symlink).
 // Visits each file only once.
-func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo) (dirEntry interface{}, err error) {
-	return u.fsCache.LoadOrStore(absPath, func() (interface{}, error) {
+func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo) (dirEntry proto.Message, err error) {
+	node, err := u.fsCache.LoadOrStore(absPath, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
 			return u.visitSymlink(ctx, absPath)
@@ -187,6 +185,10 @@ func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileIn
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
 		}
 	})
+	if err != nil {
+		return nil, err
+	}
+	return node.(proto.Message), nil
 }
 
 // visitRegularFile computes the hash of a regular file and schedules a presence
@@ -371,11 +373,54 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 	}, nil
 }
 
-// visitSymlink converts a symlink to a SymlinkNode and schedules visitation
+// visitSymlink converts a symlink to a directory node and schedules visitation
 // of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, absPath string) (*repb.SymlinkNode, error) {
-	// TODO(nodir): implement
-	panic("not supported")
+// If u.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
+// returns the directory node of the target file.
+func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Message, error) {
+	target, err := os.Readlink(absPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "os.ReadLink")
+	}
+
+	// Determine absolute and relative paths of the target.
+	var absTarget, relTarget string
+	symlinkDir := filepath.Dir(absPath)
+	target = filepath.Clean(target) // target may end with slash
+	if filepath.IsAbs(target) {
+		absTarget = target
+		if relTarget, err = filepath.Rel(symlinkDir, absTarget); err != nil {
+			return nil, err
+		}
+	} else {
+		relTarget = target
+		// Note: we can't use joinFilePathsFast here because relTarget may start
+		// with "../".
+		absTarget = filepath.Join(symlinkDir, relTarget)
+	}
+	// TODO(nodir): add an option to return an error if a symlink target outside of
+	// execution root is detected.
+
+	symlinkNode := &repb.SymlinkNode{
+		Name:   filepath.Base(absPath),
+		Target: filepath.ToSlash(relTarget),
+	}
+
+	targetInfo, err := os.Lstat(absTarget)
+	switch {
+	case os.IsNotExist(err) && u.PreserveSymlinks && u.AllowDanglingSymlinks:
+		// Special case for preserved dangling links.
+		return symlinkNode, nil
+	case err != nil:
+		return nil, errors.WithStack(err)
+	}
+
+	node, err := u.visitFile(ctx, absTarget, targetInfo)
+	if u.PreserveSymlinks {
+		// Note: even though we throw away `node`, it was still important to visit the target.
+		return symlinkNode, err
+	}
+	return node, err
 }
 
 // uploadItem is a blob to potentially upload.
