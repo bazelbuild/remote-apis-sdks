@@ -56,15 +56,30 @@ type DigestStat struct {
 	Bytes   int64 // total sum of of digest sizes
 }
 
+// UploadOptions is optional configuration for Upload function.
+// The default options are the zero value of this struct.
+type UploadOptions struct {
+	// PreserveSymlinks specifies whether to preserve symlinks or convert them
+	// to regular files.
+	PreserveSymlinks bool
+
+	// AllowDanglingSymlinks specifies whether to upload dangling links or halt
+	// the upload with an error.
+	//
+	// This field is ignored if PreserveSymlinks is false, which is the default.
+	AllowDanglingSymlinks bool
+}
+
 // Upload uploads all inputs. It exits when inputC is closed or ctx is canceled.
-func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats *TransferStats, err error) {
+func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput) (stats *TransferStats, err error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
 	defer eg.Wait()
 
 	u := &uploader{
-		Client: c,
-		eg:     eg,
+		Client:        c,
+		UploadOptions: opt,
+		eg:            eg,
 	}
 
 	// Initialize checkBundler, which checks if a blob is present on the server.
@@ -139,6 +154,7 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 // resources, such as file system. They should be stored in the Client instead.
 type uploader struct {
 	*Client
+	UploadOptions
 	eg    *errgroup.Group
 	stats TransferStats
 

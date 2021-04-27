@@ -90,12 +90,11 @@ func TestFS(t *testing.T) {
 	})
 
 	tests := []struct {
-		desc                  string
-		inputs                []*UploadInput
-		wantScheduledChecks   []*uploadItem
-		wantErr               error
-		preserveSymlinks      bool
-		allowDanglingSymlinks bool
+		desc                string
+		inputs              []*UploadInput
+		wantScheduledChecks []*uploadItem
+		wantErr             error
+		opt                 UploadOptions
 	}{
 		{
 			desc:                "root",
@@ -114,7 +113,7 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc:                "symlinks-preserved",
-			preserveSymlinks:    true,
+			opt:                 UploadOptions{PreserveSymlinks: true},
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
 		},
@@ -129,11 +128,10 @@ func TestFS(t *testing.T) {
 			wantErr: os.ErrNotExist,
 		},
 		{
-			desc:                  "dangling-symlinks-allow",
-			preserveSymlinks:      true,
-			allowDanglingSymlinks: true,
-			inputs:                []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
-			wantScheduledChecks:   []*uploadItem{withDanglingSymlinksItem},
+			desc:                "dangling-symlinks-allow",
+			opt:                 UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
+			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
 		},
 	}
 
@@ -151,13 +149,11 @@ func TestFS(t *testing.T) {
 					return nil
 				},
 			}
-			client.PreserveSymlinks = tc.preserveSymlinks
-			client.AllowDanglingSymlinks = tc.allowDanglingSymlinks
 			client.SmallFileThreshold = 5
 			client.LargeFileThreshold = 10
 			client.init()
 
-			_, err := client.Upload(ctx, inputChanFrom(tc.inputs...))
+			_, err := client.Upload(ctx, tc.opt, inputChanFrom(tc.inputs...))
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("error mismatch: want %q, got %q", tc.wantErr, err)
@@ -228,7 +224,7 @@ func TestSmallBlobs(t *testing.T) {
 		&UploadInput{Content: []byte("c")},
 		&UploadInput{Content: []byte("d")},
 	)
-	if _, err := client.Upload(ctx, inputC); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, inputC); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 
