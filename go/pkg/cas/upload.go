@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,10 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
+// ErrFilteredSymlinkTarget is returned when a symlink's target was filtered out
+// via UploadInput.PathExclude or ErrSkip, while the symlink itself wasn't.
+var ErrFilteredSymlinkTarget = errors.New("symlink's target was filtered out")
+
 // UploadInput is one of inputs to Client.Upload function.
 //
 // It can be either a reference to a file/dir (see Path) or it can be an
@@ -38,7 +43,14 @@ type UploadInput struct {
 	// Ignored if Path is not empty.
 	Content []byte
 
-	// TODO(nodir): add Predicate.
+	// PathExclude is a file/dir filter. If PathExclude is not nil and the
+	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
+	// If the Path is a directory, then the filter is evaluated against each file
+	// in the subtree.
+	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
+	//
+	// This field has no effect if Path is empty.
+	PathExclude *regexp.Regexp
 }
 
 // TransferStats is upload/download statistics.
@@ -68,7 +80,27 @@ type UploadOptions struct {
 	//
 	// This field is ignored if PreserveSymlinks is false, which is the default.
 	AllowDanglingSymlinks bool
+
+	// Callback is called for each file/dir to be uploaded.
+	// If it returns an error which is ErrSkip according to errors.Is, then the
+	// file/dir is not processed.
+	// If it returns another error, then the upload is halted with that error.
+	//
+	// Callback might be called multiple times for the same file if different
+	// UploadInputs directly/indirectly refer to the same file, but with different
+	// PathExclude.
+	//
+	// Callback is called from different goroutines.
+	Callback func(absPath string, mode os.FileMode) error
 }
+
+// ErrSkip, when returned by UploadOptions.Callback, means the file/dir must be
+// not be uploaded.
+//
+// Note that if UploadOptions.PreserveSymlinks is true and the ErrSkip is
+// returned for a symlink target, but not the symlink itself, then it may
+// result in a dangling symlink.
+var ErrSkip = errors.New("skip file")
 
 // Upload uploads all inputs. It exits when inputC is closed or ctx is canceled.
 func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput) (stats *TransferStats, err error) {
@@ -158,6 +190,7 @@ type uploader struct {
 
 	// wgFS is used to wait for all FS walking to finish.
 	wgFS sync.WaitGroup
+
 	// fsCache contains already-processed files.
 	fsCache cache.SingleFlight
 
@@ -193,21 +226,49 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 			return errors.WithStack(err)
 		}
 
-		_, err = u.visitFile(ctx, absPath, info)
+		_, err = u.visitPath(ctx, absPath, info, in.PathExclude)
 		return errors.Wrapf(err, "%q", absPath)
 	})
 	return nil
 }
 
-// visitFile visits the file/dir depending on its type (regular, dir, symlink).
+// visitPath visits the file/dir depending on its type (regular, dir, symlink).
 // Visits each file only once.
-func (u *uploader) visitFile(ctx context.Context, absPath string, info os.FileInfo) (dirEntry proto.Message, err error) {
-	node, err := u.fsCache.LoadOrStore(absPath, func() (interface{}, error) {
+//
+// If the file should be skipped, then returns (nil, nil).
+func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, pathExclude *regexp.Regexp) (dirEntry proto.Message, err error) {
+	// First, check if the file passes all filters.
+	if pathExclude != nil && pathExclude.MatchString(absPath) {
+		return nil, nil
+	}
+	// Call the callback only after checking the pathExclude.
+	if u.Callback != nil {
+		switch err := u.Callback(absPath, info.Mode()); {
+		case errors.Is(err, ErrSkip):
+			return nil, nil
+		case err != nil:
+			return nil, err
+		}
+	}
+
+	// Make a cache key.
+	type cacheKeyType struct {
+		AbsPath       string
+		ExcludeRegexp string
+	}
+	cacheKey := cacheKeyType{
+		AbsPath: absPath,
+	}
+	if pathExclude != nil {
+		cacheKey.ExcludeRegexp = pathExclude.String()
+	}
+
+	node, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			return u.visitSymlink(ctx, absPath)
+			return u.visitSymlink(ctx, absPath, pathExclude)
 		case info.Mode().IsDir():
-			return u.visitDir(ctx, absPath)
+			return u.visitDir(ctx, absPath, pathExclude)
 		case info.Mode().IsRegular():
 			return u.visitRegularFile(ctx, absPath, info)
 		default:
@@ -324,7 +385,7 @@ func (u *uploader) openFileSource(absPath string) (uploadSource, error) {
 // visitDir reads a directory and its descendants. The function blocks until
 // each descendant is visited, but the visitation happens concurrently, using
 // u.eg.
-func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.DirectoryNode, error) {
+func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (*repb.DirectoryNode, error) {
 	var mu sync.Mutex
 	dir := &repb.Directory{}
 	var subErr error
@@ -362,7 +423,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 				u.eg.Go(func() error {
 					defer wgChildren.Done()
 					defer u.wgFS.Done()
-					node, err := u.visitFile(ctx, absChild, info)
+					node, err := u.visitPath(ctx, absChild, info, pathExclude)
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil {
@@ -377,6 +438,8 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 						dir.Directories = append(dir.Directories, node)
 					case *repb.SymlinkNode:
 						dir.Symlinks = append(dir.Symlinks, node)
+					case nil:
+						// This file should be ignored.
 					default:
 						// This condition is impossible because all functions in this file
 						// return one of the three types above.
@@ -411,7 +474,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 // of the target file.
 // If u.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Message, error) {
+func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (proto.Message, error) {
 	target, err := os.Readlink(absPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "os.ReadLink")
@@ -432,8 +495,6 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Mess
 		// with "../".
 		absTarget = filepath.Join(symlinkDir, relTarget)
 	}
-	// TODO(nodir): add an option to return an error if a symlink target outside of
-	// execution root is detected.
 
 	symlinkNode := &repb.SymlinkNode{
 		Name:   filepath.Base(absPath),
@@ -449,12 +510,19 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Mess
 		return nil, errors.WithStack(err)
 	}
 
-	node, err := u.visitFile(ctx, absTarget, targetInfo)
-	if u.PreserveSymlinks {
-		// Note: even though we throw away `node`, it was still important to visit the target.
-		return symlinkNode, err
+	switch targetNode, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
+	case err != nil:
+		return nil, err
+	case !u.PreserveSymlinks:
+		return targetNode, nil
+	case targetNode == nil && !u.AllowDanglingSymlinks:
+		// The target got skipped via Callback or PathExclude,
+		// resulting in a dangling symlink, which is not allowed.
+		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
+	default:
+		// Note: even though we throw away targetNode, it was still important to visit the target.
+		return symlinkNode, nil
 	}
-	return node, err
 }
 
 // uploadItem is a blob to potentially upload.

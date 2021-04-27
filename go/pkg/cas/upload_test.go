@@ -5,7 +5,9 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -102,6 +104,73 @@ func TestFS(t *testing.T) {
 			wantScheduledChecks: []*uploadItem{rootItem, aItem, bItem, subdirItem, cItem},
 		},
 		{
+			desc:   "root-without-a-using-callback",
+			inputs: []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
+			opt: UploadOptions{
+				Callback: func(absPath string, mode os.FileMode) error {
+					if filepath.Base(absPath) == "a" {
+						return ErrSkip
+					}
+					return nil
+				},
+			},
+			wantScheduledChecks: []*uploadItem{
+				uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
+					Files: []*repb.FileNode{
+						{Name: "b", Digest: bItem.Digest},
+					},
+					Directories: []*repb.DirectoryNode{
+						{Name: "subdir", Digest: subdirItem.Digest},
+					},
+				}),
+				bItem,
+				subdirItem,
+				cItem,
+			},
+		},
+		{
+			desc: "root-without-b-using-exclude",
+			inputs: []*UploadInput{{
+				Path:        filepath.Join(tmpDir, "root"),
+				PathExclude: regexp.MustCompile(`[/\\]b$`),
+			}},
+			wantScheduledChecks: []*uploadItem{
+				uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
+					Files: []*repb.FileNode{
+						{Name: "a", Digest: aItem.Digest},
+					},
+					Directories: []*repb.DirectoryNode{
+						{Name: "subdir", Digest: subdirItem.Digest},
+					},
+				}),
+				aItem,
+				subdirItem,
+				cItem,
+			},
+		},
+		{
+			desc:   "root-without-subdir",
+			inputs: []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
+			opt: UploadOptions{
+				Callback: func(absPath string, mode os.FileMode) error {
+					if strings.Contains(absPath, "subdir") {
+						return ErrSkip
+					}
+					return nil
+				},
+			},
+			wantScheduledChecks: []*uploadItem{
+				uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
+					Files: []*repb.FileNode{
+						{Name: "a", Digest: aItem.Digest},
+						{Name: "b", Digest: bItem.Digest},
+					},
+				}),
+				aItem,
+				bItem,
+			},
+		},
+		{
 			desc:                "blob",
 			inputs:              []*UploadInput{{Content: []byte("foo")}},
 			wantScheduledChecks: []*uploadItem{uploadItemFromBlob("digest 2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae/3", []byte("foo"))},
@@ -132,6 +201,24 @@ func TestFS(t *testing.T) {
 			opt:                 UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
 			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
+		},
+		{
+			desc: "dangling-symlink-via-filtering",
+			opt:  UploadOptions{PreserveSymlinks: true},
+			inputs: []*UploadInput{{
+				Path:        filepath.Join(tmpDir, "with-symlinks"),
+				PathExclude: regexp.MustCompile("root"),
+			}},
+			wantErr: ErrFilteredSymlinkTarget,
+		},
+		{
+			desc: "dangling-symlink-via-filtering-allow",
+			opt:  UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
+			inputs: []*UploadInput{{
+				Path:        filepath.Join(tmpDir, "with-symlinks"),
+				PathExclude: regexp.MustCompile("root"),
+			}},
+			wantScheduledChecks: []*uploadItem{withSymlinksItemPreserved},
 		},
 	}
 
