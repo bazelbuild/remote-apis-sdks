@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 
@@ -15,6 +14,7 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
+	"github.com/pkg/errors"
 )
 
 func TestFS(t *testing.T) {
@@ -91,7 +91,7 @@ func TestFS(t *testing.T) {
 		desc                  string
 		inputs                []*UploadInput
 		wantScheduledChecks   []*uploadItem
-		expectNotFoundErr     string // TODO(nodir): use errors.Is instead, when we switch to errors package.
+		wantErr               error
 		preserveSymlinks      bool
 		allowDanglingSymlinks bool
 	}{
@@ -122,9 +122,9 @@ func TestFS(t *testing.T) {
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
 		},
 		{
-			desc:              "dangling-symlinks-disallow",
-			inputs:            []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
-			expectNotFoundErr: "no such file or directory",
+			desc:    "dangling-symlinks-disallow",
+			inputs:  []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
+			wantErr: os.ErrNotExist,
 		},
 		{
 			desc:                  "dangling-symlinks-allow",
@@ -155,12 +155,9 @@ func TestFS(t *testing.T) {
 			client.LargeFileThreshold = 10
 
 			_, err := client.Upload(ctx, inputChanFrom(tc.inputs...))
-			if tc.expectNotFoundErr != "" {
-				if err == nil {
-					t.Fatalf("expected to fail with %q", tc.expectNotFoundErr)
-				}
-				if !strings.Contains(err.Error(), tc.expectNotFoundErr) {
-					t.Fatalf("want an error to contain %q, got %q", tc.expectNotFoundErr, err)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("error mismatch: want %q, got %q", tc.wantErr, err)
 				}
 				return
 			}
