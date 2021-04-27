@@ -42,7 +42,7 @@ type UploadInput struct {
 	PreserveSymlinks bool
 
 	// AllowDanglingSymlinks specifies whether to upload dangling links or halt
-	// the upload.
+	// the upload with an error.
 	//
 	// This field is ignored if PreserveSymlinks is false, which is the default.
 	AllowDanglingSymlinks bool
