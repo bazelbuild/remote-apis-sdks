@@ -443,14 +443,11 @@ func (u *uploader) visitSymlink(ctx context.Context, key fsCacheKey) (proto.Mess
 
 	targetKey := key
 	targetKey.AbsPath = absTarget
-	if !key.PreserveSymlinks {
-		return u.visitFile(ctx, targetKey, targetInfo)
+      node, err := u.visitFile(ctx, targetKey, targetInfo)
+	if key.PreserveSymlinks {
+		return symlinkNode, err
 	}
-
-	// Even though we return a SymlinkNode, we still must visit the target file
-	// to ensure it is uploaded.
-	_, err = u.visitFile(ctx, targetKey, targetInfo)
-	return symlinkNode, err
+	return node, err
 }
 
 // uploadItem is a blob to potentially upload.
