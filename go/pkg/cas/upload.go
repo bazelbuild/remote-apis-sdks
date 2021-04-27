@@ -16,9 +16,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/api/support/bundler"
+	"google.golang.org/grpc/status"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
@@ -69,9 +71,12 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 	}
 
 	// Initialize checkBundler, which checks if a blob is present on the server.
+	var wgChecks sync.WaitGroup
 	u.checkBundler = bundler.NewBundler(&uploadItem{}, func(items interface{}) {
+		wgChecks.Add(1)
 		// Handle errors and context cancelation via errgroup.
 		eg.Go(func() error {
+			defer wgChecks.Done()
 			return u.check(ctx, items.([]*uploadItem))
 		})
 	})
@@ -80,6 +85,20 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 	// We might run into the request size limits only if we have >100K digests.
 	u.checkBundler.BundleCountThreshold = u.FindMissingBlobsBatchSize
 
+	// Initialize batchBundler, which uploads blobs in batches.
+	u.batchBundler = bundler.NewBundler(&repb.BatchUpdateBlobsRequest_Request{}, func(subReq interface{}) {
+		// Handle errors and context cancelation via errgroup.
+		eg.Go(func() error {
+			return u.uploadBatch(ctx, subReq.([]*repb.BatchUpdateBlobsRequest_Request))
+		})
+	})
+	// Limit the sum of sub-request sizes to (maxRequestSize - requestOverhead).
+	// 4MiB is the default gRPC request size limit.
+	// TODO: retrieve it from server's capabilities instead.
+	// Subtract 1KB to be on the safe side.
+	u.batchBundler.BundleByteLimit = 4*1024*1024 - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
+	u.batchBundler.BundleCountThreshold = c.BatchBlobsBatchSize
+
 	// Start processing input.
 	eg.Go(func() error {
 		// Before exiting this main goroutine, ensure all the work has been completed.
@@ -87,9 +106,9 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 		// in a bundler.
 		defer func() {
 			u.wgFS.Wait()
-
-			// checkBundler can be flushed only after FS walk is done.
-			u.checkBundler.Flush()
+			u.checkBundler.Flush() // only after FS walk is done.
+			wgChecks.Wait()        // only after checkBundler is flushed
+			u.batchBundler.Flush() // only after wgChecks is done.
 		}()
 
 		for {
@@ -130,6 +149,7 @@ type uploader struct {
 
 	// fsSem controls concurrency of file IO.
 	// TODO(nodir): ensure it does not hurt streaming.
+	// TODO(nodir): move to Client struct.
 	fsSem *semaphore.Weighted
 	// muLargeFile ensures only one large file is read at a time.
 	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
@@ -139,6 +159,9 @@ type uploader struct {
 	// server.
 	checkBundler *bundler.Bundler
 	seenDigests  sync.Map // TODO: consider making it more global
+
+	// batchBundler bundles blobs that can be uploaded using UploadBlobs RPC.
+	batchBundler *bundler.Bundler
 }
 
 // startProcessing adds the item to the appropriate stage depending on its type.
@@ -430,6 +453,15 @@ type uploadItem struct {
 	Open   func() (readSeekCloser, error)
 }
 
+func (item *uploadItem) ReadAll() ([]byte, error) {
+	r, err := item.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return ioutil.ReadAll(r)
+}
+
 // scheduleCheck schedules a blob presence check on the server. If it fails,
 // then the blob is uploaded.
 func (u *uploader) scheduleCheck(ctx context.Context, item *uploadItem) error {
@@ -475,7 +507,7 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 		missingBytes += d.SizeBytes
 		item := byDigest[digest.NewFromProtoUnvalidated(d)]
 		if err := u.scheduleUpload(ctx, item); err != nil {
-			return err
+			return errors.Wrapf(err, "%q", item.Title)
 		}
 	}
 	atomic.AddInt64(&u.stats.CacheMisses.Digests, int64(len(res.MissingBlobDigests)))
@@ -486,12 +518,67 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 }
 
 func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
-	if u.testScheduleUpload != nil {
-		return u.testScheduleUpload(ctx, item)
+	// Check if this blob can be uploaded in a batch.
+	if marshalledRequestSize(item.Digest) > int64(u.batchBundler.BundleByteLimit) {
+		// There is no way this blob can fit in a batch request.
+		// TODO(nodir): implement streaming.
+		panic("not implemented")
 	}
 
-	// TODO(nodir): implement.
-	panic("not implemented")
+	// Since this blob is small enough, just read it entirely.
+	contents, err := item.ReadAll()
+	if err != nil {
+		return errors.Wrapf(err, "failed to read the item")
+	}
+	req := &repb.BatchUpdateBlobsRequest_Request{Digest: item.Digest, Data: contents}
+	return u.batchBundler.AddWait(ctx, req, proto.Size(req))
+}
+
+// uploadBatch uploads blobs in using BatchUpdateBlobs RPC.
+func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlobsRequest_Request) error {
+	if err := u.semBatchUpdateBlobs.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer u.semBatchUpdateBlobs.Release(1)
+
+	reqMap := make(map[digest.Digest]*repb.BatchUpdateBlobsRequest_Request, len(reqs))
+	for _, r := range reqs {
+		reqMap[digest.NewFromProtoUnvalidated(r.Digest)] = r
+	}
+
+	req := &repb.BatchUpdateBlobsRequest{
+		InstanceName: u.InstanceName,
+		Requests:     reqs,
+	}
+	return u.withRetries(ctx, func() error {
+		// TODO(nodir): add per-RPC timeouts.
+		res, err := u.cas.BatchUpdateBlobs(ctx, req)
+		if err != nil {
+			return err
+		}
+
+		bytesTransferred := int64(0)
+		digestsTransferred := int64(0)
+		var retriableErr error
+		req.Requests = req.Requests[:0] // reset for the next attempt
+		for _, r := range res.Responses {
+			if err := status.FromProto(r.Status).Err(); err != nil {
+				if !retry.TransientOnly(err) {
+					return err
+				}
+				// This error is retriable. Save it to return later, and
+				// save the failed sub-request for the next attempt.
+				retriableErr = err
+				req.Requests = append(req.Requests, reqMap[digest.NewFromProtoUnvalidated(r.Digest)])
+				continue
+			}
+			bytesTransferred += r.Digest.SizeBytes
+			digestsTransferred++
+		}
+		atomic.AddInt64(&u.stats.Batched.Bytes, bytesTransferred)
+		atomic.AddInt64(&u.stats.Batched.Digests, digestsTransferred)
+		return retriableErr
+	})
 }
 
 // uploadItemFromDirMsg creates an upload item for a directory.
@@ -535,4 +622,27 @@ const pathSep = string(filepath.Separator)
 // call filepath.Clean.
 func joinFilePathsFast(a, b string) string {
 	return a + pathSep + b
+}
+
+func marshalledFieldSize(size int64) int64 {
+	return 1 + int64(proto.SizeVarint(uint64(size))) + size
+}
+
+func marshalledRequestSize(d *repb.Digest) int64 {
+	// An additional BatchUpdateBlobsRequest_Request includes the Digest and data fields,
+	// as well as the message itself. Every field has a 1-byte size tag, followed by
+	// the varint field size for variable-sized fields (digest hash and data).
+	// Note that the BatchReadBlobsResponse_Response field is similar, but includes
+	// and additional Status proto which can theoretically be unlimited in size.
+	// We do not account for it here, relying on the Client setting a large (100MB)
+	// limit for incoming messages.
+	digestSize := marshalledFieldSize(int64(len(d.Hash)))
+	if d.SizeBytes > 0 {
+		digestSize += 1 + int64(proto.SizeVarint(uint64(d.SizeBytes)))
+	}
+	reqSize := marshalledFieldSize(digestSize)
+	if d.SizeBytes > 0 {
+		reqSize += marshalledFieldSize(int64(d.SizeBytes))
+	}
+	return marshalledFieldSize(reqSize)
 }

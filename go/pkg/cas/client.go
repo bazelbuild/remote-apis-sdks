@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"golang.org/x/sync/semaphore"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 
@@ -28,13 +29,13 @@ type Client struct {
 	// ClientConfig is the configuration that the client was created with.
 	ClientConfig
 
-	byteStream bspb.ByteStreamClient
-	cas        repb.ContentAddressableStorageClient
+	byteStream          bspb.ByteStreamClient
+	cas                 repb.ContentAddressableStorageClient
+	semBatchUpdateBlobs *semaphore.Weighted
 
 	// Mockable functions.
 
-	testScheduleCheck  func(ctx context.Context, item *uploadItem) error
-	testScheduleUpload func(ctx context.Context, item *uploadItem) error
+	testScheduleCheck func(ctx context.Context, item *uploadItem) error
 }
 
 // ClientConfig is a config for Client.
@@ -60,6 +61,14 @@ type ClientConfig struct {
 	// FindMissingBlobsBatchSize is the maximum number of digests to check in a
 	// single FindMissingBlobs RPC.
 	FindMissingBlobsBatchSize int
+
+	// BatchUpdateBlobsConcurrency is the maximum number of BatchUpdateBlobs RPCs
+	// at the same time.
+	BatchUpdateBlobsConcurrency int
+
+	// BatchBlobsBatchSize is the maximum number of blobs to upload/download
+	// in a single BatchUpdateBlobs/BatchReadBlobs RPC.
+	BatchBlobsBatchSize int
 
 	// RetryPolicy specifies how to retry requests on transient errors.
 	RetryPolicy retry.BackoffPolicy
@@ -98,6 +107,13 @@ func DefaultClientConfig() ClientConfig {
 		FileIOSize: 4 * 1024 * 1024, // 4MiB
 
 		FindMissingBlobsBatchSize: 1000,
+
+		BatchUpdateBlobsConcurrency: 256, // arbitrary
+
+		// This is a suggested approximate limit based on current RBE implementation for writes.
+		// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
+		// This default might not be best for reads though.
+		BatchBlobsBatchSize: 4000,
 
 		RetryPolicy: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
 	}
@@ -152,9 +168,17 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 		byteStream:   bspb.NewByteStreamClient(conn),
 		cas:          repb.NewContentAddressableStorageClient(conn),
 	}
+	client.init()
 
-	// TODO(nodir): Check capabilities.
+	// TODO(nodir): Check capabilities, optionally.
 	return client, nil
+}
+
+// init is a part of NewClientWithConfig that can be done in tests without
+// creating a real gRPC connection. This function exists purely to aid testing,
+// and is tightly coupled with NewClientWithConfig.
+func (c *Client) init() {
+	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobsConcurrency))
 }
 
 func (c *Client) withRetries(ctx context.Context, f func() error) error {
