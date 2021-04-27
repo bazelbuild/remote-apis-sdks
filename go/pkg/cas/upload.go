@@ -14,7 +14,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/api/support/bundler"
 	"google.golang.org/grpc/status"
 
@@ -66,8 +65,6 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 	u := &uploader{
 		Client: c,
 		eg:     eg,
-
-		fsSem: semaphore.NewWeighted(int64(c.FSConcurrency)),
 	}
 
 	// Initialize checkBundler, which checks if a blob is present on the server.
@@ -137,6 +134,9 @@ func (c *Client) Upload(ctx context.Context, inputC <-chan *UploadInput) (stats 
 //
 // Special care is taken for large files: they are read sequentially, opened
 // only once per file, and read with large IO size.
+//
+// Note: uploader shouldn't store semaphores/locks that protect global
+// resources, such as file system. They should be stored in the Client instead.
 type uploader struct {
 	*Client
 	eg    *errgroup.Group
@@ -146,14 +146,6 @@ type uploader struct {
 	wgFS sync.WaitGroup
 	// fsCache contains already-processed files.
 	fsCache cache.SingleFlight
-
-	// fsSem controls concurrency of file IO.
-	// TODO(nodir): ensure it does not hurt streaming.
-	// TODO(nodir): move to Client struct.
-	fsSem *semaphore.Weighted
-	// muLargeFile ensures only one large file is read at a time.
-	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
-	muLargeFile sync.Mutex
 
 	// checkBundler bundles digests that need to be checked for presence on the
 	// server.
@@ -243,10 +235,10 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		defer u.muLargeFile.Unlock()
 	}
 
-	if err := u.fsSem.Acquire(ctx, 1); err != nil {
+	if err := u.semFileIO.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}
-	defer u.fsSem.Release(1)
+	defer u.semFileIO.Release(1)
 
 	f, err := os.Open(absPath)
 	if err != nil {
@@ -322,10 +314,10 @@ func (u *uploader) visitDir(ctx context.Context, absPath string) (*repb.Director
 	// This sub-function exist to avoid holding the semaphore while waiting for
 	// children.
 	err := func() error {
-		if err := u.fsSem.Acquire(ctx, 1); err != nil {
+		if err := u.semFileIO.Acquire(ctx, 1); err != nil {
 			return err
 		}
-		defer u.fsSem.Release(1)
+		defer u.semFileIO.Release(1)
 
 		f, err := os.Open(absPath)
 		if err != nil {
