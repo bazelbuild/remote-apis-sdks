@@ -12,7 +12,7 @@ def remote_apis_sdks_go_deps():
         go_repository,
         name = "com_github_pkg_errors",
         importpath = "github.com/pkg/errors",
-        tag = "v0.8.1",
+        tag = "v0.9.1",
     )
     _maybe(
         go_repository,
