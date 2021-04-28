@@ -215,7 +215,7 @@ func TestSmallBlobs(t *testing.T) {
 		ClientConfig: DefaultClientConfig(),
 		cas:          cas,
 	}
-	client.FindMissingBlobsBatchSize = 2
+	client.FindMissingBlobs.MaxItems = 2
 	client.init()
 
 	inputC := inputChanFrom(
