@@ -95,7 +95,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 	// Given that all digests are small (no more than 40 bytes), the count limit
 	// is the bottleneck.
 	// We might run into the request size limits only if we have >100K digests.
-	u.checkBundler.BundleCountThreshold = u.FindMissingBlobsBatchSize
+	u.checkBundler.BundleCountThreshold = u.FindMissingBlobs.MaxItems
 
 	// Initialize batchBundler, which uploads blobs in batches.
 	u.batchBundler = bundler.NewBundler(&repb.BatchUpdateBlobsRequest_Request{}, func(subReq interface{}) {
@@ -105,11 +105,9 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 		})
 	})
 	// Limit the sum of sub-request sizes to (maxRequestSize - requestOverhead).
-	// 4MiB is the default gRPC request size limit.
-	// TODO: retrieve it from server's capabilities instead.
 	// Subtract 1KB to be on the safe side.
-	u.batchBundler.BundleByteLimit = 4*1024*1024 - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
-	u.batchBundler.BundleCountThreshold = c.MaxBatchTotalSizeBytes
+	u.batchBundler.BundleByteLimit = c.BatchUpdateBlobs.MaxSizeBytes - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
+	u.batchBundler.BundleCountThreshold = c.BatchUpdateBlobs.MaxItems
 
 	// Start processing input.
 	eg.Go(func() error {
@@ -500,9 +498,8 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 		totalBytes += item.Digest.SizeBytes
 	}
 
-	// TODO(nodir): add per-RPC timeouts.
 	var res *repb.FindMissingBlobsResponse
-	err := u.withRetries(ctx, func() (err error) {
+	err := u.rpc(ctx, &u.FindMissingBlobs, func(ctx context.Context) (err error) {
 		res, err = u.cas.FindMissingBlobs(ctx, req)
 		return
 	})
@@ -558,8 +555,7 @@ func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlob
 		InstanceName: u.InstanceName,
 		Requests:     reqs,
 	}
-	return u.withRetries(ctx, func() error {
-		// TODO(nodir): add per-RPC timeouts.
+	return u.rpc(ctx, &u.BatchUpdateBlobs, func(ctx context.Context) error {
 		res, err := u.cas.BatchUpdateBlobs(ctx, req)
 		if err != nil {
 			return err

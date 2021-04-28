@@ -68,22 +68,12 @@ type ClientConfig struct {
 	// FileIOSize is the size of file reads.
 	FileIOSize int64
 
-	// FindMissingBlobsBatchSize is the maximum number of digests to check in a
-	// single FindMissingBlobs RPC.
-	FindMissingBlobsBatchSize int
+	// FindMissingBlobs is configuration for FindMissingBlobs RPCs.
+	// FindMissingBlobs.MaxSizeBytes is ignored.
+	FindMissingBlobs RPCConfig
 
-	// BatchUpdateBlobsConcurrency is the maximum number of BatchUpdateBlobs RPCs
-	// at the same time.
-	BatchUpdateBlobsConcurrency int
-
-	// MaxBatchTotalSizeBytes is the maximum number of blobs to upload/download
-	// in a single BatchUpdateBlobs/BatchReadBlobs RPC.
-	//
-	// If server capabilities are consulted (see IgnoreCapabilities), then
-	// this value is capped to the server-imposed limit.
-	// Thus Client.ClientConfig.MaxBatchTotalSizeBytes might be less than what
-	// was specified in NewClientWithConfig.
-	MaxBatchTotalSizeBytes int
+	// BatchUpdateBlobs is configuration for BatchUpdateBlobs RPCs.
+	BatchUpdateBlobs RPCConfig
 
 	// RetryPolicy specifies how to retry requests on transient errors.
 	RetryPolicy retry.BackoffPolicy
@@ -91,8 +81,23 @@ type ClientConfig struct {
 	// IgnoreCapabilities specifies whether to ignore server-provided capabilities.
 	// Capabilities are consulted by default.
 	IgnoreCapabilities bool
+}
 
-	// TODO(nodir): add per-RPC timeouts.
+// RPCConfig is configuration for a particular CAS RPC.
+// Some of the fields might not apply to certain RPCs.
+type RPCConfig struct {
+	// Concurrency is the maximum number of RPCs at a time.
+	Concurrency int
+
+	// MaxSizeBytes is the maximum size of the request/response, in bytes.
+	MaxSizeBytes int
+
+	// MaxItems is the maximum number of blobs/digests per RPC.
+	// Applies to batch RPCs.
+	MaxItems int
+
+	// Timeout is the maximum duration of the RPC.
+	Timeout time.Duration
 }
 
 // DefaultClientConfig returns the default config.
@@ -115,14 +120,22 @@ func DefaultClientConfig() ClientConfig {
 		// https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-size
 		FileIOSize: 4 * 1024 * 1024, // 4MiB
 
-		FindMissingBlobsBatchSize: 1000,
+		FindMissingBlobs: RPCConfig{
+			Concurrency: 64,
+			MaxItems:    1000,
+			Timeout:     time.Second,
+		},
+		BatchUpdateBlobs: RPCConfig{
+			Concurrency: 256,
 
-		BatchUpdateBlobsConcurrency: 256, // arbitrary
-
-		// This is a suggested approximate limit based on current RBE implementation for writes.
-		// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
-		// This default might not be best for reads though.
-		MaxBatchTotalSizeBytes: 4000,
+			// This is a suggested approximate limit based on current RBE implementation for writes.
+			// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
+			// This default might not be best for reads though.
+			MaxItems: 4000,
+			// 4MiB is the default gRPC request size limit.
+			MaxSizeBytes: 4 * 1024 * 1024,
+			Timeout:      time.Second,
+		},
 
 		RetryPolicy: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
 	}
@@ -145,9 +158,30 @@ func (c *ClientConfig) Validate() error {
 		return fmt.Errorf("FileIOSize must be positive")
 
 	// Do not allow more than 100K, otherwise we might run into the request size limits.
-	case c.FindMissingBlobsBatchSize <= 0 || c.FindMissingBlobsBatchSize > 10000:
-		return fmt.Errorf("FindMissingBlobsBatchSize must be in [1, 10000]")
+	case c.FindMissingBlobs.MaxItems > 10000:
+		return fmt.Errorf("FindMissingBlobs.MaxItems must <= 10000")
+	}
 
+	if err := c.FindMissingBlobs.validate(false); err != nil {
+		return errors.Wrap(err, "FindMissingBlobs")
+	}
+	if err := c.BatchUpdateBlobs.validate(true); err != nil {
+		return errors.Wrap(err, "BatchUpdateBlobs")
+	}
+	return nil
+}
+
+// validate returns an error if the config is invalid.
+func (c *RPCConfig) validate(validateMaxSizeBytes bool) error {
+	switch {
+	case c.Concurrency <= 0:
+		return fmt.Errorf("Concurrency must be positive")
+	case validateMaxSizeBytes && c.MaxSizeBytes <= 0:
+		return fmt.Errorf("MaxSizeBytes must be positive")
+	case c.MaxItems <= 0:
+		return fmt.Errorf("MaxItems must be positive")
+	case c.Timeout <= 0:
+		return fmt.Errorf("Timeout must be positive")
 	default:
 		return nil
 	}
@@ -192,15 +226,21 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 // creating a real gRPC connection. This function exists purely to aid testing,
 // and is tightly coupled with NewClientWithConfig.
 func (c *Client) init() {
-	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobsConcurrency))
+	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobs.Concurrency))
 	c.semFileIO = semaphore.NewWeighted(int64(c.FSConcurrency))
 	c.fileIOBufs.New = func() interface{} {
 		return make([]byte, c.FileIOSize)
 	}
 }
 
-func (c *Client) withRetries(ctx context.Context, f func() error) error {
-	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, f)
+// rpc calls f with retries, and with per-RPC timeouts.
+// Does not limit concurrency.
+func (c *Client) rpc(ctx context.Context, cfg *RPCConfig, f func(context.Context) error) error {
+	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, func() error {
+		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+		return f(ctx)
+	})
 }
 
 // checkCapabilities consults with server-side capabilities and potentially
@@ -215,8 +255,8 @@ func (c *Client) checkCapabilities(ctx context.Context) error {
 		return errors.Wrapf(err, "digest function mismatch")
 	}
 
-	if c.MaxBatchTotalSizeBytes > int(caps.CacheCapabilities.MaxBatchTotalSizeBytes) {
-		c.MaxBatchTotalSizeBytes = int(caps.CacheCapabilities.MaxBatchTotalSizeBytes)
+	if c.BatchUpdateBlobs.MaxSizeBytes > int(caps.CacheCapabilities.MaxBatchTotalSizeBytes) {
+		c.BatchUpdateBlobs.MaxSizeBytes = int(caps.CacheCapabilities.MaxBatchTotalSizeBytes)
 	}
 	return nil
 }
