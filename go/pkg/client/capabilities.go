@@ -2,9 +2,9 @@ package client
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/pkg/errors"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -20,29 +20,13 @@ func (c *Client) CheckCapabilities(ctx context.Context) (err error) {
 			return err
 		}
 	}
-	dgFn := digest.GetDigestFunction()
-	if c.serverCaps.ExecutionCapabilities != nil {
-		serverFn := c.serverCaps.ExecutionCapabilities.DigestFunction
-		if serverFn == repb.DigestFunction_UNKNOWN {
-			return fmt.Errorf("Server returned UNKNOWN digest function")
-		}
-		if serverFn != dgFn {
-			return fmt.Errorf("Digest function mismatch: server requires %v, client uses %v", serverFn, dgFn)
-		}
+
+	if err := digest.CheckCapabilities(c.serverCaps); err != nil {
+		return errors.Wrapf(err, "digest function mismatch")
 	}
+
 	if c.serverCaps.CacheCapabilities != nil {
-		cc := c.serverCaps.CacheCapabilities
-		found := false
-		for _, serverFn := range cc.DigestFunction {
-			if serverFn == dgFn {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("Digest function mismatch: server requires one of %v, client uses %v", cc.DigestFunction, dgFn)
-		}
-		c.MaxBatchSize = MaxBatchSize(cc.MaxBatchTotalSizeBytes)
+		c.MaxBatchSize = MaxBatchSize(c.serverCaps.CacheCapabilities.MaxBatchTotalSizeBytes)
 	}
 	return nil
 }

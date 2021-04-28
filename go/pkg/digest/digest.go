@@ -166,6 +166,34 @@ func NewFromReaderWithBuffer(r io.Reader, buf []byte) (Digest, error) {
 	}, nil
 }
 
+// CheckCapabilities returns an error if the digest function is not supported
+// by the server.
+func CheckCapabilities(caps *repb.ServerCapabilities) error {
+	fn := GetDigestFunction()
+
+	if caps.ExecutionCapabilities != nil {
+		if serverFn := caps.ExecutionCapabilities.DigestFunction; serverFn != fn {
+			return fmt.Errorf("server requires %v, client uses %v", serverFn, fn)
+		}
+	}
+
+	if caps.CacheCapabilities != nil {
+		cc := caps.CacheCapabilities
+		found := false
+		for _, serverFn := range cc.DigestFunction {
+			if serverFn == fn {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("server requires one of %v, client uses %v", cc.DigestFunction, fn)
+		}
+	}
+
+	return nil
+}
+
 // TestNew is like New but also pads your hash with zeros if it is shorter than the required length,
 // and panics on error rather than returning the error.
 // ONLY USE FOR TESTS.

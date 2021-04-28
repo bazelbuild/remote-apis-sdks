@@ -12,6 +12,7 @@ import (
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -75,12 +76,21 @@ type ClientConfig struct {
 	// at the same time.
 	BatchUpdateBlobsConcurrency int
 
-	// BatchBlobsBatchSize is the maximum number of blobs to upload/download
+	// MaxBatchTotalSizeBytes is the maximum number of blobs to upload/download
 	// in a single BatchUpdateBlobs/BatchReadBlobs RPC.
-	BatchBlobsBatchSize int
+	//
+	// If server capabilities are consulted (see IgnoreCapabilities), then
+	// this value is capped to the server-imposed limit.
+	// Thus Client.ClientConfig.MaxBatchTotalSizeBytes might be less than what
+	// was specified in NewClientWithConfig.
+	MaxBatchTotalSizeBytes int
 
 	// RetryPolicy specifies how to retry requests on transient errors.
 	RetryPolicy retry.BackoffPolicy
+
+	// IgnoreCapabilities specifies whether to ignore server-provided capabilities.
+	// Capabilities are consulted by default.
+	IgnoreCapabilities bool
 
 	// TODO(nodir): add per-RPC timeouts.
 }
@@ -112,7 +122,7 @@ func DefaultClientConfig() ClientConfig {
 		// This is a suggested approximate limit based on current RBE implementation for writes.
 		// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
 		// This default might not be best for reads though.
-		BatchBlobsBatchSize: 4000,
+		MaxBatchTotalSizeBytes: 4000,
 
 		RetryPolicy: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
 	}
@@ -167,9 +177,14 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 		byteStream:   bspb.NewByteStreamClient(conn),
 		cas:          repb.NewContentAddressableStorageClient(conn),
 	}
+	if !client.IgnoreCapabilities {
+		if err := client.checkCapabilities(ctx); err != nil {
+			return nil, errors.Wrapf(err, "checking capabilities")
+		}
+	}
+
 	client.init()
 
-	// TODO(nodir): Check capabilities, optionally.
 	return client, nil
 }
 
@@ -186,4 +201,22 @@ func (c *Client) init() {
 
 func (c *Client) withRetries(ctx context.Context, f func() error) error {
 	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, f)
+}
+
+// checkCapabilities consults with server-side capabilities and potentially
+// mutates c.ClientConfig.
+func (c *Client) checkCapabilities(ctx context.Context) error {
+	caps, err := repb.NewCapabilitiesClient(c.conn).GetCapabilities(ctx, &repb.GetCapabilitiesRequest{InstanceName: c.InstanceName})
+	if err != nil {
+		return errors.Wrapf(err, "GetCapabilities RPC")
+	}
+
+	if err := digest.CheckCapabilities(caps); err != nil {
+		return errors.Wrapf(err, "digest function mismatch")
+	}
+
+	if c.MaxBatchTotalSizeBytes > int(caps.CacheCapabilities.MaxBatchTotalSizeBytes) {
+		c.MaxBatchTotalSizeBytes = int(caps.CacheCapabilities.MaxBatchTotalSizeBytes)
+	}
+	return nil
 }

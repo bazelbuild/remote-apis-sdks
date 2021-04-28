@@ -109,7 +109,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 	// TODO: retrieve it from server's capabilities instead.
 	// Subtract 1KB to be on the safe side.
 	u.batchBundler.BundleByteLimit = 4*1024*1024 - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
-	u.batchBundler.BundleCountThreshold = c.BatchBlobsBatchSize
+	u.batchBundler.BundleCountThreshold = c.MaxBatchTotalSizeBytes
 
 	// Start processing input.
 	eg.Go(func() error {
