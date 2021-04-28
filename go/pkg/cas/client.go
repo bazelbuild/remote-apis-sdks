@@ -86,7 +86,7 @@ type ClientConfig struct {
 // RPCConfig is configuration for a particular CAS RPC.
 // Some of the fields might not apply to certain RPCs.
 type RPCConfig struct {
-	// Concurrency is the maximum number of RPCs at a time.
+	// Concurrency is the maximum number of RPCs in flight.
 	Concurrency int
 
 	// MaxSizeBytes is the maximum size of the request/response, in bytes.
