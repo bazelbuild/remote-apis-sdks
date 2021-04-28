@@ -499,7 +499,7 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 	}
 
 	var res *repb.FindMissingBlobsResponse
-	err := u.rpc(ctx, &u.FindMissingBlobs, func(ctx context.Context) (err error) {
+	err := u.unaryRPC(ctx, &u.FindMissingBlobs, func(ctx context.Context) (err error) {
 		res, err = u.cas.FindMissingBlobs(ctx, req)
 		return
 	})
@@ -555,7 +555,7 @@ func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlob
 		InstanceName: u.InstanceName,
 		Requests:     reqs,
 	}
-	return u.rpc(ctx, &u.BatchUpdateBlobs, func(ctx context.Context) error {
+	return u.unaryRPC(ctx, &u.BatchUpdateBlobs, func(ctx context.Context) error {
 		res, err := u.cas.BatchUpdateBlobs(ctx, req)
 		if err != nil {
 			return err

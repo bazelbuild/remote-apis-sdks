@@ -233,9 +233,10 @@ func (c *Client) init() {
 	}
 }
 
-// rpc calls f with retries, and with per-RPC timeouts.
+// unaryRPC calls f with retries, and with per-RPC timeouts.
 // Does not limit concurrency.
-func (c *Client) rpc(ctx context.Context, cfg *RPCConfig, f func(context.Context) error) error {
+// It is useful when f calls an unary RPC.
+func (c *Client) unaryRPC(ctx context.Context, cfg *RPCConfig, f func(context.Context) error) error {
 	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, func() error {
 		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
