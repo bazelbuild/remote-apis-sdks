@@ -486,11 +486,7 @@ func (u *uploader) scheduleCheck(ctx context.Context, item *uploadItem) error {
 // check checks which items are present on the server, and schedules upload for
 // the missing ones.
 func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
-	if err := u.FindMissingBlobs.sem.Acquire(ctx, 1); err != nil {
-		return err
-	}
-	defer u.FindMissingBlobs.sem.Release(1)
-
+	// TODO(nodir): limit concurrency.
 	req := &repb.FindMissingBlobsRequest{
 		InstanceName: u.InstanceName,
 		BlobDigests:  make([]*repb.Digest, len(items)),
@@ -546,10 +542,10 @@ func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
 
 // uploadBatch uploads blobs in using BatchUpdateBlobs RPC.
 func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlobsRequest_Request) error {
-	if err := u.BatchUpdateBlobs.sem.Acquire(ctx, 1); err != nil {
+	if err := u.semBatchUpdateBlobs.Acquire(ctx, 1); err != nil {
 		return err
 	}
-	defer u.BatchUpdateBlobs.sem.Release(1)
+	defer u.semBatchUpdateBlobs.Release(1)
 
 	reqMap := make(map[digest.Digest]*repb.BatchUpdateBlobsRequest_Request, len(reqs))
 	for _, r := range reqs {

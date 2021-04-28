@@ -31,8 +31,9 @@ type Client struct {
 	// ClientConfig is the configuration that the client was created with.
 	ClientConfig
 
-	byteStream bspb.ByteStreamClient
-	cas        repb.ContentAddressableStorageClient
+	byteStream          bspb.ByteStreamClient
+	cas                 repb.ContentAddressableStorageClient
+	semBatchUpdateBlobs *semaphore.Weighted
 
 	// TODO(nodir): ensure it does not hurt streaming.
 	semFileIO *semaphore.Weighted
@@ -97,12 +98,6 @@ type RPCConfig struct {
 
 	// Timeout is the maximum duration of the RPC.
 	Timeout time.Duration
-
-	sem *semaphore.Weighted
-}
-
-func (c *RPCConfig) init() {
-	c.sem = semaphore.NewWeighted(int64(c.Concurrency))
 }
 
 // DefaultClientConfig returns the default config.
@@ -231,13 +226,11 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 // creating a real gRPC connection. This function exists purely to aid testing,
 // and is tightly coupled with NewClientWithConfig.
 func (c *Client) init() {
+	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobs.Concurrency))
 	c.semFileIO = semaphore.NewWeighted(int64(c.FSConcurrency))
 	c.fileIOBufs.New = func() interface{} {
 		return make([]byte, c.FileIOSize)
 	}
-
-	c.FindMissingBlobs.init()
-	c.BatchUpdateBlobs.init()
 }
 
 // unaryRPC calls f with retries, and with per-RPC timeouts.
