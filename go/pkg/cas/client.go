@@ -123,7 +123,7 @@ func DefaultClientConfig() ClientConfig {
 		FindMissingBlobs: RPCConfig{
 			Concurrency: 64,
 			MaxItems:    1000,
-			Timeout:     time.Second,
+			Timeout:     time.Minute,
 		},
 		BatchUpdateBlobs: RPCConfig{
 			Concurrency: 256,
@@ -134,7 +134,7 @@ func DefaultClientConfig() ClientConfig {
 			MaxItems: 4000,
 			// 4MiB is the default gRPC request size limit.
 			MaxSizeBytes: 4 * 1024 * 1024,
-			Timeout:      time.Second,
+			Timeout:      time.Minute,
 		},
 
 		RetryPolicy: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
