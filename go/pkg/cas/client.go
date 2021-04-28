@@ -90,10 +90,11 @@ type RPCConfig struct {
 	Concurrency int
 
 	// MaxSizeBytes is the maximum size of the request/response, in bytes.
+	// Applies only to unary RPCs.
 	MaxSizeBytes int
 
 	// MaxItems is the maximum number of blobs/digests per RPC.
-	// Applies to batch RPCs.
+	// Applies only to unary batch RPCs, such as FindMissingBlobs.
 	MaxItems int
 
 	// Timeout is the maximum duration of the RPC.
@@ -157,29 +158,26 @@ func (c *ClientConfig) Validate() error {
 	case c.FileIOSize <= 0:
 		return fmt.Errorf("FileIOSize must be positive")
 
-	// Do not allow more than 100K, otherwise we might run into the request size limits.
+	// Checking more than 100K blobs may run into the request size limits.
+	// It does not really make sense to check even >10K blobs, so limit to 10k.
 	case c.FindMissingBlobs.MaxItems > 10000:
 		return fmt.Errorf("FindMissingBlobs.MaxItems must <= 10000")
 	}
 
-	if err := c.FindMissingBlobs.validate(false); err != nil {
+	if err := c.FindMissingBlobs.validate(); err != nil {
 		return errors.Wrap(err, "FindMissingBlobs")
 	}
-	if err := c.BatchUpdateBlobs.validate(true); err != nil {
+	if err := c.BatchUpdateBlobs.validate(); err != nil {
 		return errors.Wrap(err, "BatchUpdateBlobs")
 	}
 	return nil
 }
 
 // validate returns an error if the config is invalid.
-func (c *RPCConfig) validate(validateMaxSizeBytes bool) error {
+func (c *RPCConfig) validate() error {
 	switch {
 	case c.Concurrency <= 0:
 		return fmt.Errorf("Concurrency must be positive")
-	case validateMaxSizeBytes && c.MaxSizeBytes <= 0:
-		return fmt.Errorf("MaxSizeBytes must be positive")
-	case c.MaxItems <= 0:
-		return fmt.Errorf("MaxItems must be positive")
 	case c.Timeout <= 0:
 		return fmt.Errorf("Timeout must be positive")
 	default:
