@@ -265,9 +265,9 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	// It is a medium or large file.
 
 	// Compute the hash.
-	// TODO(nodir): reuse the buffer.
-	buf := make([]byte, u.FileIOSize)
+	buf := u.fileIOBufs.Get().([]byte)
 	dig, err := digest.NewFromReaderWithBuffer(f, buf)
+	u.fileIOBufs.Put(buf)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to compute hash")
 	}

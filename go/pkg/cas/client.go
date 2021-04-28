@@ -33,11 +33,14 @@ type Client struct {
 	byteStream          bspb.ByteStreamClient
 	cas                 repb.ContentAddressableStorageClient
 	semBatchUpdateBlobs *semaphore.Weighted
+
 	// TODO(nodir): ensure it does not hurt streaming.
 	semFileIO *semaphore.Weighted
 	// muLargeFile ensures only one large file is read/written at a time.
 	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
 	muLargeFile sync.Mutex
+	// Pools of []byte slices with the length of ClientConfig.FileIOSize.
+	fileIOBufs sync.Pool
 
 	// Mockable functions.
 
@@ -186,6 +189,9 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 func (c *Client) init() {
 	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobsConcurrency))
 	c.semFileIO = semaphore.NewWeighted(int64(c.FSConcurrency))
+	c.fileIOBufs.New = func() interface{} {
+		return make([]byte, c.FileIOSize)
+	}
 }
 
 func (c *Client) withRetries(ctx context.Context, f func() error) error {
