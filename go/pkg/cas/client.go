@@ -31,8 +31,12 @@ type Client struct {
 	// ClientConfig is the configuration that the client was created with.
 	ClientConfig
 
-	byteStream          bspb.ByteStreamClient
-	cas                 repb.ContentAddressableStorageClient
+	byteStream bspb.ByteStreamClient
+	cas        repb.ContentAddressableStorageClient
+
+	// per-RPC semaphores
+
+	semFindMissingBlobs *semaphore.Weighted
 	semBatchUpdateBlobs *semaphore.Weighted
 
 	// TODO(nodir): ensure it does not hurt streaming.
@@ -225,6 +229,8 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 // and is tightly coupled with NewClientWithConfig.
 func (c *Client) init() {
 	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobs.Concurrency))
+	c.semFindMissingBlobs = semaphore.NewWeighted(int64(c.FindMissingBlobs.Concurrency))
+
 	c.semFileIO = semaphore.NewWeighted(int64(c.FSConcurrency))
 	c.fileIOBufs.New = func() interface{} {
 		return make([]byte, c.FileIOSize)
