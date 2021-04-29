@@ -486,7 +486,10 @@ func (u *uploader) scheduleCheck(ctx context.Context, item *uploadItem) error {
 // check checks which items are present on the server, and schedules upload for
 // the missing ones.
 func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
-	// TODO(nodir): limit concurrency.
+	if err := u.semFindMissingBlobs.Acquire(ctx, 1); err != nil {
+		return err
+	}
+
 	req := &repb.FindMissingBlobsRequest{
 		InstanceName: u.InstanceName,
 		BlobDigests:  make([]*repb.Digest, len(items)),
