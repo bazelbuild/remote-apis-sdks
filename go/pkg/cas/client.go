@@ -126,7 +126,7 @@ func DefaultClientConfig() ClientConfig {
 		FileIOSize: 4 * 1024 * 1024, // 4MiB
 
 		FindMissingBlobs: RPCConfig{
-			Concurrency: 64,
+			Concurrency: 256, // Should be >= BatchUpdateBlobs.Concurrency.
 			MaxItems:    1000,
 			Timeout:     time.Minute,
 		},
