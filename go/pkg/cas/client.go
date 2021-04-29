@@ -40,6 +40,7 @@ type Client struct {
 
 	semFindMissingBlobs *semaphore.Weighted
 	semBatchUpdateBlobs *semaphore.Weighted
+	semByteStreamWrite  *semaphore.Weighted
 
 	// TODO(nodir): ensure it does not hurt streaming.
 	semFileIO *semaphore.Weighted
@@ -52,6 +53,9 @@ type Client struct {
 	// Use fileBufReaders.Get(), then reset the reader with bufio.Reader.Reset,
 	// and put back to the when done.
 	fileBufReaders sync.Pool
+
+	// streamBufs is a pool of []byte slices used for ByteStream read/write RPCs.
+	streamBufs sync.Pool
 
 	// Mockable functions.
 
@@ -78,12 +82,22 @@ type ClientConfig struct {
 	// FileIOSize is the size of file reads.
 	FileIOSize int64
 
-	// FindMissingBlobs is configuration for FindMissingBlobs RPCs.
+	// CompressedBytestreamThreshold is the minimum blob size to enable compression
+	// in ByteStream RPCs.
+	// Use 0 for all writes being compressed, and a negative number for all operations being
+	// uncompressed.
+	CompressedBytestreamThreshold int64
+
+	// FindMissingBlobs is configuration for ContentAddressableStorage.FindMissingBlobs RPCs.
 	// FindMissingBlobs.MaxSizeBytes is ignored.
 	FindMissingBlobs RPCConfig
 
-	// BatchUpdateBlobs is configuration for BatchUpdateBlobs RPCs.
+	// BatchUpdateBlobs is configuration for ContentAddressableStorage.BatchUpdateBlobs RPCs.
 	BatchUpdateBlobs RPCConfig
+
+	// ByteStreamWrite is configuration for ByteStream.Write RPCs.
+	// ByteStreamWrite.MaxItems is ignored.
+	ByteStreamWrite RPCConfig
 
 	// RetryPolicy specifies how to retry requests on transient errors.
 	RetryPolicy retry.BackoffPolicy
@@ -95,16 +109,18 @@ type ClientConfig struct {
 
 // RPCConfig is configuration for a particular CAS RPC.
 // Some of the fields might not apply to certain RPCs.
+//
+// For streaming RPCs, the values apply to individual requests/responses in a
+// stream, not the entire stream.
 type RPCConfig struct {
 	// Concurrency is the maximum number of RPCs in flight.
 	Concurrency int
 
 	// MaxSizeBytes is the maximum size of the request/response, in bytes.
-	// Applies only to unary RPCs.
 	MaxSizeBytes int
 
 	// MaxItems is the maximum number of blobs/digests per RPC.
-	// Applies only to unary batch RPCs, such as FindMissingBlobs.
+	// Applies only to batch RPCs, such as FindMissingBlobs.
 	MaxItems int
 
 	// Timeout is the maximum duration of the RPC.
@@ -147,6 +163,12 @@ func DefaultClientConfig() ClientConfig {
 			MaxSizeBytes: 4 * 1024 * 1024,
 			Timeout:      time.Minute,
 		},
+		ByteStreamWrite: RPCConfig{
+			Concurrency: 256,
+			// 4MiB is the default gRPC request size limit.
+			MaxSizeBytes: 4 * 1024 * 1024,
+			Timeout:      time.Minute,
+		},
 
 		RetryPolicy: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
 	}
@@ -178,6 +200,9 @@ func (c *ClientConfig) Validate() error {
 		return errors.Wrap(err, "FindMissingBlobs")
 	}
 	if err := c.BatchUpdateBlobs.validate(); err != nil {
+		return errors.Wrap(err, "BatchUpdateBlobs")
+	}
+	if err := c.ByteStreamWrite.validate(); err != nil {
 		return errors.Wrap(err, "BatchUpdateBlobs")
 	}
 	return nil
@@ -238,10 +263,19 @@ var emptyReader = bytes.NewReader(nil)
 func (c *Client) init() {
 	c.semFindMissingBlobs = semaphore.NewWeighted(int64(c.FindMissingBlobs.Concurrency))
 	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobs.Concurrency))
+	c.semByteStreamWrite = semaphore.NewWeighted(int64(c.ByteStreamWrite.Concurrency))
 
 	c.semFileIO = semaphore.NewWeighted(int64(c.FSConcurrency))
 	c.fileBufReaders.New = func() interface{} {
 		return bufio.NewReaderSize(emptyReader, int(c.FileIOSize))
+	}
+
+	streamBufSize := 32 * 1024 // by default, send 4KiB chunks.
+	if streamBufSize > c.ByteStreamWrite.MaxSizeBytes {
+		streamBufSize = int(c.ByteStreamWrite.MaxSizeBytes)
+	}
+	c.streamBufs.New = func() interface{} {
+		return make([]byte, streamBufSize)
 	}
 }
 
@@ -249,9 +283,15 @@ func (c *Client) init() {
 // Does not limit concurrency.
 // It is useful when f calls an unary RPC.
 func (c *Client) unaryRPC(ctx context.Context, cfg *RPCConfig, f func(context.Context) error) error {
-	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, func() error {
+	return c.withRetries(ctx, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
+		return f(ctx)
+	})
+}
+
+func (c *Client) withRetries(ctx context.Context, f func(context.Context) error) error {
+	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, func() error {
 		return f(ctx)
 	})
 }
@@ -271,5 +311,8 @@ func (c *Client) checkCapabilities(ctx context.Context) error {
 	if c.BatchUpdateBlobs.MaxSizeBytes > int(caps.CacheCapabilities.MaxBatchTotalSizeBytes) {
 		c.BatchUpdateBlobs.MaxSizeBytes = int(caps.CacheCapabilities.MaxBatchTotalSizeBytes)
 	}
+
+	// TODO(nodir): check compression capabilities.
+
 	return nil
 }
