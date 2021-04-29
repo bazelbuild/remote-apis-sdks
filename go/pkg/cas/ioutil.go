@@ -1,39 +1,81 @@
 package cas
 
 import (
+	"bufio"
 	"bytes"
-	"fmt"
 	"io"
+	"os"
+	"sync"
 )
 
 // This file contains various IO utility types and functions.
 
-// readSeekCloser can Read, Seek and Close.
-// TODO(nodir): use io.ReadSeekCloser after dropping Go 1.15 support.
-type readSeekCloser interface {
-	io.ReadSeeker
+// byteSource is a common interface to in-memory blobs and files.
+// Rewind() is used to retry uploads.
+type byteSource interface {
+	io.Reader
 	io.Closer
+	Rewind() error
 }
 
-// byteReader partially implements readSeekCloser on top of []byte.
-// Seek supports only Seek(0, 0).
-type byteReader struct {
+// fileSource implements byteSource on top of *os.File, with buffering.
+//
+// It buffering is done using a reusable bufio.Reader.
+// When the fileSource is closed, the bufio.Reader is placed back to a pool.
+type fileSource struct {
+	f          *os.File
+	bufReaders *sync.Pool
+	bufReader  *bufio.Reader
+}
+
+func newFileSource(f *os.File, bufReaders *sync.Pool) *fileSource {
+	bufReader := bufReaders.Get().(*bufio.Reader)
+	bufReader.Reset(f)
+	return &fileSource{
+		f:          f,
+		bufReaders: bufReaders,
+		bufReader:  bufReader,
+	}
+}
+
+func (f *fileSource) Read(p []byte) (int, error) {
+	return f.bufReader.Read(p)
+}
+
+func (f *fileSource) Rewind() error {
+	if _, err := f.f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	f.bufReader.Reset(f.f)
+	return nil
+}
+
+func (f *fileSource) Close() error {
+	if err := f.f.Close(); err != nil {
+		return err
+	}
+
+	// Put it back to the pool after closing the file, so that we don't try to
+	// put it back twice.
+	f.bufReaders.Put(f.bufReader)
+	return nil
+}
+
+// byteSliceSource implements byteSource on top of []byte.
+type byteSliceSource struct {
 	io.Reader
 	content []byte
 }
 
-func newByteReader(content []byte) *byteReader {
-	return &byteReader{Reader: bytes.NewReader(content), content: content}
+func newByteReader(content []byte) *byteSliceSource {
+	return &byteSliceSource{Reader: bytes.NewReader(content), content: content}
 }
 
-func (r *byteReader) Seek(offset int64, whence int) (int64, error) {
-	if offset != 0 || whence != io.SeekStart {
-		return 0, fmt.Errorf("unsupported")
-	}
+func (r *byteSliceSource) Rewind() error {
 	r.Reader = bytes.NewReader(r.content)
-	return 0, nil
+	return nil
 }
 
-func (r *byteReader) Close() error {
+func (r *byteSliceSource) Close() error {
 	return nil
 }

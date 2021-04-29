@@ -254,7 +254,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	}
 	defer u.semFileIO.Release(1)
 
-	f, err := os.Open(absPath)
+	f, err := u.openFileSource(absPath)
 	if err != nil {
 		return nil, err
 	}
@@ -279,9 +279,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	// It is a medium or large file.
 
 	// Compute the hash.
-	buf := u.fileIOBufs.Get().([]byte)
-	dig, err := digest.NewFromReaderWithBuffer(f, buf)
-	u.fileIOBufs.Put(buf)
+	dig, err := digest.NewFromReader(f)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to compute hash")
 	}
@@ -299,9 +297,8 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		// advantage of ByteStream's built-in presence check.
 		// https://github.com/bazelbuild/remote-apis/blob/0cd22f7b466ced15d7803e8845d08d3e8d2c51bc/build/bazel/remote/execution/v2/remote_execution.proto#L250-L254
 
-		item.Open = func() (readSeekCloser, error) {
-			_, err := f.Seek(0, io.SeekStart)
-			return f, err
+		item.Open = func() (byteSource, error) {
+			return f, f.Rewind()
 		}
 		panic("not implemented")
 		// TODO(nodir): implement.
@@ -310,10 +307,18 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	// Schedule a check and close the file (in defer).
 	// item.Open will reopen the file.
 
-	item.Open = func() (readSeekCloser, error) {
-		return os.Open(absPath)
+	item.Open = func() (byteSource, error) {
+		return u.openFileSource(absPath)
 	}
 	return ret, u.scheduleCheck(ctx, item)
+}
+
+func (u *uploader) openFileSource(absPath string) (byteSource, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, err
+	}
+	return newFileSource(f, &u.fileBufReaders), nil
 }
 
 // visitDir reads a directory and its descendants. The function blocks until
@@ -456,7 +461,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Mess
 type uploadItem struct {
 	Title  string
 	Digest *repb.Digest
-	Open   func() (readSeekCloser, error)
+	Open   func() (byteSource, error)
 }
 
 func (item *uploadItem) ReadAll() ([]byte, error) {
@@ -614,7 +619,7 @@ func uploadItemFromBlob(title string, blob []byte) *uploadItem {
 	item := &uploadItem{
 		Title:  title,
 		Digest: digest.NewFromBlob(blob).ToProto(),
-		Open: func() (readSeekCloser, error) {
+		Open: func() (byteSource, error) {
 			return newByteReader(blob), nil
 		},
 	}
