@@ -184,7 +184,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		// Compute the absolute path only once per directory tree.
 		absPath, err := filepath.Abs(in.Path)
 		if err != nil {
-			return errors.Wrapf(err, "failed to get absolute path")
+			return errors.Wrapf(err, "failed to get absolute path of %q", in.Path)
 		}
 
 		// Do not use os.Stat() here. We want to know if it is a symlink.
@@ -194,7 +194,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		}
 
 		_, err = u.visitFile(ctx, absPath, info)
-		return err
+		return errors.Wrapf(err, "%q", absPath)
 	})
 	return nil
 }
