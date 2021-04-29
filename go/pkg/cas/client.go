@@ -2,6 +2,8 @@
 package cas
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -44,8 +46,12 @@ type Client struct {
 	// muLargeFile ensures only one large file is read/written at a time.
 	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
 	muLargeFile sync.Mutex
-	// Pools of []byte slices with the length of ClientConfig.FileIOSize.
-	fileIOBufs sync.Pool
+
+	// fileBufReaders is a pool of reusable *bufio.Readers
+	// with buffer size = ClientConfig.FileIOSize, so e.g. 4MiB.
+	// Use fileBufReaders.Get(), then reset the reader with bufio.Reader.Reset,
+	// and put back to the when done.
+	fileBufReaders sync.Pool
 
 	// Mockable functions.
 
@@ -224,6 +230,8 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 	return client, nil
 }
 
+var emptyReader = bytes.NewReader(nil)
+
 // init is a part of NewClientWithConfig that can be done in tests without
 // creating a real gRPC connection. This function exists purely to aid testing,
 // and is tightly coupled with NewClientWithConfig.
@@ -232,8 +240,8 @@ func (c *Client) init() {
 	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobs.Concurrency))
 
 	c.semFileIO = semaphore.NewWeighted(int64(c.FSConcurrency))
-	c.fileIOBufs.New = func() interface{} {
-		return make([]byte, c.FileIOSize)
+	c.fileBufReaders.New = func() interface{} {
+		return bufio.NewReaderSize(emptyReader, int(c.FileIOSize))
 	}
 }
 

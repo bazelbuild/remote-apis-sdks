@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/golang/protobuf/proto"
 
@@ -25,6 +26,13 @@ var (
 
 	// Empty is the digest of the empty blob.
 	Empty = NewFromBlob([]byte{})
+
+	// copyBufs is a pool of 32KiB []byte slices, used to compute hashes.
+	copyBufs = sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 32*1024)
+		},
+	}
 )
 
 // Digest is a Go type to mirror the repb.Digest message.
@@ -147,15 +155,9 @@ func NewFromFile(path string) (Digest, error) {
 // NewFromReader computes a file digest from a reader.
 // It returns an error if there was a problem reading the file.
 func NewFromReader(r io.Reader) (Digest, error) {
-	// 32KiB is the buffer size used by io.Copy.
-	return NewFromReaderWithBuffer(r, make([]byte, 32*1024))
-}
-
-// NewFromReaderWithBuffer computes a file digest from a reader, using the
-// given buffer.
-// It returns an error if there was a problem reading the file.
-func NewFromReaderWithBuffer(r io.Reader, buf []byte) (Digest, error) {
 	h := HashFn.New()
+	buf := copyBufs.Get().([]byte)
+	defer copyBufs.Put(buf)
 	size, err := io.CopyBuffer(h, r, buf)
 	if err != nil {
 		return Empty, err
