@@ -11,15 +11,15 @@ import (
 
 // This file contains various IO utility types and functions.
 
-// byteSource is a common interface to in-memory blobs and files.
+// uploadSource is a common interface to in-memory blobs and files.
 // SeekStart is like io.Seeker.Seek, but only supports io.SeekStart.
-type byteSource interface {
+type uploadSource interface {
 	io.Reader
 	io.Closer
 	SeekStart(offset int64) error
 }
 
-// byteSliceSource implements byteSource on top of []byte.
+// byteSliceSource implements uploadSource on top of []byte.
 type byteSliceSource struct {
 	io.Reader
 	content []byte
@@ -41,7 +41,7 @@ func (s *byteSliceSource) Close() error {
 	return nil
 }
 
-// fileSource implements byteSource on top of *os.File, with buffering.
+// fileSource implements uploadSource on top of *os.File, with buffering.
 //
 // Buffering is done using a reusable bufio.Reader.
 // When the fileSource is closed, the bufio.Reader is placed back to a pool.

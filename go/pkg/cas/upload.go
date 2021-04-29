@@ -297,7 +297,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		// advantage of ByteStream's built-in presence check.
 		// https://github.com/bazelbuild/remote-apis/blob/0cd22f7b466ced15d7803e8845d08d3e8d2c51bc/build/bazel/remote/execution/v2/remote_execution.proto#L250-L254
 
-		item.Open = func() (byteSource, error) {
+		item.Open = func() (uploadSource, error) {
 			return f, f.SeekStart(0)
 		}
 		panic("not implemented")
@@ -307,13 +307,13 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	// Schedule a check and close the file (in defer).
 	// item.Open will reopen the file.
 
-	item.Open = func() (byteSource, error) {
+	item.Open = func() (uploadSource, error) {
 		return u.openFileSource(absPath)
 	}
 	return ret, u.scheduleCheck(ctx, item)
 }
 
-func (u *uploader) openFileSource(absPath string) (byteSource, error) {
+func (u *uploader) openFileSource(absPath string) (uploadSource, error) {
 	f, err := os.Open(absPath)
 	if err != nil {
 		return nil, err
@@ -461,7 +461,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string) (proto.Mess
 type uploadItem struct {
 	Title  string
 	Digest *repb.Digest
-	Open   func() (byteSource, error)
+	Open   func() (uploadSource, error)
 }
 
 func (item *uploadItem) ReadAll() ([]byte, error) {
@@ -619,7 +619,7 @@ func uploadItemFromBlob(title string, blob []byte) *uploadItem {
 	item := &uploadItem{
 		Title:  title,
 		Digest: digest.NewFromBlob(blob).ToProto(),
-		Open: func() (byteSource, error) {
+		Open: func() (uploadSource, error) {
 			return newByteSliceSource(blob), nil
 		},
 	}
