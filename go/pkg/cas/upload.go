@@ -298,7 +298,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		// https://github.com/bazelbuild/remote-apis/blob/0cd22f7b466ced15d7803e8845d08d3e8d2c51bc/build/bazel/remote/execution/v2/remote_execution.proto#L250-L254
 
 		item.Open = func() (byteSource, error) {
-			return f, f.Rewind()
+			return f, f.SeekStart(0)
 		}
 		panic("not implemented")
 		// TODO(nodir): implement.

@@ -3,6 +3,7 @@ package cas
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -11,11 +12,11 @@ import (
 // This file contains various IO utility types and functions.
 
 // byteSource is a common interface to in-memory blobs and files.
-// Rewind() is used to retry uploads.
+// SeekStart is like io.Seeker.Seek, but only supports io.SeekStart.
 type byteSource interface {
 	io.Reader
 	io.Closer
-	Rewind() error
+	SeekStart(offset int64) error
 }
 
 // byteSliceSource implements byteSource on top of []byte.
@@ -28,8 +29,11 @@ func newByteSliceSource(content []byte) *byteSliceSource {
 	return &byteSliceSource{Reader: bytes.NewReader(content), content: content}
 }
 
-func (s *byteSliceSource) Rewind() error {
-	s.Reader = bytes.NewReader(s.content)
+func (s *byteSliceSource) SeekStart(offset int64) error {
+	if offset < 0 || offset >= int64(len(s.content)) {
+		return fmt.Errorf("offset out of range")
+	}
+	s.Reader = bytes.NewReader(s.content[offset:])
 	return nil
 }
 
@@ -61,8 +65,8 @@ func (f *fileSource) Read(p []byte) (int, error) {
 	return f.r.Read(p)
 }
 
-func (f *fileSource) Rewind() error {
-	if _, err := f.f.Seek(0, io.SeekStart); err != nil {
+func (f *fileSource) SeekStart(offset int64) error {
+	if _, err := f.f.Seek(offset, io.SeekStart); err != nil {
 		return err
 	}
 	f.r.Reset(f.f)
