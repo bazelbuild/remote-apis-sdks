@@ -18,35 +18,54 @@ type byteSource interface {
 	Rewind() error
 }
 
+// byteSliceSource implements byteSource on top of []byte.
+type byteSliceSource struct {
+	io.Reader
+	content []byte
+}
+
+func newByteSliceSource(content []byte) *byteSliceSource {
+	return &byteSliceSource{Reader: bytes.NewReader(content), content: content}
+}
+
+func (s *byteSliceSource) Rewind() error {
+	s.Reader = bytes.NewReader(s.content)
+	return nil
+}
+
+func (s *byteSliceSource) Close() error {
+	return nil
+}
+
 // fileSource implements byteSource on top of *os.File, with buffering.
 //
-// It buffering is done using a reusable bufio.Reader.
+// Buffering is done using a reusable bufio.Reader.
 // When the fileSource is closed, the bufio.Reader is placed back to a pool.
 type fileSource struct {
-	f          *os.File
-	bufReaders *sync.Pool
-	bufReader  *bufio.Reader
+	f     *os.File
+	r     *bufio.Reader
+	rPool *sync.Pool
 }
 
 func newFileSource(f *os.File, bufReaders *sync.Pool) *fileSource {
-	bufReader := bufReaders.Get().(*bufio.Reader)
-	bufReader.Reset(f)
+	r := bufReaders.Get().(*bufio.Reader)
+	r.Reset(f)
 	return &fileSource{
-		f:          f,
-		bufReaders: bufReaders,
-		bufReader:  bufReader,
+		f:     f,
+		r:     r,
+		rPool: bufReaders,
 	}
 }
 
 func (f *fileSource) Read(p []byte) (int, error) {
-	return f.bufReader.Read(p)
+	return f.r.Read(p)
 }
 
 func (f *fileSource) Rewind() error {
 	if _, err := f.f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	f.bufReader.Reset(f.f)
+	f.r.Reset(f.f)
 	return nil
 }
 
@@ -55,27 +74,8 @@ func (f *fileSource) Close() error {
 		return err
 	}
 
-	// Put it back to the pool after closing the file, so that we don't try to
-	// put it back twice.
-	f.bufReaders.Put(f.bufReader)
-	return nil
-}
-
-// byteSliceSource implements byteSource on top of []byte.
-type byteSliceSource struct {
-	io.Reader
-	content []byte
-}
-
-func newByteReader(content []byte) *byteSliceSource {
-	return &byteSliceSource{Reader: bytes.NewReader(content), content: content}
-}
-
-func (r *byteSliceSource) Rewind() error {
-	r.Reader = bytes.NewReader(r.content)
-	return nil
-}
-
-func (r *byteSliceSource) Close() error {
+	// Put it back to the pool only after closing the file, so that we don't try
+	// to put it back twice in case Close() is called again.
+	f.rPool.Put(f.r)
 	return nil
 }

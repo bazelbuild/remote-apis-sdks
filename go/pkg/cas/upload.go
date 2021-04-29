@@ -620,7 +620,7 @@ func uploadItemFromBlob(title string, blob []byte) *uploadItem {
 		Title:  title,
 		Digest: digest.NewFromBlob(blob).ToProto(),
 		Open: func() (byteSource, error) {
-			return newByteReader(blob), nil
+			return newByteSliceSource(blob), nil
 		},
 	}
 	if item.Title == "" {
