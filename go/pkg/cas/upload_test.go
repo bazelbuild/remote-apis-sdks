@@ -372,6 +372,7 @@ func TestStreaming(t *testing.T) {
 	cfg.ByteStreamWrite.MaxSizeBytes = 2 // force multiple requests in a stream
 	cfg.SmallFileThreshold = 2
 	cfg.LargeFileThreshold = 3
+	cfg.CompressedBytestreamThreshold = 7 // between medium and large
 	client, err := NewClientWithConfig(ctx, conn, "instance", cfg)
 	if err != nil {
 		t.Fatal(err)

@@ -86,6 +86,7 @@ type ClientConfig struct {
 	// in ByteStream RPCs.
 	// Use 0 for all writes being compressed, and a negative number for all operations being
 	// uncompressed.
+	// DefaultClientConfig() disables compression by default.
 	CompressedBytestreamThreshold int64
 
 	// FindMissingBlobs is configuration for ContentAddressableStorage.FindMissingBlobs RPCs.
@@ -169,6 +170,9 @@ func DefaultClientConfig() ClientConfig {
 			MaxSizeBytes: 4 * 1024 * 1024,
 			Timeout:      time.Minute,
 		},
+
+		// Disable compression by default.
+		CompressedBytestreamThreshold: -1,
 
 		RetryPolicy: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
 	}

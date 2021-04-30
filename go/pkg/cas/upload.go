@@ -687,7 +687,7 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 	}
 	defer u.semByteStreamWrite.Release(1)
 
-	// Prepeare compressor, if needed.
+	// Prepare compressor, if needed.
 	enableCompression := item.Digest.SizeBytes >= u.CompressedBytestreamThreshold
 	var enc *zstd.Encoder
 	if enableCompression {
@@ -711,6 +711,8 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 	// TODO(nodir): implement per-RPC timeouts. No nice way to do it.
 	rewind := false
 	return u.withRetries(ctx, func(ctx context.Context) error {
+		// TODO(nodir): check QueryWriteStatus.
+
 		// Do not rewind if this is the first attempt.
 		if rewind {
 			if err := r.SeekStart(0); err != nil {
@@ -785,7 +787,7 @@ chunkLoop:
 		case err != nil:
 			return err
 		}
-		req.Data = buf[:n] // note: must happen in ErrUnexpectedEOF case
+		req.Data = buf[:n] // must limit by `:n` in ErrUnexpectedEOF case
 
 		// Send the chunk.
 		switch err = stream.Send(req); {
