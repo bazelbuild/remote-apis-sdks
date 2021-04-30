@@ -763,6 +763,7 @@ func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *re
 	if err != nil {
 		return err
 	}
+	defer stream.CloseSend()
 
 	req := &bspb.WriteRequest{}
 	if compressed {
