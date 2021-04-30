@@ -79,6 +79,8 @@ type TransferStats struct {
 type DigestStat struct {
 	Digests int64 // number of unique digests
 	Bytes   int64 // total sum of of digest sizes
+
+	// TODO(nodir): add something like TransferBytes, i.e. how much was actually transfered
 }
 
 // UploadOptions is optional configuration for Upload function.
@@ -686,20 +688,6 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 	}
 	defer u.semByteStreamWrite.Release(1)
 
-	// Prepare compressor, if needed.
-	enableCompression := item.Digest.SizeBytes >= u.CompressedBytestreamThreshold
-	var enc *zstd.Encoder
-	if enableCompression {
-		enc = zstdEncoders.Get().(*zstd.Encoder)
-		defer func() {
-			enc.Close()
-			zstdEncoders.Put(enc)
-		}()
-	}
-
-	streamBuf := u.streamBufs.Get().([]byte)
-	defer u.streamBufs.Put(streamBuf)
-
 	// Open the item.
 	r, err := item.Open()
 	if err != nil {
@@ -710,7 +698,7 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 	// TODO(nodir): implement per-RPC timeouts. No nice way to do it.
 	rewind := false
 	return u.withRetries(ctx, func(ctx context.Context) error {
-		// TODO(nodir): check QueryWriteStatus.
+		// TODO(nodir): add support for resumable uploads.
 
 		// Do not rewind if this is the first attempt.
 		if rewind {
@@ -720,14 +708,21 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 		}
 		rewind = true
 
-		if !enableCompression {
-			return u.streamFromReader(ctx, r, item.Digest, false, updateCacheStats, streamBuf)
+		if u.CompressedBytestreamThreshold < 0 || item.Digest.SizeBytes < u.CompressedBytestreamThreshold {
+			// No compression.
+			return u.streamFromReader(ctx, r, item.Digest, false, updateCacheStats)
 		}
 
 		// Compress using an in-memory pipe. This is mostly to accomodate the fact
 		// that zstd package expects a writer.
 		// Note that using io.Pipe() means we buffer only bytes that were not uploaded yet.
 		pr, pw := io.Pipe()
+
+		enc := zstdEncoders.Get().(*zstd.Encoder)
+		defer func() {
+			enc.Close()
+			zstdEncoders.Put(enc)
+		}()
 		enc.Reset(pw)
 
 		// Read from disk and make RPCs concurrently.
@@ -751,13 +746,13 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 		})
 		eg.Go(func() error {
 			defer pr.Close()
-			return u.streamFromReader(ctx, pr, item.Digest, true, updateCacheStats, streamBuf)
+			return u.streamFromReader(ctx, pr, item.Digest, true, updateCacheStats)
 		})
 		return eg.Wait()
 	})
 }
 
-func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *repb.Digest, compressed, updateCacheStats bool, buf []byte) error {
+func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *repb.Digest, compressed, updateCacheStats bool) error {
 	stream, err := u.byteStream.Write(ctx)
 	if err != nil {
 		return err
@@ -770,6 +765,9 @@ func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *re
 	} else {
 		req.ResourceName = fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", u.InstanceName, uuid.New(), digest.Hash, digest.SizeBytes)
 	}
+
+	buf := u.streamBufs.Get().([]byte)
+	defer u.streamBufs.Put(buf)
 
 chunkLoop:
 	for {

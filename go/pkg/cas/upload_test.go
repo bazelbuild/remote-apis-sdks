@@ -357,6 +357,7 @@ func TestSmallBlobs(t *testing.T) {
 }
 
 func TestStreaming(t *testing.T) {
+	// TODO(nodir): add tests for retries.
 	t.Parallel()
 	ctx := context.Background()
 
