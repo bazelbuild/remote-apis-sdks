@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	cloud.google.com/go v0.65.0 // indirect
-	github.com/bazelbuild/remote-apis v0.0.0-20210309154856-0943dc4e70e1
+	github.com/bazelbuild/remote-apis v0.0.0-20210430163111-3b7a4b50d27b
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/golang/protobuf v1.4.2
 	github.com/google/go-cmp v0.5.1
