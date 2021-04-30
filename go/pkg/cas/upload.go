@@ -616,8 +616,7 @@ func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
 	if marshalledRequestSize(item.Digest) > int64(u.batchBundler.BundleByteLimit) {
 		// There is no way this blob can fit in a batch request.
 		u.eg.Go(func() error {
-			err := u.stream(ctx, item, false)
-			return errors.Wrap(err, item.Title)
+			return errors.Wrap(u.stream(ctx, item, false), item.Title)
 		})
 		return nil
 	}
