@@ -274,7 +274,7 @@ func (c *Client) init() {
 		return bufio.NewReaderSize(emptyReader, int(c.FileIOSize))
 	}
 
-	streamBufSize := 32 * 1024 // by default, send 4KiB chunks.
+	streamBufSize := 32 * 1024 // by default, send 32KiB chunks.
 	if streamBufSize > c.ByteStreamWrite.MaxSizeBytes {
 		streamBufSize = int(c.ByteStreamWrite.MaxSizeBytes)
 	}
