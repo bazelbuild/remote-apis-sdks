@@ -87,7 +87,7 @@ def remote_apis_sdks_go_deps():
         go_repository,
         name = "com_github_bazelbuild_remote_apis",
         importpath = "github.com/bazelbuild/remote-apis",
-        commit = "0943dc4e70e1414735a85a3167557392c177ff45",  # 2021-03-09,
+        commit = "3b7a4b50d27bb040fc4139bf69b4489377b89136",  # 2021-04-30,
     )
     _maybe(
         go_repository,
