@@ -18,7 +18,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/ptypes"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
@@ -274,18 +273,47 @@ func (c *Client) DownloadBlob(ctx context.Context, blobDigest, path string) (str
 }
 
 // UploadBlob uploads a blob from the specified path into the remote cache.
-func (c *Client) UploadBlob(ctx context.Context, path string) error {
-	dg, err := digest.NewFromFile(path)
-	if err != nil {
+func (c *Client) UploadBlob(ctx context.Context, paths ...string) error {
+	return c.UploadBlobs(ctx, 1, paths)
+}
+
+// UploadBlobs uploads blobs from the specified paths into the remote cache.
+func (c *Client) UploadBlobs(ctx context.Context, concurrency uint64, paths []string) error {
+	uploader := newParallelUploader(ctx, c.GrpcClient, concurrency)
+	for _, path := range paths {
+		if err := uploader.Enqueue(path); err != nil {
+			return err
+		}
+	}
+	return uploader.CloseAndWait()
+}
+
+// UploadTree uploads a tree from the specified path into the remote cache.
+func (c *Client) UploadTree(ctx context.Context, concurrency uint64, path string) error {
+	uploader := newParallelUploader(ctx, c.GrpcClient, concurrency)
+
+	enqueueFn := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		switch mode := info.Mode(); {
+		case mode.IsRegular():
+			if err := uploader.Enqueue(path); err != nil {
+				return err
+			}
+
+		default:
+			// TODO(yannic): Handle uploading directory entries and symlinks.
+			break
+		}
+		return nil
+	}
+	if err := filepath.Walk(path, enqueueFn); err != nil {
 		return err
 	}
 
-	log.Infof("Uploading blob of %v from %v.", dg, path)
-	ue := uploadinfo.EntryFromFile(dg, path)
-	if _, _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
-		return err
-	}
-	return nil
+	return uploader.CloseAndWait()
 }
 
 // DownloadDirectory downloads a an input root from the remote cache into the specified path.

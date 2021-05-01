@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"io/ioutil"
+	"os"
 	"path"
 	"path/filepath"
 	"testing"
@@ -244,11 +245,14 @@ func TestTool_DownloadBlob(t *testing.T) {
 }
 
 func TestTool_UploadBlob(t *testing.T) {
+	tempDir := path.Join(t.TempDir(), "TestTool_UploadBlob")
+	os.MkdirAll(tempDir, os.ModePerm)
+
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 	cas := e.Server.CAS
 
-	tmpFile := path.Join(t.TempDir(), "blob")
+	tmpFile := path.Join(tempDir, "blob")
 	if err := ioutil.WriteFile(tmpFile, []byte("Hello, World!"), 0777); err != nil {
 		t.Fatalf("Could not create temp blob: %v", err)
 	}
@@ -274,5 +278,52 @@ func TestTool_UploadBlob(t *testing.T) {
 	}
 	if cas.BlobWrites(dg) != 1 {
 		t.Fatalf("Expected 1 write for blob '%v', got %v", dg.String(), cas.BlobWrites(dg))
+	}
+}
+
+func TestTool_UploadTree(t *testing.T) {
+	tempDir := path.Join(t.TempDir(), "TestTool_UploadTree")
+	os.MkdirAll(tempDir, os.ModePerm)
+
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	cas := e.Server.CAS
+
+	files := []string{
+		"blob",
+		"foo/blob",
+		"foo/bar/blob",
+		"bar/blob",
+	}
+
+	for _, file := range files {
+		path := path.Join(tempDir, file)
+		os.MkdirAll(filepath.Dir(path), os.ModePerm)
+		if err := ioutil.WriteFile(path, []byte(file), 0777); err != nil {
+			t.Fatalf("Could not create temp blob '%v': %v", file, err)
+		}
+	}
+
+	tmpFile := path.Join(tempDir, "blob")
+	if err := ioutil.WriteFile(tmpFile, []byte("Hello, World!"), 0777); err != nil {
+		t.Fatalf("Could not create temp blob: %v", err)
+	}
+
+	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
+	if err := toolClient.UploadTree(context.Background(), tempDir); err != nil {
+		t.Fatalf("UploadTree('%v') failed: %v", tmpFile, err)
+	}
+
+	// First request should upload the blob.
+	if cas.WriteReqs() != 4 {
+		t.Fatalf("Expected 4 writes, got %v", cas.WriteReqs())
+	}
+
+	// Retries should check whether the blob already exists and skip uploading if it does.
+	if err := toolClient.UploadTree(context.Background(), tempDir); err != nil {
+		t.Fatalf("UploadTree('%v') failed: %v", tmpFile, err)
+	}
+	if cas.WriteReqs() != 4 {
+		t.Fatalf("Expected 4 writes, got %v", cas.WriteReqs())
 	}
 }
