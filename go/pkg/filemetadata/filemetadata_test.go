@@ -13,6 +13,10 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
+var (
+	ignoreMtime = cmpopts.IgnoreFields(Metadata{}, "MTime")
+)
+
 func TestComputeFiles(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -50,7 +54,7 @@ func TestComputeFiles(t *testing.T) {
 				Digest:       digest.NewFromBlob([]byte(tc.contents)),
 				IsExecutable: tc.executable,
 			}
-			if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
+			if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
 				t.Errorf("Compute(%v) returned diff. (-want +got)\n%s", filename, diff)
 			}
 			if got.MTime.Before(before) || got.MTime.After(after) {
@@ -116,7 +120,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 				IsExecutable: tc.executable,
 			}
 
-			if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
+			if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
 				t.Errorf("Compute(%v) returned diff. (-want +got)\n%s", symlinkPath, diff)
 			}
 		})

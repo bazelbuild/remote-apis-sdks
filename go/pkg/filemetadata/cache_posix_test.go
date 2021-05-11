@@ -9,7 +9,6 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func TestExecutableCacheLoad(t *testing.T) {
@@ -29,7 +28,7 @@ func TestExecutableCacheLoad(t *testing.T) {
 		Digest:       wantDg,
 		IsExecutable: true,
 	}
-	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
+	if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
 		t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 	}
 }
