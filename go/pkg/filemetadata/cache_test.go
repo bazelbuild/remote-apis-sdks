@@ -8,6 +8,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 var (
@@ -32,7 +33,7 @@ func TestSimpleCacheLoad(t *testing.T) {
 		Digest:       wantDg,
 		IsExecutable: false,
 	}
-	if diff := cmp.Diff(want, got); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 		t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 	}
 	if c.GetCacheHits() != 0 {
@@ -62,7 +63,7 @@ func TestCacheOnceLoadMultiple(t *testing.T) {
 		if got.Err != nil {
 			t.Errorf("Get(%v) failed. Got error: %v", filename, got.Err)
 		}
-		if diff := cmp.Diff(want, got); diff != "" {
+		if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 			t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 		}
 	}
@@ -91,7 +92,7 @@ func TestLoadAfterChangeWithoutValidation(t *testing.T) {
 		Digest:       wantDg,
 		IsExecutable: false,
 	}
-	if diff := cmp.Diff(want, got); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 		t.Fatalf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 	}
 
@@ -103,7 +104,7 @@ func TestLoadAfterChangeWithoutValidation(t *testing.T) {
 	if got.Err != nil {
 		t.Errorf("Get(%v) failed. Got error: %v", filename, got.Err)
 	}
-	if diff := cmp.Diff(want, got); diff != "" {
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 		t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 	}
 	if c.GetCacheHits() != 1 {

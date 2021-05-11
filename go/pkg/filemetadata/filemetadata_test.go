@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func TestComputeFiles(t *testing.T) {
@@ -33,10 +35,12 @@ func TestComputeFiles(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			before := time.Now().Truncate(time.Second)
 			filename, err := testutil.CreateFile(t, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
+			after := time.Now().Truncate(time.Second).Add(time.Second)
 			defer os.RemoveAll(filename)
 			got := Compute(filename)
 			if got.Err != nil {
@@ -46,8 +50,11 @@ func TestComputeFiles(t *testing.T) {
 				Digest:       digest.NewFromBlob([]byte(tc.contents)),
 				IsExecutable: tc.executable,
 			}
-			if diff := cmp.Diff(want, got); diff != "" {
+			if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 				t.Errorf("Compute(%v) returned diff. (-want +got)\n%s", filename, diff)
+			}
+			if got.MTime.Before(before) || got.MTime.After(after) {
+				t.Errorf("Compute(%v) returned MTime %v, want time in (%v, %v).", filename, got.MTime, before, after)
 			}
 		})
 	}
@@ -109,7 +116,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 				IsExecutable: tc.executable,
 			}
 
-			if diff := cmp.Diff(want, got); diff != "" {
+			if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Metadata{}, "MTime")); diff != "" {
 				t.Errorf("Compute(%v) returned diff. (-want +got)\n%s", symlinkPath, diff)
 			}
 		})
