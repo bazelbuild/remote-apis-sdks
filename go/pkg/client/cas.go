@@ -453,7 +453,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				}
 				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
 				}
 				atomic.AddInt64(&totalBytesTransferred, written)
 			}
