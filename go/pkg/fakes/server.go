@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
@@ -73,10 +74,20 @@ func (s *Server) Stop() {
 
 // NewTestClient returns a new in-process Client connected to this server.
 func (s *Server) NewTestClient(ctx context.Context) (*rc.Client, error) {
-	return rc.NewClient(ctx, "instance", rc.DialParams{
+	return rc.NewClient(ctx, "instance", s.dialParams())
+}
+
+// NewClientConn returns a gRPC client connction to the server.
+func (s *Server) NewClientConn(ctx context.Context) (*grpc.ClientConn, error) {
+	p := s.dialParams()
+	return client.Dial(ctx, p.Service, p)
+}
+
+func (s *Server) dialParams() rc.DialParams {
+	return rc.DialParams{
 		Service:    s.listener.Addr().String(),
 		NoSecurity: true,
-	})
+	}
 }
 
 // TestEnv is a wrapper for convenient integration tests of remote execution.

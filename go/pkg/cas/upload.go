@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/google/uuid"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/support/bundler"
@@ -22,11 +24,22 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
 // ErrFilteredSymlinkTarget is returned when a symlink's target was filtered out
 // via UploadInput.PathExclude or ErrSkip, while the symlink itself wasn't.
 var ErrFilteredSymlinkTarget = errors.New("symlink's target was filtered out")
+
+// zstdEncoders is a pool of ZStd encoders.
+// Clients of this pool must call Close() on the encoder after using the
+// encoder.
+var zstdEncoders = sync.Pool{
+	New: func() interface{} {
+		enc, _ := zstd.NewWriter(nil)
+		return enc
+	},
+}
 
 // UploadInput is one of inputs to Client.Upload function.
 //
@@ -66,6 +79,8 @@ type TransferStats struct {
 type DigestStat struct {
 	Digests int64 // number of unique digests
 	Bytes   int64 // total sum of of digest sizes
+
+	// TODO(nodir): add something like TransferBytes, i.e. how much was actually transfered
 }
 
 // UploadOptions is optional configuration for Upload function.
@@ -361,8 +376,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		item.Open = func() (uploadSource, error) {
 			return f, f.SeekStart(0)
 		}
-		panic("not implemented")
-		// TODO(nodir): implement.
+		return ret, u.stream(ctx, item, true)
 	}
 
 	// Schedule a check and close the file (in defer).
@@ -603,8 +617,10 @@ func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
 	// Check if this blob can be uploaded in a batch.
 	if marshalledRequestSize(item.Digest) > int64(u.batchBundler.BundleByteLimit) {
 		// There is no way this blob can fit in a batch request.
-		// TODO(nodir): implement streaming.
-		panic("not implemented")
+		u.eg.Go(func() error {
+			return errors.Wrap(u.stream(ctx, item, false), item.Title)
+		})
+		return nil
 	}
 
 	// Since this blob is small enough, just read it entirely.
@@ -660,6 +676,157 @@ func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlob
 		atomic.AddInt64(&u.stats.Batched.Digests, digestsTransferred)
 		return retriableErr
 	})
+}
+
+// stream uploads the item using ByteStream service.
+//
+// If the blob is already uploaded, then the function returns quickly and
+// without an error.
+func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStats bool) error {
+	if err := u.semByteStreamWrite.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer u.semByteStreamWrite.Release(1)
+
+	// Open the item.
+	r, err := item.Open()
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	// TODO(nodir): implement per-RPC timeouts. No nice way to do it.
+	rewind := false
+	return u.withRetries(ctx, func(ctx context.Context) error {
+		// TODO(nodir): add support for resumable uploads.
+
+		// Do not rewind if this is the first attempt.
+		if rewind {
+			if err := r.SeekStart(0); err != nil {
+				return err
+			}
+		}
+		rewind = true
+
+		if u.CompressedBytestreamThreshold < 0 || item.Digest.SizeBytes < u.CompressedBytestreamThreshold {
+			// No compression.
+			return u.streamFromReader(ctx, r, item.Digest, false, updateCacheStats)
+		}
+
+		// Compress using an in-memory pipe. This is mostly to accomodate the fact
+		// that zstd package expects a writer.
+		// Note that using io.Pipe() means we buffer only bytes that were not uploaded yet.
+		pr, pw := io.Pipe()
+
+		enc := zstdEncoders.Get().(*zstd.Encoder)
+		defer func() {
+			enc.Close()
+			zstdEncoders.Put(enc)
+		}()
+		enc.Reset(pw)
+
+		// Read from disk and make RPCs concurrently.
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			switch _, err := enc.ReadFrom(r); {
+			case err == io.ErrClosedPipe:
+				// The other goroutine exited before we finished encoding.
+				// Might be a cache hit or context cancelation.
+				// In any case, the other goroutine has the actual error, so return nil
+				// here.
+				return nil
+			case err != nil:
+				return errors.Wrapf(err, "failed to read the file/blob")
+			}
+
+			if err := enc.Close(); err != nil {
+				return errors.Wrapf(err, "failed to close the zstd encoder")
+			}
+			return pw.Close()
+		})
+		eg.Go(func() error {
+			defer pr.Close()
+			return u.streamFromReader(ctx, pr, item.Digest, true, updateCacheStats)
+		})
+		return eg.Wait()
+	})
+}
+
+func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *repb.Digest, compressed, updateCacheStats bool) error {
+	stream, err := u.byteStream.Write(ctx)
+	if err != nil {
+		return err
+	}
+	defer stream.CloseSend()
+
+	req := &bspb.WriteRequest{}
+	if compressed {
+		req.ResourceName = fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", u.InstanceName, uuid.New(), digest.Hash, digest.SizeBytes)
+	} else {
+		req.ResourceName = fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", u.InstanceName, uuid.New(), digest.Hash, digest.SizeBytes)
+	}
+
+	buf := u.streamBufs.Get().([]byte)
+	defer u.streamBufs.Put(buf)
+
+chunkLoop:
+	for {
+		// Before reading, check if the context if canceled.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Read the next chunk from the pipe.
+		// Use ReadFull to ensure we aren't sending tiny blobs over RPC.
+		n, err := io.ReadFull(r, buf)
+		switch {
+		case err == io.EOF || err == io.ErrUnexpectedEOF:
+			req.FinishWrite = true
+		case err != nil:
+			return err
+		}
+		req.Data = buf[:n] // must limit by `:n` in ErrUnexpectedEOF case
+
+		// Send the chunk.
+		switch err = stream.Send(req); {
+		case err == io.EOF:
+			// The server closed the stream.
+			// Most likely the file is already uploaded, see the CommittedSize check below.
+			break chunkLoop
+		case err != nil:
+			return err
+		case req.FinishWrite:
+			break chunkLoop
+		}
+
+		// Prepare the next request.
+		req.ResourceName = "" // send the resource name only in the first request
+		req.WriteOffset += int64(len(req.Data))
+	}
+
+	// Finalize the request.
+	switch res, err := stream.CloseAndRecv(); {
+	case err != nil:
+		return err
+	case res.CommittedSize != digest.SizeBytes:
+		return fmt.Errorf("unexpected commitSize: got %d, want %d", res.CommittedSize, digest.SizeBytes)
+	}
+
+	// Update stats.
+	cacheHit := !req.FinishWrite
+	if !cacheHit {
+		atomic.AddInt64(&u.stats.Streamed.Bytes, digest.SizeBytes)
+		atomic.AddInt64(&u.stats.Streamed.Digests, 1)
+	}
+	if updateCacheStats {
+		st := &u.stats.CacheMisses
+		if cacheHit {
+			st = &u.stats.CacheHits
+		}
+		atomic.AddInt64(&st.Bytes, digest.SizeBytes)
+		atomic.AddInt64(&st.Digests, 1)
+	}
+	return nil
 }
 
 // uploadItemFromDirMsg creates an upload item for a directory.

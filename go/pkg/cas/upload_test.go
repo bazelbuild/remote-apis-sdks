@@ -11,14 +11,16 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/google/go-cmp/cmp"
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	"github.com/golang/protobuf/proto"
-	"github.com/google/go-cmp/cmp"
-	"github.com/pkg/errors"
 )
 
 func TestFS(t *testing.T) {
@@ -351,6 +353,70 @@ func TestSmallBlobs(t *testing.T) {
 	})
 	if diff := cmp.Diff(wantUploadBlobsReqs, gotUploadBlobReqs, cmp.Comparer(proto.Equal)); diff != "" {
 		t.Error(diff)
+	}
+}
+
+func TestStreaming(t *testing.T) {
+	// TODO(nodir): add tests for retries.
+	t.Parallel()
+	ctx := context.Background()
+
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	conn, err := e.Server.NewClientConn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := DefaultClientConfig()
+	cfg.BatchUpdateBlobs.MaxSizeBytes = 1
+	cfg.ByteStreamWrite.MaxSizeBytes = 2 // force multiple requests in a stream
+	cfg.SmallFileThreshold = 2
+	cfg.LargeFileThreshold = 3
+	cfg.CompressedBytestreamThreshold = 7 // between medium and large
+	client, err := NewClientWithConfig(ctx, conn, "instance", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	largeFilePath := filepath.Join(t.TempDir(), "testdata", "large")
+	putFile(t, largeFilePath, "laaaaaaaaaaarge")
+
+	inputC := inputChanFrom(
+		&UploadInput{Content: []byte("medium")}, // large blob
+		&UploadInput{Path: largeFilePath},       // large file
+	)
+	gotStats, err := client.Upload(ctx, UploadOptions{}, inputC)
+	if err != nil {
+		t.Fatalf("failed to upload: %s", err)
+	}
+
+	cas := e.Server.CAS
+	if cas.WriteReqs() != 2 {
+		t.Errorf("want 2 write requests, got %d", cas.WriteReqs())
+	}
+
+	blobDigest := digest.Digest{Hash: "c082456a7766e23a18db084cd34b6ff510baef506548b897cc80e9b7d3e121c8", Size: 6}
+	if got := cas.BlobWrites(blobDigest); got != 1 {
+		t.Errorf("want 1 write of %s, got %d", blobDigest, got)
+	}
+
+	fileDigest := digest.Digest{Hash: "71944dd83e7e86354c3a9284e299e0d76c0b1108be62c8e7cefa72adf22128bf", Size: 15}
+	if got := cas.BlobWrites(fileDigest); got != 1 {
+		t.Errorf("want 1 write of %s, got %d", fileDigest, got)
+	}
+
+	wantStats := &TransferStats{
+		CacheMisses: DigestStat{Digests: 2, Bytes: 21},
+		Streamed:    DigestStat{Digests: 2, Bytes: 21},
+	}
+	if diff := cmp.Diff(wantStats, gotStats); diff != "" {
+		t.Errorf("unexpected stats (-want +got):\n%s", diff)
+	}
+
+	// Upload the large file again.
+	if _, err := client.Upload(ctx, UploadOptions{}, inputChanFrom(&UploadInput{Path: largeFilePath})); err != nil {
+		t.Fatalf("failed to upload: %s", err)
 	}
 }
 
