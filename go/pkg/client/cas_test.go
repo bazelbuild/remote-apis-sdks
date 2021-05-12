@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -599,8 +600,8 @@ func TestUploadCancel(t *testing.T) {
 			eg, _ := errgroup.WithContext(cCtx)
 			ue := uploadinfo.EntryFromBlob(blob)
 			eg.Go(func() error {
-				if _, _, err := c.UploadIfMissing(cCtx, ue); err != context.Canceled {
-					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context.Canceled", err)
+				if _, _, err := c.UploadIfMissing(cCtx, ue); !errors.Is(err, context.Canceled) {
+					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected to wrap context.Canceled", err)
 				}
 				return nil
 			})
