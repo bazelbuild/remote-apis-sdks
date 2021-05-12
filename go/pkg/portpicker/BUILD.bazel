@@ -1,7 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
-    name = "go_default_library",
+    name = "portpicker",
     srcs = ["portpicker.go"],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker",
     visibility = ["//visibility:public"],

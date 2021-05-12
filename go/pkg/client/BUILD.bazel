@@ -1,7 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "go_default_library",
+    name = "client",
     srcs = [
         "bytestream.go",
         "capabilities.go",
@@ -15,15 +15,15 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/client",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/pkg/actas:go_default_library",
-        "//go/pkg/balancer:go_default_library",
-        "//go/pkg/balancer/proto:go_default_library",
-        "//go/pkg/chunker:go_default_library",
-        "//go/pkg/command:go_default_library",
-        "//go/pkg/digest:go_default_library",
-        "//go/pkg/filemetadata:go_default_library",
-        "//go/pkg/retry:go_default_library",
-        "//go/pkg/uploadinfo:go_default_library",
+        "//go/pkg/actas",
+        "//go/pkg/balancer",
+        "//go/pkg/balancer/proto",
+        "//go/pkg/chunker",
+        "//go/pkg/command",
+        "//go/pkg/digest",
+        "//go/pkg/filemetadata",
+        "//go/pkg/retry",
+        "//go/pkg/uploadinfo",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
         "@com_github_golang_glog//:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
@@ -49,7 +49,7 @@ go_library(
 )
 
 go_test(
-    name = "go_default_test",
+    name = "client_test",
     srcs = [
         "batch_retries_test.go",
         "cas_internal_test.go",
@@ -60,16 +60,16 @@ go_test(
         "tree_test.go",
         "tree_whitebox_test.go",
     ],
-    embed = [":go_default_library"],
+    embed = [":client"],
     deps = [
-        "//go/pkg/chunker:go_default_library",
-        "//go/pkg/command:go_default_library",
-        "//go/pkg/digest:go_default_library",
-        "//go/pkg/fakes:go_default_library",
-        "//go/pkg/filemetadata:go_default_library",
-        "//go/pkg/portpicker:go_default_library",
-        "//go/pkg/retry:go_default_library",
-        "//go/pkg/uploadinfo:go_default_library",
+        "//go/pkg/chunker",
+        "//go/pkg/command",
+        "//go/pkg/digest",
+        "//go/pkg/fakes",
+        "//go/pkg/filemetadata",
+        "//go/pkg/portpicker",
+        "//go/pkg/retry",
+        "//go/pkg/uploadinfo",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
         "@com_github_bazelbuild_remote_apis//build/bazel/semver:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",

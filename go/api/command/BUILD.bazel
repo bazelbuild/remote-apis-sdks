@@ -17,7 +17,7 @@ go_proto_library(
 )
 
 go_library(
-    name = "go_default_library",
+    name = "command",
     embed = [":command_go_proto"],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/api/command",
     visibility = ["//visibility:public"],

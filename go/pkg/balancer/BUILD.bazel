@@ -1,7 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "go_default_library",
+    name = "balancer",
     srcs = [
         "gcp_balancer.go",
         "gcp_interceptor.go",
@@ -10,7 +10,7 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/pkg/balancer/proto:go_default_library",
+        "//go/pkg/balancer/proto",
         "@com_github_golang_protobuf//jsonpb:go_default_library_gen",
         "@org_golang_google_grpc//:go_default_library",
         "@org_golang_google_grpc//balancer:go_default_library",
@@ -21,9 +21,9 @@ go_library(
 )
 
 go_test(
-    name = "go_default_test",
+    name = "balancer_test",
     srcs = ["gcp_balancer_test.go"],
-    embed = [":go_default_library"],
+    embed = [":balancer"],
     deps = [
         "@com_github_pborman_uuid//:go_default_library",
         "@org_golang_google_grpc//balancer:go_default_library",

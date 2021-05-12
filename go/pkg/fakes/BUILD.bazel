@@ -1,7 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
-    name = "go_default_library",
+    name = "fakes",
     srcs = [
         "ac.go",
         "cas.go",
@@ -11,13 +11,13 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/pkg/chunker:go_default_library",
-        "//go/pkg/client:go_default_library",
-        "//go/pkg/command:go_default_library",
-        "//go/pkg/digest:go_default_library",
-        "//go/pkg/filemetadata:go_default_library",
-        "//go/pkg/rexec:go_default_library",
-        "//go/pkg/uploadinfo:go_default_library",
+        "//go/pkg/chunker",
+        "//go/pkg/client",
+        "//go/pkg/command",
+        "//go/pkg/digest",
+        "//go/pkg/filemetadata",
+        "//go/pkg/rexec",
+        "//go/pkg/uploadinfo",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
         "@com_github_golang_glog//:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",

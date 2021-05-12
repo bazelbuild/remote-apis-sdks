@@ -1,6 +1,6 @@
 module github.com/bazelbuild/remote-apis-sdks
 
-go 1.13
+go 1.15
 
 require (
 	cloud.google.com/go v0.65.0 // indirect
