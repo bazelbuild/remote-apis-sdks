@@ -1,7 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "go_default_library",
+    name = "outerr",
     srcs = ["outerr.go"],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr",
     visibility = ["//visibility:public"],
@@ -9,7 +9,7 @@ go_library(
 )
 
 go_test(
-    name = "go_default_test",
+    name = "outerr_test",
     srcs = ["outerr_test.go"],
-    embed = [":go_default_library"],
+    embed = [":outerr"],
 )
