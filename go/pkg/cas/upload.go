@@ -11,7 +11,6 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
@@ -899,22 +898,4 @@ func marshalledRequestSize(d *repb.Digest) int64 {
 		reqSize += marshalledFieldSize(int64(d.SizeBytes))
 	}
 	return marshalledFieldSize(reqSize)
-}
-
-// withPerCallTimeout returns a function wrapper that cancels the context if
-// fn does not return within the timeout.
-func withPerCallTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc, func(fn func())) {
-	ctx, cancel := context.WithCancel(ctx)
-	return ctx, cancel, func(fn func()) {
-		stop := make(chan struct{})
-		defer close(stop)
-		go func() {
-			select {
-			case <-time.After(timeout):
-				cancel()
-			case <-stop:
-			}
-		}()
-		fn()
-	}
 }

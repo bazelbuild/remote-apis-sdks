@@ -320,3 +320,21 @@ func (c *Client) checkCapabilities(ctx context.Context) error {
 
 	return nil
 }
+
+// withPerCallTimeout returns a function wrapper that cancels the context if
+// fn does not return within the timeout.
+func withPerCallTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc, func(fn func())) {
+	ctx, cancel := context.WithCancel(ctx)
+	return ctx, cancel, func(fn func()) {
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			select {
+			case <-time.After(timeout):
+				cancel()
+			case <-stop:
+			}
+		}()
+		fn()
+	}
+}
