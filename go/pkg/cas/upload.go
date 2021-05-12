@@ -695,7 +695,6 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 	}
 	defer r.Close()
 
-	// TODO(nodir): implement per-RPC timeouts. No nice way to do it.
 	rewind := false
 	return u.withRetries(ctx, func(ctx context.Context) error {
 		// TODO(nodir): add support for resumable uploads.
@@ -753,6 +752,9 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 }
 
 func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *repb.Digest, compressed, updateCacheStats bool) error {
+	ctx, cancel, withTimeout := withPerCallTimeout(ctx, u.ByteStreamWrite.Timeout)
+	defer cancel()
+
 	stream, err := u.byteStream.Write(ctx)
 	if err != nil {
 		return err
@@ -788,7 +790,10 @@ chunkLoop:
 		req.Data = buf[:n] // must limit by `:n` in ErrUnexpectedEOF case
 
 		// Send the chunk.
-		switch err = stream.Send(req); {
+		withTimeout(func() {
+			err = stream.Send(req)
+		})
+		switch {
 		case err == io.EOF:
 			// The server closed the stream.
 			// Most likely the file is already uploaded, see the CommittedSize check below.
