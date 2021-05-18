@@ -96,20 +96,20 @@ type UploadOptions struct {
 	// This field is ignored if PreserveSymlinks is false, which is the default.
 	AllowDanglingSymlinks bool
 
-	// Callback is called for each file/dir to be uploaded.
+	// Prelude is called for each file/dir to be read and uploaded.
 	// If it returns an error which is ErrSkip according to errors.Is, then the
 	// file/dir is not processed.
 	// If it returns another error, then the upload is halted with that error.
 	//
-	// Callback might be called multiple times for the same file if different
+	// Prelude might be called multiple times for the same file if different
 	// UploadInputs directly/indirectly refer to the same file, but with different
 	// PathExclude.
 	//
-	// Callback is called from different goroutines.
-	Callback func(absPath string, mode os.FileMode) error
+	// Prelude is called from different goroutines.
+	Prelude func(absPath string, mode os.FileMode) error
 }
 
-// ErrSkip, when returned by UploadOptions.Callback, means the file/dir must be
+// ErrSkip, when returned by UploadOptions.Prelude, means the file/dir must be
 // not be uploaded.
 //
 // Note that if UploadOptions.PreserveSymlinks is true and the ErrSkip is
@@ -256,9 +256,9 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 	if pathExclude != nil && pathExclude.MatchString(absPath) {
 		return nil, nil
 	}
-	// Call the callback only after checking the pathExclude.
-	if u.Callback != nil {
-		switch err := u.Callback(absPath, info.Mode()); {
+	// Call the Prelude only after checking the pathExclude.
+	if u.Prelude != nil {
+		switch err := u.Prelude(absPath, info.Mode()); {
 		case errors.Is(err, ErrSkip):
 			return nil, nil
 		case err != nil:
@@ -530,7 +530,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	case !u.PreserveSymlinks:
 		return targetNode, nil
 	case targetNode == nil && !u.AllowDanglingSymlinks:
-		// The target got skipped via Callback or PathExclude,
+		// The target got skipped via Prelude or PathExclude,
 		// resulting in a dangling symlink, which is not allowed.
 		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
 	default:

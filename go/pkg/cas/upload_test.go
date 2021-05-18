@@ -109,7 +109,7 @@ func TestFS(t *testing.T) {
 			desc:   "root-without-a-using-callback",
 			inputs: []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
 			opt: UploadOptions{
-				Callback: func(absPath string, mode os.FileMode) error {
+				Prelude: func(absPath string, mode os.FileMode) error {
 					if filepath.Base(absPath) == "a" {
 						return ErrSkip
 					}
@@ -154,7 +154,7 @@ func TestFS(t *testing.T) {
 			desc:   "root-without-subdir",
 			inputs: []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
 			opt: UploadOptions{
-				Callback: func(absPath string, mode os.FileMode) error {
+				Prelude: func(absPath string, mode os.FileMode) error {
 					if strings.Contains(absPath, "subdir") {
 						return ErrSkip
 					}
