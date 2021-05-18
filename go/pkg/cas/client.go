@@ -30,8 +30,8 @@ type Client struct {
 	// InstanceName is the full name of the RBE instance.
 	InstanceName string
 
-	// ClientConfig is the configuration that the client was created with.
-	ClientConfig
+	// Config is the configuration that the client was created with.
+	Config ClientConfig
 
 	byteStream bspb.ByteStreamClient
 	cas        repb.ContentAddressableStorageClient
@@ -243,12 +243,12 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 
 	client := &Client{
 		InstanceName: instanceName,
-		ClientConfig: config,
+		Config:       config,
 		conn:         conn,
 		byteStream:   bspb.NewByteStreamClient(conn),
 		cas:          repb.NewContentAddressableStorageClient(conn),
 	}
-	if !client.IgnoreCapabilities {
+	if !client.Config.IgnoreCapabilities {
 		if err := client.checkCapabilities(ctx); err != nil {
 			return nil, errors.Wrapf(err, "checking capabilities")
 		}
@@ -265,18 +265,18 @@ var emptyReader = bytes.NewReader(nil)
 // creating a real gRPC connection. This function exists purely to aid testing,
 // and is tightly coupled with NewClientWithConfig.
 func (c *Client) init() {
-	c.semFindMissingBlobs = semaphore.NewWeighted(int64(c.FindMissingBlobs.Concurrency))
-	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.BatchUpdateBlobs.Concurrency))
-	c.semByteStreamWrite = semaphore.NewWeighted(int64(c.ByteStreamWrite.Concurrency))
+	c.semFindMissingBlobs = semaphore.NewWeighted(int64(c.Config.FindMissingBlobs.Concurrency))
+	c.semBatchUpdateBlobs = semaphore.NewWeighted(int64(c.Config.BatchUpdateBlobs.Concurrency))
+	c.semByteStreamWrite = semaphore.NewWeighted(int64(c.Config.ByteStreamWrite.Concurrency))
 
-	c.semFileIO = semaphore.NewWeighted(int64(c.FSConcurrency))
+	c.semFileIO = semaphore.NewWeighted(int64(c.Config.FSConcurrency))
 	c.fileBufReaders.New = func() interface{} {
-		return bufio.NewReaderSize(emptyReader, int(c.FileIOSize))
+		return bufio.NewReaderSize(emptyReader, int(c.Config.FileIOSize))
 	}
 
 	streamBufSize := 32 * 1024 // by default, send 32KiB chunks.
-	if streamBufSize > c.ByteStreamWrite.MaxSizeBytes {
-		streamBufSize = int(c.ByteStreamWrite.MaxSizeBytes)
+	if streamBufSize > c.Config.ByteStreamWrite.MaxSizeBytes {
+		streamBufSize = int(c.Config.ByteStreamWrite.MaxSizeBytes)
 	}
 	c.streamBufs.New = func() interface{} {
 		return make([]byte, streamBufSize)
@@ -295,7 +295,7 @@ func (c *Client) unaryRPC(ctx context.Context, cfg *RPCConfig, f func(context.Co
 }
 
 func (c *Client) withRetries(ctx context.Context, f func(context.Context) error) error {
-	return retry.WithPolicy(ctx, retry.TransientOnly, c.RetryPolicy, func() error {
+	return retry.WithPolicy(ctx, retry.TransientOnly, c.Config.RetryPolicy, func() error {
 		return f(ctx)
 	})
 }
@@ -312,8 +312,8 @@ func (c *Client) checkCapabilities(ctx context.Context) error {
 		return errors.Wrapf(err, "digest function mismatch")
 	}
 
-	if c.BatchUpdateBlobs.MaxSizeBytes > int(caps.CacheCapabilities.MaxBatchTotalSizeBytes) {
-		c.BatchUpdateBlobs.MaxSizeBytes = int(caps.CacheCapabilities.MaxBatchTotalSizeBytes)
+	if c.Config.BatchUpdateBlobs.MaxSizeBytes > int(caps.CacheCapabilities.MaxBatchTotalSizeBytes) {
+		c.Config.BatchUpdateBlobs.MaxSizeBytes = int(caps.CacheCapabilities.MaxBatchTotalSizeBytes)
 	}
 
 	// TODO(nodir): check compression capabilities.
