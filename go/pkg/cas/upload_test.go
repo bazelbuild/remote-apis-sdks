@@ -151,7 +151,7 @@ func TestFS(t *testing.T) {
 			},
 		},
 		{
-			desc: "same-regular-file-is-not-uploaded-twice",
+			desc: "same-regular-file-is-read-only-once",
 			// The two regexps below do not exclude anything.
 			// This test ensures that same files aren't checked twice.
 			inputs: []*UploadInput{
