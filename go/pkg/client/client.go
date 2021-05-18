@@ -36,9 +36,7 @@ import (
 )
 
 const (
-	scopes      = "https://www.googleapis.com/auth/cloud-platform"
-	authority   = "test-server"
-	localPrefix = "localhost"
+	scopes = "https://www.googleapis.com/auth/cloud-platform"
 
 	// HomeDirMacro is replaced by the current user's home dir in the CredFile dial parameter.
 	HomeDirMacro = "${HOME}"
