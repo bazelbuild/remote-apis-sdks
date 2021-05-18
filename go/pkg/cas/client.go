@@ -44,6 +44,9 @@ type Client struct {
 
 	// TODO(nodir): ensure it does not hurt streaming.
 	semFileIO *semaphore.Weighted
+	// muLargeFile ensures only one large file is read/written at a time.
+	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
+	muLargeFile sync.Mutex
 
 	// fileBufReaders is a pool of reusable *bufio.Readers
 	// with buffer size = ClientConfig.FileIOSize, so e.g. 4MiB.
