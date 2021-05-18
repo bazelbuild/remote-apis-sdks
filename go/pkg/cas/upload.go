@@ -274,7 +274,9 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 	cacheKey := cacheKeyType{
 		AbsPath: absPath,
 	}
-	if pathExclude != nil {
+	// Incorporate the pathExclude only if the path is a directory.
+	// If it is a regular file or a symlink, then read it only once.
+	if info.IsDir() && pathExclude != nil {
 		cacheKey.ExcludeRegexp = pathExclude.String()
 	}
 
