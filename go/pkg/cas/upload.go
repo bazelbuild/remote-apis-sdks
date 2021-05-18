@@ -274,9 +274,9 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 	cacheKey := cacheKeyType{
 		AbsPath: absPath,
 	}
-	// Incorporate the pathExclude only if the path is a directory.
-	// If it is a regular file or a symlink, then read it only once.
-	if info.IsDir() && pathExclude != nil {
+	// Incorporate the pathExclude, unless it is a regular file.
+	// If it is a regular file, then pathExclude is not used, see below.
+	if pathExclude != nil && !info.Mode().IsRegular() {
 		cacheKey.ExcludeRegexp = pathExclude.String()
 	}
 
@@ -287,6 +287,7 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		case info.Mode().IsDir():
 			return u.visitDir(ctx, absPath, pathExclude)
 		case info.Mode().IsRegular():
+			// Code above assumes that pathExclude is not used here.
 			return u.visitRegularFile(ctx, absPath, info)
 		default:
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
