@@ -1245,12 +1245,6 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	if err != nil {
 		return nil, err
 	}
-	// Remove the existing output directories before downloading.
-	for _, dir := range resPb.OutputDirectories {
-		if err := os.RemoveAll(filepath.Join(execRoot, dir.Path)); err != nil {
-			return nil, err
-		}
-	}
 	return c.downloadOutputs(ctx, outs, execRoot, cache)
 }
 
