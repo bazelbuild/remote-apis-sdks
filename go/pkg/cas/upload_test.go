@@ -230,7 +230,7 @@ func TestFS(t *testing.T) {
 			var gotScheduledChecks []*uploadItem
 
 			client := &Client{
-				ClientConfig: DefaultClientConfig(),
+				Config: DefaultClientConfig(),
 				testScheduleCheck: func(ctx context.Context, item *uploadItem) error {
 					mu.Lock()
 					defer mu.Unlock()
@@ -238,8 +238,8 @@ func TestFS(t *testing.T) {
 					return nil
 				},
 			}
-			client.SmallFileThreshold = 5
-			client.LargeFileThreshold = 10
+			client.Config.SmallFileThreshold = 5
+			client.Config.LargeFileThreshold = 10
 			client.init()
 
 			_, err := client.Upload(ctx, tc.opt, inputChanFrom(tc.inputs...))
@@ -301,10 +301,10 @@ func TestSmallBlobs(t *testing.T) {
 	}
 	client := &Client{
 		InstanceName: "projects/p/instances/i",
-		ClientConfig: DefaultClientConfig(),
+		Config:       DefaultClientConfig(),
 		cas:          cas,
 	}
-	client.FindMissingBlobs.MaxItems = 2
+	client.Config.FindMissingBlobs.MaxItems = 2
 	client.init()
 
 	inputC := inputChanFrom(

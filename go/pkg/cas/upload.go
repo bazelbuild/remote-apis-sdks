@@ -142,7 +142,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 	// Given that all digests are small (no more than 40 bytes), the count limit
 	// is the bottleneck.
 	// We might run into the request size limits only if we have >100K digests.
-	u.checkBundler.BundleCountThreshold = u.FindMissingBlobs.MaxItems
+	u.checkBundler.BundleCountThreshold = u.Config.FindMissingBlobs.MaxItems
 
 	// Initialize batchBundler, which uploads blobs in batches.
 	u.batchBundler = bundler.NewBundler(&repb.BatchUpdateBlobsRequest_Request{}, func(subReq interface{}) {
@@ -153,8 +153,8 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 	})
 	// Limit the sum of sub-request sizes to (maxRequestSize - requestOverhead).
 	// Subtract 1KB to be on the safe side.
-	u.batchBundler.BundleByteLimit = c.BatchUpdateBlobs.MaxSizeBytes - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
-	u.batchBundler.BundleCountThreshold = c.BatchUpdateBlobs.MaxItems
+	u.batchBundler.BundleByteLimit = c.Config.BatchUpdateBlobs.MaxSizeBytes - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
+	u.batchBundler.BundleCountThreshold = c.Config.BatchUpdateBlobs.MaxItems
 
 	// Start processing input.
 	eg.Go(func() error {
@@ -316,7 +316,7 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 //    the network and slows down the progress.
 //    See also ClientConfig.LargeFileThreshold.
 func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os.FileInfo) (*repb.FileNode, error) {
-	isLarge := info.Size() >= u.LargeFileThreshold
+	isLarge := info.Size() >= u.Config.LargeFileThreshold
 
 	// Lock the mutex before acquiring a semaphore to avoid hogging the latter.
 	if isLarge {
@@ -341,7 +341,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		IsExecutable: (info.Mode() & 0100) != 0,
 	}
 
-	if info.Size() <= u.SmallFileThreshold {
+	if info.Size() <= u.Config.SmallFileThreshold {
 		// This file is small enough to buffer it entirely.
 		contents, err := ioutil.ReadAll(f)
 		if err != nil {
@@ -590,7 +590,7 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 	}
 
 	var res *repb.FindMissingBlobsResponse
-	err := u.unaryRPC(ctx, &u.FindMissingBlobs, func(ctx context.Context) (err error) {
+	err := u.unaryRPC(ctx, &u.Config.FindMissingBlobs, func(ctx context.Context) (err error) {
 		res, err = u.cas.FindMissingBlobs(ctx, req)
 		return
 	})
@@ -648,7 +648,7 @@ func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlob
 		InstanceName: u.InstanceName,
 		Requests:     reqs,
 	}
-	return u.unaryRPC(ctx, &u.BatchUpdateBlobs, func(ctx context.Context) error {
+	return u.unaryRPC(ctx, &u.Config.BatchUpdateBlobs, func(ctx context.Context) error {
 		res, err := u.cas.BatchUpdateBlobs(ctx, req)
 		if err != nil {
 			return err
@@ -707,7 +707,7 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 		}
 		rewind = true
 
-		if u.CompressedBytestreamThreshold < 0 || item.Digest.SizeBytes < u.CompressedBytestreamThreshold {
+		if u.Config.CompressedBytestreamThreshold < 0 || item.Digest.SizeBytes < u.Config.CompressedBytestreamThreshold {
 			// No compression.
 			return u.streamFromReader(ctx, r, item.Digest, false, updateCacheStats)
 		}
@@ -752,7 +752,7 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 }
 
 func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *repb.Digest, compressed, updateCacheStats bool) error {
-	ctx, cancel, withTimeout := withPerCallTimeout(ctx, u.ByteStreamWrite.Timeout)
+	ctx, cancel, withTimeout := withPerCallTimeout(ctx, u.Config.ByteStreamWrite.Timeout)
 	defer cancel()
 
 	stream, err := u.byteStream.Write(ctx)
