@@ -145,10 +145,10 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 	u.checkBundler.BundleCountThreshold = u.Config.FindMissingBlobs.MaxItems
 
 	// Initialize batchBundler, which uploads blobs in batches.
-	u.batchBundler = bundler.NewBundler(&repb.BatchUpdateBlobsRequest_Request{}, func(subReq interface{}) {
+	u.batchBundler = bundler.NewBundler(&uploadItem{}, func(items interface{}) {
 		// Handle errors and context cancelation via errgroup.
 		eg.Go(func() error {
-			return u.uploadBatch(ctx, subReq.([]*repb.BatchUpdateBlobsRequest_Request))
+			return u.uploadBatch(ctx, items.([]*uploadItem))
 		})
 	})
 	// Limit the sum of sub-request sizes to (maxRequestSize - requestOverhead).
@@ -624,8 +624,9 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 }
 
 func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
+	reqSize := marshalledRequestSize(item.Digest)
 	// Check if this blob can be uploaded in a batch.
-	if marshalledRequestSize(item.Digest) > int64(u.batchBundler.BundleByteLimit) {
+	if reqSize > int64(u.batchBundler.BundleByteLimit) {
 		// There is no way this blob can fit in a batch request.
 		u.eg.Go(func() error {
 			return errors.Wrap(u.stream(ctx, item, false), item.Title)
@@ -633,31 +634,36 @@ func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
 		return nil
 	}
 
-	// Since this blob is small enough, just read it entirely.
-	contents, err := item.ReadAll()
-	if err != nil {
-		return errors.Wrapf(err, "failed to read the item")
-	}
-	req := &repb.BatchUpdateBlobsRequest_Request{Digest: item.Digest, Data: contents}
-	return u.batchBundler.AddWait(ctx, req, proto.Size(req))
+	// Upload in a batch.
+	return u.batchBundler.AddWait(ctx, item, int(reqSize))
 }
 
 // uploadBatch uploads blobs in using BatchUpdateBlobs RPC.
-func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlobsRequest_Request) error {
+func (u *uploader) uploadBatch(ctx context.Context, items []*uploadItem) error {
 	if err := u.semBatchUpdateBlobs.Acquire(ctx, 1); err != nil {
 		return err
 	}
 	defer u.semBatchUpdateBlobs.Release(1)
 
-	reqMap := make(map[digest.Digest]*repb.BatchUpdateBlobsRequest_Request, len(reqs))
-	for _, r := range reqs {
-		reqMap[digest.NewFromProtoUnvalidated(r.Digest)] = r
-	}
-
 	req := &repb.BatchUpdateBlobsRequest{
 		InstanceName: u.InstanceName,
-		Requests:     reqs,
+		Requests:     make([]*repb.BatchUpdateBlobsRequest_Request, len(items)),
 	}
+	type entry struct {
+		subReq *repb.BatchUpdateBlobsRequest_Request
+		item   *uploadItem
+	}
+	entries := make(map[digest.Digest]entry, len(items))
+	for i, item := range items {
+		subReq := &repb.BatchUpdateBlobsRequest_Request{Digest: item.Digest}
+		var err error
+		if subReq.Data, err = item.ReadAll(); err != nil {
+			return errors.Wrapf(err, "failed to read %q", item.Title)
+		}
+		req.Requests[i] = subReq
+		entries[digest.NewFromProtoUnvalidated(item.Digest)] = entry{item: item, subReq: subReq}
+	}
+
 	return u.unaryRPC(ctx, &u.Config.BatchUpdateBlobs, func(ctx context.Context) error {
 		res, err := u.cas.BatchUpdateBlobs(ctx, req)
 		if err != nil {
@@ -669,6 +675,7 @@ func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlob
 		var retriableErr error
 		req.Requests = req.Requests[:0] // reset for the next attempt
 		for _, r := range res.Responses {
+			e := entries[digest.NewFromProtoUnvalidated(r.Digest)]
 			if err := status.FromProto(r.Status).Err(); err != nil {
 				if !retry.TransientOnly(err) {
 					return err
@@ -676,9 +683,11 @@ func (u *uploader) uploadBatch(ctx context.Context, reqs []*repb.BatchUpdateBlob
 				// This error is retriable. Save it to return later, and
 				// save the failed sub-request for the next attempt.
 				retriableErr = err
-				req.Requests = append(req.Requests, reqMap[digest.NewFromProtoUnvalidated(r.Digest)])
+				req.Requests = append(req.Requests, e.subReq)
 				continue
 			}
+
+			// This blob has been successfully uploaded.
 			bytesTransferred += r.Digest.SizeBytes
 			digestsTransferred++
 		}
