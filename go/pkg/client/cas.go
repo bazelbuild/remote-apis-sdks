@@ -469,9 +469,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 	LogContextInfof(ctx, log.Level(2), "Done")
 	if err != nil {
 		LogContextInfof(ctx, log.Level(2), "Upload error: %v", err)
+		return missing, totalBytesTransferred, fmt.Errorf("error while doing a non-unified upload: %w", err)
+
 	}
 
-	return missing, totalBytesTransferred, fmt.Errorf("error while doing a non-unified upload: %w", err)
+	return missing, totalBytesTransferred, nil
 }
 
 func (c *Client) cancelPendingRequests(reqs []*uploadRequest) {
