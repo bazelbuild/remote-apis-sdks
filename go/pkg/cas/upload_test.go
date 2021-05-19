@@ -151,6 +151,23 @@ func TestFS(t *testing.T) {
 			},
 		},
 		{
+			desc: "same-regular-file-is-read-only-once",
+			// The two regexps below do not exclude anything.
+			// This test ensures that same files aren't checked twice.
+			inputs: []*UploadInput{
+				{
+					Path:        filepath.Join(tmpDir, "root"),
+					PathExclude: regexp.MustCompile(`1$`),
+				},
+				{
+					Path:        filepath.Join(tmpDir, "root"),
+					PathExclude: regexp.MustCompile(`2$`),
+				},
+			},
+			// Directories are checked twice, but files are checked only once.
+			wantScheduledChecks: []*uploadItem{rootItem, rootItem, aItem, bItem, subdirItem, subdirItem, cItem},
+		},
+		{
 			desc:   "root-without-subdir",
 			inputs: []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
 			opt: UploadOptions{

@@ -274,7 +274,11 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 	cacheKey := cacheKeyType{
 		AbsPath: absPath,
 	}
-	if pathExclude != nil {
+	// Incorporate the pathExclude, unless it is a regular file.
+	// If it is a regular file, then there's no need to include pathExclude in the
+	// cache key, as we already know the regex does not match the file and the
+	// exclusion isn't propagated.
+	if pathExclude != nil && !info.Mode().IsRegular() {
 		cacheKey.ExcludeRegexp = pathExclude.String()
 	}
 
@@ -285,6 +289,7 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		case info.Mode().IsDir():
 			return u.visitDir(ctx, absPath, pathExclude)
 		case info.Mode().IsRegular():
+			// Code above assumes that pathExclude is not used here.
 			return u.visitRegularFile(ctx, absPath, info)
 		default:
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
