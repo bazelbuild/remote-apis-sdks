@@ -624,8 +624,9 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 }
 
 func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
+	reqSize := int(marshalledRequestSize(item.Digest))
 	// Check if this blob can be uploaded in a batch.
-	if marshalledRequestSize(item.Digest) > int64(u.batchBundler.BundleByteLimit) {
+	if reqSize > u.batchBundler.BundleByteLimit {
 		// There is no way this blob can fit in a batch request.
 		u.eg.Go(func() error {
 			return errors.Wrap(u.stream(ctx, item, false), item.Title)
@@ -634,7 +635,7 @@ func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
 	}
 
 	// Upload in a batch.
-	return u.batchBundler.AddWait(ctx, item, int(marshalledRequestSize(item.Digest)))
+	return u.batchBundler.AddWait(ctx, item, reqSize)
 }
 
 // uploadBatch uploads blobs in using BatchUpdateBlobs RPC.
@@ -657,7 +658,7 @@ func (u *uploader) uploadBatch(ctx context.Context, items []*uploadItem) error {
 		subReq := &repb.BatchUpdateBlobsRequest_Request{Digest: item.Digest}
 		var err error
 		if subReq.Data, err = item.ReadAll(); err != nil {
-			return errors.Wrapf(err, "failed to read item %q", item.Title)
+			return errors.Wrapf(err, "failed to read %q", item.Title)
 		}
 		req.Requests[i] = subReq
 		entries[digest.NewFromProtoUnvalidated(item.Digest)] = entry{item: item, subReq: subReq}
