@@ -241,24 +241,29 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 			return errors.WithStack(err)
 		}
 
-		_, err = u.visitPath(ctx, absPath, info, in.PathExclude)
+		_, err = u.visitPath(ctx, pathInfo{abs: absPath, FileInfo: info}, in.PathExclude)
 		return errors.Wrapf(err, "%q", absPath)
 	})
 	return nil
+}
+
+type pathInfo struct {
+	abs string
+	os.FileInfo
 }
 
 // visitPath visits the file/dir depending on its type (regular, dir, symlink).
 // Visits each file only once.
 //
 // If the file should be skipped, then returns (nil, nil).
-func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, pathExclude *regexp.Regexp) (dirEntry proto.Message, err error) {
+func (u *uploader) visitPath(ctx context.Context, info pathInfo, pathExclude *regexp.Regexp) (dirEntry proto.Message, err error) {
 	// First, check if the file passes all filters.
-	if pathExclude != nil && pathExclude.MatchString(absPath) {
+	if pathExclude != nil && pathExclude.MatchString(info.abs) {
 		return nil, nil
 	}
 	// Call the Prelude only after checking the pathExclude.
 	if u.Prelude != nil {
-		switch err := u.Prelude(absPath, info.Mode()); {
+		switch err := u.Prelude(info.abs, info.Mode()); {
 		case errors.Is(err, ErrSkip):
 			return nil, nil
 		case err != nil:
@@ -272,7 +277,7 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		ExcludeRegexp string
 	}
 	cacheKey := cacheKeyType{
-		AbsPath: absPath,
+		AbsPath: info.abs,
 	}
 	// Incorporate the pathExclude, unless it is a regular file.
 	// If it is a regular file, then there's no need to include pathExclude in the
@@ -285,12 +290,12 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 	node, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			return u.visitSymlink(ctx, absPath, pathExclude)
+			return u.visitSymlink(ctx, info, pathExclude)
 		case info.Mode().IsDir():
-			return u.visitDir(ctx, absPath, pathExclude)
+			return u.visitDir(ctx, info, pathExclude)
 		case info.Mode().IsRegular():
 			// Code above assumes that pathExclude is not used here.
-			return u.visitRegularFile(ctx, absPath, info)
+			return u.visitRegularFile(ctx, info)
 		default:
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
 		}
@@ -320,7 +325,7 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 //    network disks. Reading many large files concurrently appears to saturate
 //    the network and slows down the progress.
 //    See also ClientConfig.LargeFileThreshold.
-func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os.FileInfo) (*repb.FileNode, error) {
+func (u *uploader) visitRegularFile(ctx context.Context, info pathInfo) (*repb.FileNode, error) {
 	isLarge := info.Size() >= u.Config.LargeFileThreshold
 
 	// Lock the mutex before acquiring a semaphore to avoid hogging the latter.
@@ -335,7 +340,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	}
 	defer u.semFileIO.Release(1)
 
-	f, err := u.openFileSource(absPath)
+	f, err := u.openFileSource(info.abs)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +357,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		if err != nil {
 			return nil, err
 		}
-		item := uploadItemFromBlob(absPath, contents)
+		item := uploadItemFromBlob(info.abs, contents)
 		ret.Digest = item.Digest
 		return ret, u.scheduleCheck(ctx, item)
 	}
@@ -367,7 +372,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	ret.Digest = dig.ToProto()
 
 	item := &uploadItem{
-		Title:  absPath,
+		Title:  info.abs,
 		Digest: ret.Digest,
 	}
 
@@ -388,7 +393,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	// item.Open will reopen the file.
 
 	item.Open = func() (uploadSource, error) {
-		return u.openFileSource(absPath)
+		return u.openFileSource(info.abs)
 	}
 	return ret, u.scheduleCheck(ctx, item)
 }
@@ -404,7 +409,7 @@ func (u *uploader) openFileSource(absPath string) (uploadSource, error) {
 // visitDir reads a directory and its descendants. The function blocks until
 // each descendant is visited, but the visitation happens concurrently, using
 // u.eg.
-func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (*repb.DirectoryNode, error) {
+func (u *uploader) visitDir(ctx context.Context, info pathInfo, pathExclude *regexp.Regexp) (*repb.DirectoryNode, error) {
 	var mu sync.Mutex
 	dir := &repb.Directory{}
 	var subErr error
@@ -418,7 +423,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 		}
 		defer u.semFileIO.Release(1)
 
-		f, err := os.Open(absPath)
+		f, err := os.Open(info.abs)
 		if err != nil {
 			return err
 		}
@@ -426,7 +431,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 
 		// Check the context, since file IO functions don't.
 		for ctx.Err() == nil {
-			infos, err := f.Readdir(128)
+			children, err := f.Readdir(128)
 			if err == io.EOF {
 				break
 			}
@@ -434,15 +439,17 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 				return err
 			}
 
-			for _, info := range infos {
-				info := info
-				absChild := joinFilePathsFast(absPath, info.Name())
+			for _, ci := range children {
+				child := pathInfo{
+					abs:      joinFilePathsFast(info.abs, ci.Name()),
+					FileInfo: ci,
+				}
 				wgChildren.Add(1)
 				u.wgFS.Add(1)
 				u.eg.Go(func() error {
 					defer wgChildren.Done()
 					defer u.wgFS.Done()
-					node, err := u.visitPath(ctx, absChild, info, pathExclude)
+					node, err := u.visitPath(ctx, child, pathExclude)
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil {
@@ -476,15 +483,15 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 
 	wgChildren.Wait()
 	if subErr != nil {
-		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", absPath)
+		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", info.abs)
 	}
 
-	item := uploadItemFromDirMsg(absPath, dir)
+	item := uploadItemFromDirMsg(info.abs, dir)
 	if err := u.scheduleCheck(ctx, item); err != nil {
 		return nil, err
 	}
 	return &repb.DirectoryNode{
-		Name:   filepath.Base(absPath),
+		Name:   filepath.Base(info.abs),
 		Digest: item.Digest,
 	}, nil
 }
@@ -493,15 +500,15 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 // of the target file.
 // If u.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (proto.Message, error) {
-	target, err := os.Readlink(absPath)
+func (u *uploader) visitSymlink(ctx context.Context, info pathInfo, pathExclude *regexp.Regexp) (proto.Message, error) {
+	target, err := os.Readlink(info.abs)
 	if err != nil {
 		return nil, errors.Wrapf(err, "os.ReadLink")
 	}
 
 	// Determine absolute and relative paths of the target.
 	var absTarget, relTarget string
-	symlinkDir := filepath.Dir(absPath)
+	symlinkDir := filepath.Dir(info.abs)
 	target = filepath.Clean(target) // target may end with slash
 	if filepath.IsAbs(target) {
 		absTarget = target
@@ -516,7 +523,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	}
 
 	symlinkNode := &repb.SymlinkNode{
-		Name:   filepath.Base(absPath),
+		Name:   filepath.Base(info.abs),
 		Target: filepath.ToSlash(relTarget),
 	}
 
@@ -529,7 +536,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 		return nil, errors.WithStack(err)
 	}
 
-	switch targetNode, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
+	switch targetNode, err := u.visitPath(ctx, pathInfo{abs: absTarget, FileInfo: targetInfo}, pathExclude); {
 	case err != nil:
 		return nil, err
 	case !u.PreserveSymlinks:
@@ -537,7 +544,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	case targetNode == nil && !u.AllowDanglingSymlinks:
 		// The target got skipped via Prelude or PathExclude,
 		// resulting in a dangling symlink, which is not allowed.
-		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
+		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", info.abs, target)
 	default:
 		// Note: even though we throw away targetNode, it was still important to visit the target.
 		return symlinkNode, nil
