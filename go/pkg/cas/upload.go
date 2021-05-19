@@ -624,9 +624,9 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 }
 
 func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
-	reqSize := int(marshalledRequestSize(item.Digest))
+	reqSize := marshalledRequestSize(item.Digest)
 	// Check if this blob can be uploaded in a batch.
-	if reqSize > u.batchBundler.BundleByteLimit {
+	if reqSize > int64(u.batchBundler.BundleByteLimit) {
 		// There is no way this blob can fit in a batch request.
 		u.eg.Go(func() error {
 			return errors.Wrap(u.stream(ctx, item, false), item.Title)
@@ -635,7 +635,7 @@ func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
 	}
 
 	// Upload in a batch.
-	return u.batchBundler.AddWait(ctx, item, reqSize)
+	return u.batchBundler.AddWait(ctx, item, int(reqSize))
 }
 
 // uploadBatch uploads blobs in using BatchUpdateBlobs RPC.
