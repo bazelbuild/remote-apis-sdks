@@ -14,20 +14,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/golang/protobuf/proto"
-	"github.com/klauspost/compress/zstd"
-	syncpool "github.com/mostynb/zstdpool-syncpool"
-	"github.com/pborman/uuid"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"google3/third_party/bazel_remote_apis_sdks/go/pkg/chunker/chunker"
+	"google3/third_party/bazel_remote_apis_sdks/go/pkg/digest/digest"
+	"google3/third_party/bazel_remote_apis_sdks/go/pkg/filemetadata/filemetadata"
+	"google3/third_party/bazel_remote_apis_sdks/go/pkg/uploadinfo/uploadinfo"
+	"google3/third_party/golang/errors/errors"
+	"google3/third_party/golang/go_sync/errgroup/errgroup"
+	"google3/third_party/golang/grpc/codes/codes"
+	"google3/third_party/golang/grpc/status/status"
+	"google3/third_party/golang/kcompress/zstd/zstd"
+	"google3/third_party/golang/protobuf/v1/proto/proto"
+	"google3/third_party/golang/uuid/uuid"
+	syncpool "google3/third_party/golang/zstdpool/syncpool"
 
-	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	log "github.com/golang/glog"
+	"google3/base/go/log"
+	repb "google3/third_party/bazel_remoteapis/build/bazel/remote/execution/v2/remote_execution_go_proto"
 )
 
 // DefaultCompressedBytestreamThreshold is the default threshold, in bytes, for
@@ -396,7 +397,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 
 	missing, err := c.MissingBlobs(ctx, dgs)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, errors.Wrap(err, "error while determining missing blobs")
 	}
 	LogContextInfof(ctx, log.Level(2), "%d items to store", len(missing))
 	var batches [][]digest.Digest
@@ -417,7 +418,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
 		eg.Go(func() error {
 			if err := c.casUploaders.Acquire(eCtx, 1); err != nil {
-				return err
+				return errors.Wrap(err, "error while acquiring semaphore to upload a batch")
 			}
 			defer c.casUploaders.Release(1)
 			if i%logInterval == 0 {
@@ -430,18 +431,18 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 					ue := ueList[dg]
 					ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 					if err != nil {
-						return err
+						return errors.Wrapf(err, "error while creating chunks for digest %v", dg)
 					}
 
 					data, err := ch.FullData()
 					if err != nil {
-						return err
+						return errors.Wrapf(err, "error while fetching FullData for digest %v", dg)
 					}
 					bchMap[dg] = data
 					atomic.AddInt64(&totalBytesTransferred, int64(len(data)))
 				}
 				if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
-					return err
+					return errors.Wrap(err, "error while doing a batch write")
 				}
 			} else {
 				LogContextInfof(ctx, log.Level(3), "Uploading single blob with digest %s", batch[0])
@@ -449,11 +450,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				dg := ue.Digest
 				ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 				if err != nil {
-					return err
+					return errors.Wrapf(err, "error while creating chunks for digest %v", dg)
 				}
 				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch)
 				if err != nil {
-					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
+					return errors.Wrapf(err, "error while doing a chunked write for %v", dg)
 				}
 				atomic.AddInt64(&totalBytesTransferred, written)
 			}
@@ -471,7 +472,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 		LogContextInfof(ctx, log.Level(2), "Upload error: %v", err)
 	}
 
-	return missing, totalBytesTransferred, err
+	return missing, totalBytesTransferred, errors.Wrap(err, "error while doing a non-unified upload")
 }
 
 func (c *Client) cancelPendingRequests(reqs []*uploadRequest) {
@@ -534,7 +535,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry)
 			return nil, 0, ctx.Err()
 		case resp := <-wait:
 			if resp.err != nil {
-				return nil, 0, fmt.Errorf("Error while uploading a blob: %w", resp.err)
+				return nil, 0, errors.Wrapf(resp.err, "error while uploading blob with digest %v", resp.digest)
 			}
 			if resp.missing {
 				missing = append(missing, resp.digest)
@@ -640,7 +641,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 			return e
 		})
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "error while uploading %d blobs, with total size of %d. Likely the client attempted to upload more than the server supported limit", len(blobs), sz)
 		}
 
 		numErrs, errDg, errMsg := 0, new(repb.Digest), ""
@@ -1745,3 +1746,4 @@ func (c *Client) writeRscName(dg digest.Digest) string {
 	}
 	return c.ResourceNameWrite(dg.Hash, dg.Size)
 }
+
