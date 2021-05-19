@@ -25,6 +25,16 @@ func TestSimpleValueStore(t *testing.T) {
 	if val != val1 {
 		t.Errorf("LoadOrStore(%v) loaded wrong value: got %v, want %v", key1, val, val1)
 	}
+	val, err, loaded := s.Load(key1)
+	if !loaded {
+		t.Errorf("expected to load value")
+	}
+	if err != nil {
+		t.Errorf("Load(%v) failed: %v", key1, err)
+	}
+	if val != val1 {
+		t.Errorf("Load(%v) loaded wrong value: got %v, want %v", key1, val, val1)
+	}
 
 	val, err = s.LoadOrStore(key2, func() (interface{}, error) { return val2, nil })
 	if err != nil {
@@ -32,6 +42,16 @@ func TestSimpleValueStore(t *testing.T) {
 	}
 	if val != val2 {
 		t.Errorf("LoadOrStore(%v) loaded wrong value: got %v, want %v", key2, val, val2)
+	}
+	val, err, loaded = s.Load(key2)
+	if !loaded {
+		t.Errorf("expected to load value")
+	}
+	if err != nil {
+		t.Errorf("Load(%v) failed: %v", key2, err)
+	}
+	if val != val2 {
+		t.Errorf("Load(%v) loaded wrong value: got %v, want %v", key2, val, val1)
 	}
 }
 

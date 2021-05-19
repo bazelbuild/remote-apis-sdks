@@ -108,6 +108,46 @@ type UploadOptions struct {
 // result in a dangling symlink.
 var ErrSkip = errors.New("skip file")
 
+// UploadResult is the result of a Client.Upload call.
+// It provides file/dir digests and statistics.
+type UploadResult struct {
+	Stats TransferStats
+	u     *uploader
+}
+
+// Digest returns the digest computed for a file/dir at ps.Path.
+//
+// To retrieve a digest of a regular file, only ps.Path is required.
+//
+// To retrieve a digest of a directory or a symlink, ps.Exclude must match one
+// of the PathSpecs passed to Client.Upload earlier.
+//
+// If the digest is unknown, returns (nil, nil).
+// If the file is a danging symlink, then its digest is unknown.
+func (r *UploadResult) Digest(ps *PathSpec) (*digest.Digest, error) {
+	if !filepath.IsAbs(ps.Path) {
+		return nil, errors.Errorf("%q is not absolute", ps.Path)
+	}
+
+	// TODO(nodir): cache this syscall too.
+	info, err := os.Lstat(ps.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	key := makeFSCacheKey(ps.Path, info.Mode(), ps.Exclude)
+	switch val, err, loaded := r.u.fsCache.Load(key); {
+	case !loaded:
+		return nil, nil
+	case err != nil:
+		return nil, err
+	default:
+		val := val.(*fsCacheValue)
+		dig := digest.NewFromProtoUnvalidated(val.digest)
+		return &dig, nil
+	}
+}
+
 // Upload uploads all files/directories specified by pathC.
 //
 // Close pathC to indicate that there are no more files/dirs to upload.
@@ -115,7 +155,7 @@ var ErrSkip = errors.New("skip file")
 // exits successfully.
 //
 // If ctx is canceled, the Upload returns with an error.
-func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *PathSpec) (stats *TransferStats, err error) {
+func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *PathSpec) (*UploadResult, error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
 	defer eg.Wait()
@@ -179,7 +219,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *Pa
 			}
 		}
 	})
-	return &u.stats, eg.Wait()
+	return &UploadResult{Stats: u.stats, u: u}, eg.Wait()
 }
 
 // uploader implements a concurrent multi-stage pipeline to read blobs from the
@@ -204,6 +244,7 @@ type uploader struct {
 	wgFS sync.WaitGroup
 
 	// fsCache contains already-processed files.
+	// The keys and values are of type fsCacheKey and fsCacheValue respectively.
 	fsCache cache.SingleFlight
 
 	// checkBundler bundles digests that need to be checked for presence on the
@@ -213,6 +254,16 @@ type uploader struct {
 
 	// batchBundler bundles blobs that can be uploaded using UploadBlobs RPC.
 	batchBundler *bundler.Bundler
+}
+
+type fsCacheKey struct {
+	AbsPath       string
+	ExcludeRegexp string
+}
+
+type fsCacheValue struct {
+	dirEntry proto.Message // FileNode, DirectoryNode or SymlinkNode
+	digest   *repb.Digest  // may be nil if a symlink is dangling
 }
 
 // startProcessing adds the item to the appropriate stage depending on its type.
@@ -231,64 +282,78 @@ func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
 			return errors.WithStack(err)
 		}
 
-		_, err = u.visitPath(ctx, ps.Path, info, ps.Exclude)
+		_, _, err = u.visitPath(ctx, ps.Path, info, ps.Exclude)
 		return errors.Wrapf(err, "%q", ps.Path)
 	})
 	return nil
 }
 
+// makeFSCacheKey returns a key for u.fsCache.
+func makeFSCacheKey(absPath string, mode os.FileMode, pathExclude *regexp.Regexp) fsCacheKey {
+	key := fsCacheKey{
+		AbsPath: absPath,
+	}
+
+	if mode.IsRegular() {
+		// This is a regular file.
+		// Its digest depends only on the file path (assuming content didn't change),
+		// so the cache key is complete. Just return it.
+		return key
+	}
+	// This is a directory and/or a symlink, so the digest also depends on fs-walk
+	// settings. Incroporate those too.
+
+	if pathExclude != nil {
+		key.ExcludeRegexp = pathExclude.String()
+	}
+	return key
+}
+
 // visitPath visits the file/dir depending on its type (regular, dir, symlink).
 // Visits each file only once.
 //
-// If the file should be skipped, then returns (nil, nil).
-func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, pathExclude *regexp.Regexp) (dirEntry proto.Message, err error) {
+// If the file should be skipped, then returns (nil, nil, nil).
+// The returned digest may also be nil if the symlink is dangling.
+func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, pathExclude *regexp.Regexp) (dirEntry proto.Message, dig *repb.Digest, err error) {
 	// First, check if the file passes all filters.
 	if pathExclude != nil && pathExclude.MatchString(filepath.ToSlash(absPath)) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	// Call the Prelude only after checking the pathExclude.
 	if u.Prelude != nil {
 		switch err := u.Prelude(absPath, info.Mode()); {
 		case errors.Is(err, ErrSkip):
-			return nil, nil
+			return nil, nil, nil
 		case err != nil:
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
-	// Make a cache key.
-	type cacheKeyType struct {
-		AbsPath       string
-		ExcludeRegexp string
-	}
-	cacheKey := cacheKeyType{
-		AbsPath: absPath,
-	}
-	// Incorporate the pathExclude, unless it is a regular file.
-	// If it is a regular file, then there's no need to include pathExclude in the
-	// cache key, as we already know the regex does not match the file and the
-	// exclusion isn't propagated.
-	if pathExclude != nil && !info.Mode().IsRegular() {
-		cacheKey.ExcludeRegexp = pathExclude.String()
-	}
-
-	node, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
+	cacheKey := makeFSCacheKey(absPath, info.Mode(), pathExclude)
+	cachedUntyped, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			return u.visitSymlink(ctx, absPath, pathExclude)
+			node, digest, err := u.visitSymlink(ctx, absPath, pathExclude)
+			return &fsCacheValue{dirEntry: node, digest: digest}, err
+
 		case info.Mode().IsDir():
-			return u.visitDir(ctx, absPath, pathExclude)
+			node, err := u.visitDir(ctx, absPath, pathExclude)
+			return &fsCacheValue{dirEntry: node, digest: node.GetDigest()}, err
+
 		case info.Mode().IsRegular():
-			// Code above assumes that pathExclude is not used here.
-			return u.visitRegularFile(ctx, absPath, info)
+			// Note: makeFSCacheKey assumes that pathExclude is not used here.
+			node, err := u.visitRegularFile(ctx, absPath, info)
+			return &fsCacheValue{dirEntry: node, digest: node.GetDigest()}, err
+
 		default:
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
 		}
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return node.(proto.Message), nil
+	cached := cachedUntyped.(*fsCacheValue)
+	return cached.dirEntry, cached.digest, nil
 }
 
 // visitRegularFile computes the hash of a regular file and schedules a presence
@@ -431,7 +496,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 				u.eg.Go(func() error {
 					defer wgChildren.Done()
 					defer u.wgFS.Done()
-					node, err := u.visitPath(ctx, absChild, info, pathExclude)
+					node, _, err := u.visitPath(ctx, absChild, info, pathExclude)
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil {
@@ -482,10 +547,12 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 // of the target file.
 // If u.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
-func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (proto.Message, error) {
+//
+// The returned digest is nil if the symlink is dangling.
+func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (proto.Message, *repb.Digest, error) {
 	target, err := os.Readlink(absPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "os.ReadLink")
+		return nil, nil, errors.Wrapf(err, "os.ReadLink")
 	}
 
 	// Determine absolute and relative paths of the target.
@@ -495,7 +562,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	if filepath.IsAbs(target) {
 		absTarget = target
 		if relTarget, err = filepath.Rel(symlinkDir, absTarget); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
 		relTarget = target
@@ -513,23 +580,22 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	switch {
 	case os.IsNotExist(err) && u.PreserveSymlinks && u.AllowDanglingSymlinks:
 		// Special case for preserved dangling links.
-		return symlinkNode, nil
+		return symlinkNode, nil, nil
 	case err != nil:
-		return nil, errors.WithStack(err)
+		return nil, nil, errors.WithStack(err)
 	}
 
-	switch targetNode, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
+	switch targetNode, targetDigest, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
 	case err != nil:
-		return nil, err
+		return nil, nil, err
 	case !u.PreserveSymlinks:
-		return targetNode, nil
+		return targetNode, targetDigest, nil
 	case targetNode == nil && !u.AllowDanglingSymlinks:
 		// The target got skipped via Prelude or PathSpec.Exclude,
 		// resulting in a dangling symlink, which is not allowed.
-		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
+		return nil, nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
 	default:
-		// Note: even though we throw away targetNode, it was still important to visit the target.
-		return symlinkNode, nil
+		return symlinkNode, targetDigest, nil
 	}
 }
 
