@@ -534,7 +534,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry)
 			return nil, 0, ctx.Err()
 		case resp := <-wait:
 			if resp.err != nil {
-				return nil, 0, fmt.Errorf("Error while uploading: %w", resp.err)
+				return nil, 0, fmt.Errorf("Error while uploading a blob: %w", resp.err)
 			}
 			if resp.missing {
 				missing = append(missing, resp.digest)
