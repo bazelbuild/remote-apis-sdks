@@ -275,8 +275,9 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		AbsPath: absPath,
 	}
 	// Incorporate the pathExclude, unless it is a regular file.
-	// If it is a regular file, then there's no need to include pathExclude in the cache key, as we already know the
-	// regex does not match the file and the exclusion isn't propagated.
+	// If it is a regular file, then there's no need to include pathExclude in the
+	// cache key, as we already know the regex does not match the file and the
+	// exclusion isn't propagated.
 	if pathExclude != nil && !info.Mode().IsRegular() {
 		cacheKey.ExcludeRegexp = pathExclude.String()
 	}
