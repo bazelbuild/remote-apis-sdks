@@ -49,14 +49,14 @@ type PathSpec struct {
 	// Must be absolute or relative to CWD.
 	Path string
 
-	// PathExclude is a file/dir filter. If PathExclude is not nil and the
+	// Exclude is a file/dir filter. If Exclude is not nil and the
 	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
 	// If the Path is a directory, then the filter is evaluated against each file
 	// in the subtree.
 	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
 	//
 	// This field has no effect if Path is empty.
-	PathExclude *regexp.Regexp
+	Exclude *regexp.Regexp
 }
 
 // TransferStats is upload/download statistics.
@@ -96,7 +96,7 @@ type UploadOptions struct {
 	//
 	// Prelude might be called multiple times for the same file if different
 	// PathSpecs directly/indirectly refer to the same file, but with different
-	// PathExclude.
+	// PathSpec.Exclude.
 	//
 	// Prelude is called from different goroutines.
 	Prelude func(absPath string, mode os.FileMode) error
@@ -230,7 +230,7 @@ func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
 			return errors.WithStack(err)
 		}
 
-		_, err = u.visitPath(ctx, absPath, info, ps.PathExclude)
+		_, err = u.visitPath(ctx, absPath, info, ps.Exclude)
 		return errors.Wrapf(err, "%q", absPath)
 	})
 	return nil

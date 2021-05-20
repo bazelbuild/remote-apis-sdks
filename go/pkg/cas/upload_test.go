@@ -133,8 +133,8 @@ func TestFS(t *testing.T) {
 		{
 			desc: "root-without-b-using-exclude",
 			paths: []*PathSpec{{
-				Path:        filepath.Join(tmpDir, "root"),
-				PathExclude: regexp.MustCompile(`[/\\]b$`),
+				Path:    filepath.Join(tmpDir, "root"),
+				Exclude: regexp.MustCompile(`[/\\]b$`),
 			}},
 			wantScheduledChecks: []*uploadItem{
 				uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
@@ -156,12 +156,12 @@ func TestFS(t *testing.T) {
 			// This test ensures that same files aren't checked twice.
 			paths: []*PathSpec{
 				{
-					Path:        filepath.Join(tmpDir, "root"),
-					PathExclude: regexp.MustCompile(`1$`),
+					Path:    filepath.Join(tmpDir, "root"),
+					Exclude: regexp.MustCompile(`1$`),
 				},
 				{
-					Path:        filepath.Join(tmpDir, "root"),
-					PathExclude: regexp.MustCompile(`2$`),
+					Path:    filepath.Join(tmpDir, "root"),
+					Exclude: regexp.MustCompile(`2$`),
 				},
 			},
 			// Directories are checked twice, but files are checked only once.
@@ -220,8 +220,8 @@ func TestFS(t *testing.T) {
 			desc: "dangling-symlink-via-filtering",
 			opt:  UploadOptions{PreserveSymlinks: true},
 			paths: []*PathSpec{{
-				Path:        filepath.Join(tmpDir, "with-symlinks"),
-				PathExclude: regexp.MustCompile("root"),
+				Path:    filepath.Join(tmpDir, "with-symlinks"),
+				Exclude: regexp.MustCompile("root"),
 			}},
 			wantErr: ErrFilteredSymlinkTarget,
 		},
@@ -229,8 +229,8 @@ func TestFS(t *testing.T) {
 			desc: "dangling-symlink-via-filtering-allow",
 			opt:  UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
 			paths: []*PathSpec{{
-				Path:        filepath.Join(tmpDir, "with-symlinks"),
-				PathExclude: regexp.MustCompile("root"),
+				Path:    filepath.Join(tmpDir, "with-symlinks"),
+				Exclude: regexp.MustCompile("root"),
 			}},
 			wantScheduledChecks: []*uploadItem{withSymlinksItemPreserved},
 		},
