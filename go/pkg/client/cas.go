@@ -454,7 +454,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				}
 				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch)
 				if err != nil {
-					return errors.Wrapf(err, "error while doing a chunked write for %v", dg)
+					return errors.Wrapf(err, "error while doing a chunked write to %v for %v", ue.Path, dg)
 				}
 				atomic.AddInt64(&totalBytesTransferred, written)
 			}
@@ -640,7 +640,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 			return e
 		})
 		if err != nil {
-			return err 
+			return err
 		}
 
 		numErrs, errDg, errMsg := 0, new(repb.Digest), ""
