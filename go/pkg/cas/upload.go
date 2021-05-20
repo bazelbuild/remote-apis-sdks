@@ -44,8 +44,6 @@ var zstdEncoders = sync.Pool{
 // PathSpec specifies a subset of the file system.
 type PathSpec struct {
 	// Path to the file or a directory to upload.
-	// If empty, the Content is uploaded instead.
-	//
 	// Must be absolute or relative to CWD.
 	Path string
 
@@ -54,8 +52,6 @@ type PathSpec struct {
 	// If the Path is a directory, then the filter is evaluated against each file
 	// in the subtree.
 	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
-	//
-	// This field has no effect if Path is empty.
 	Exclude *regexp.Regexp
 }
 
