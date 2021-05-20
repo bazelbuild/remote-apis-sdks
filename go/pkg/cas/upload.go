@@ -106,8 +106,11 @@ type UploadOptions struct {
 // result in a dangling symlink.
 var ErrSkip = errors.New("skip file")
 
-// Upload uploads all path specs.
-// It exits when pathC is closed or ctx is canceled.
+// Upload uploads all files/directories specified by pathC.
+//
+// Close pathC to indicate that there are no more files/dirs to upload.
+// When pathC is closed, Upload finishes uploading the remaining files/dirs and
+// exits successfully.
 func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *PathSpec) (stats *TransferStats, err error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
