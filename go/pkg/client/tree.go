@@ -74,6 +74,20 @@ func DefaultTreeSymlinkOpts() *TreeSymlinkOpts {
 	}
 }
 
+// treeSymlinkOpts returns a TreeSymlinkOpts object based on the given SymlinkBehaviorType.
+func treeSymlinkOpts(opts *TreeSymlinkOpts, sb command.SymlinkBehaviorType) *TreeSymlinkOpts {
+	if opts == nil {
+		opts = DefaultTreeSymlinkOpts()
+	}
+	switch sb {
+	case command.ResolveSymlink:
+		opts.Preserved = false
+	case command.PreserveSymlink:
+		opts.Preserved = true
+	}
+	return opts
+}
+
 // shouldIgnore returns whether a given input should be excluded based on the given InputExclusions,
 func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusion) bool {
 	for _, r := range excl {
@@ -240,7 +254,7 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 		}
 	}
 
-	if e := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, c.TreeSymlinkOpts); e != nil {
+	if e := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); e != nil {
 		return digest.Empty, nil, nil, e
 	}
 	ft := buildTree(fs)
