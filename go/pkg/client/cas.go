@@ -640,11 +640,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 			return e
 		})
 		if err != nil {
-			s, _ := status.FromError(err)
-			log.Errorf("FOOOOOO%v", status.Code(err))
-			log.Errorf("FOOOOOOO%v", s.Code())
-			log.Errorf("FOOOOO%v", err)
-			return err //status.Error(status.Code(err), fmt.Sprintf("error while uploading %d blobs, with total size of %d. Likely the client attempted to upload more than the server supported limit: %v", len(blobs), sz, err))
+			return err 
 		}
 
 		numErrs, errDg, errMsg := 0, new(repb.Digest), ""

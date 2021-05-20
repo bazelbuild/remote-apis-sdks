@@ -68,7 +68,6 @@ func TransientOnly(err error) bool {
 	// Retry RPC timeouts. Note that we do *not* retry context cancellations (context.Cancelled);
 	// if the user wants to back out of the call we should let them.
 	if stderrors.Is(err, context.DeadlineExceeded) {
-		log.Errorf("FOOOOO deadline exceeded")
 		return true
 	}
 	s, ok := status.FromError(err)
@@ -78,10 +77,8 @@ func TransientOnly(err error) bool {
 	switch s.Code() {
 	case codes.Canceled, codes.Unknown, codes.DeadlineExceeded, codes.Aborted,
 		codes.Internal, codes.Unavailable, codes.ResourceExhausted:
-		log.Errorf("FOOOOO found match")
 		return true
 	default:
-		log.Errorf("FOOOOO jsut kidding")
 		return false
 	}
 }
