@@ -45,7 +45,7 @@ func (s InputType) String() string {
 	return fmt.Sprintf("InvalidInputType(%d)", s)
 }
 
-// SymlinkBehavior represents how symlinks are handled.
+// SymlinkBehaviorType represents how symlinks are handled.
 type SymlinkBehaviorType int
 
 const (
@@ -58,15 +58,12 @@ const (
 
 	// PreserveSymlink means symlinks are kept as-is.
 	PreserveSymlink
-
-	// SymlinkBehaviorSentinel represents the end of SymlinkBehavior.
-	SymlinkBehaviorSentinel
 )
 
 var symlinkBehaviorType = [...]string{"UnspecifiedSymlinkBehavior", "ResolveSymlink", "PreserveSymlink"}
 
 func (s SymlinkBehaviorType) String() string {
-	if UnspecifiedSymlinkBehavior <= s && s < SymlinkBehaviorSentinel {
+	if UnspecifiedSymlinkBehavior <= s && s < SymlinkBehaviorType(len(symlinkBehaviorType)) {
 		return symlinkBehaviorType[s]
 	}
 	return fmt.Sprintf("InvalidSymlinkBehaviorType(%d)", s)
