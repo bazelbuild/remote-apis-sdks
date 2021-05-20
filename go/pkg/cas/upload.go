@@ -58,6 +58,8 @@ type UploadInput struct {
 
 	// PathExclude is a file/dir filter. If PathExclude is not nil and the
 	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
+	// Forward-slash-separated paths are matched aginst the regexp: PathExclude
+	// does not have to be conditional on the OS.
 	// If the Path is a directory, then the filter is evaluated against each file
 	// in the subtree.
 	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
@@ -253,7 +255,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 // If the file should be skipped, then returns (nil, nil).
 func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, pathExclude *regexp.Regexp) (dirEntry proto.Message, err error) {
 	// First, check if the file passes all filters.
-	if pathExclude != nil && pathExclude.MatchString(absPath) {
+	if pathExclude != nil && pathExclude.MatchString(filepath.ToSlash(absPath)) {
 		return nil, nil
 	}
 	// Call the Prelude only after checking the pathExclude.
