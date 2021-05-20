@@ -686,7 +686,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			for i := 0; i < 50; i++ {
 				eg.Go(func() error {
 					// Verify that we got a context cancellation error. Sometimes, the request can succeed, if the original thread takes a while to run.
-					if _, _, err := c.UploadIfMissing(cCtx, input...); err != nil && err != context.Canceled {
+					if _, _, err := c.UploadIfMissing(cCtx, input...); err != nil && !errors.Is(err, context.Canceled) {
 						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context canceled", err)
 					}
 					return nil

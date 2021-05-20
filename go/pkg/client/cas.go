@@ -22,6 +22,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	syncpool "github.com/mostynb/zstdpool-syncpool"
 	"github.com/pborman/uuid"
+	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -396,7 +397,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 
 	missing, err := c.MissingBlobs(ctx, dgs)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, errors.Wrap(err, "error while determining missing blobs")
 	}
 	LogContextInfof(ctx, log.Level(2), "%d items to store", len(missing))
 	var batches [][]digest.Digest
@@ -417,7 +418,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
 		eg.Go(func() error {
 			if err := c.casUploaders.Acquire(eCtx, 1); err != nil {
-				return err
+				return errors.Wrap(err, "error while acquiring semaphore to upload a batch")
 			}
 			defer c.casUploaders.Release(1)
 			if i%logInterval == 0 {
@@ -430,18 +431,18 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 					ue := ueList[dg]
 					ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 					if err != nil {
-						return err
+						return errors.Wrapf(err, "error while creating chunks for digest %v", dg)
 					}
 
 					data, err := ch.FullData()
 					if err != nil {
-						return err
+						return errors.Wrapf(err, "error while fetching FullData for digest %v", dg)
 					}
 					bchMap[dg] = data
 					atomic.AddInt64(&totalBytesTransferred, int64(len(data)))
 				}
 				if err := c.BatchWriteBlobs(eCtx, bchMap); err != nil {
-					return err
+					return errors.Wrap(err, "error while doing a batch write")
 				}
 			} else {
 				LogContextInfof(ctx, log.Level(3), "Uploading single blob with digest %s", batch[0])
@@ -449,11 +450,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				dg := ue.Digest
 				ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 				if err != nil {
-					return err
+					return errors.Wrapf(err, "error while creating chunks for digest %v", dg)
 				}
 				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch)
 				if err != nil {
-					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
+					return errors.Wrapf(err, "error while doing a chunked write to %v for %v", ue.Path, dg)
 				}
 				atomic.AddInt64(&totalBytesTransferred, written)
 			}
@@ -470,8 +471,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 	if err != nil {
 		LogContextInfof(ctx, log.Level(2), "Upload error: %v", err)
 	}
-
-	return missing, totalBytesTransferred, err
+	return missing, totalBytesTransferred, errors.Wrapf(err, "error while doing a non-unified upload")
 }
 
 func (c *Client) cancelPendingRequests(reqs []*uploadRequest) {
@@ -534,7 +534,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry)
 			return nil, 0, ctx.Err()
 		case resp := <-wait:
 			if resp.err != nil {
-				return nil, 0, resp.err
+				return nil, 0, errors.Wrapf(resp.err, "error while uploading blob with digest %v", resp.digest)
 			}
 			if resp.missing {
 				missing = append(missing, resp.digest)
