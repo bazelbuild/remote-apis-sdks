@@ -95,19 +95,19 @@ func TestFS(t *testing.T) {
 
 	tests := []struct {
 		desc                string
-		inputs              []*UploadInput
+		inputs              []*PathSpec
 		wantScheduledChecks []*uploadItem
 		wantErr             error
 		opt                 UploadOptions
 	}{
 		{
 			desc:                "root",
-			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
+			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
 			wantScheduledChecks: []*uploadItem{rootItem, aItem, bItem, subdirItem, cItem},
 		},
 		{
 			desc:   "root-without-a-using-callback",
-			inputs: []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
+			inputs: []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
 			opt: UploadOptions{
 				Prelude: func(absPath string, mode os.FileMode) error {
 					if filepath.Base(absPath) == "a" {
@@ -132,7 +132,7 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc: "root-without-b-using-exclude",
-			inputs: []*UploadInput{{
+			inputs: []*PathSpec{{
 				Path:        filepath.Join(tmpDir, "root"),
 				PathExclude: regexp.MustCompile(`[/\\]b$`),
 			}},
@@ -154,7 +154,7 @@ func TestFS(t *testing.T) {
 			desc: "same-regular-file-is-read-only-once",
 			// The two regexps below do not exclude anything.
 			// This test ensures that same files aren't checked twice.
-			inputs: []*UploadInput{
+			inputs: []*PathSpec{
 				{
 					Path:        filepath.Join(tmpDir, "root"),
 					PathExclude: regexp.MustCompile(`1$`),
@@ -169,7 +169,7 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc:   "root-without-subdir",
-			inputs: []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
+			inputs: []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
 			opt: UploadOptions{
 				Prelude: func(absPath string, mode os.FileMode) error {
 					if strings.Contains(absPath, "subdir") {
@@ -190,41 +190,36 @@ func TestFS(t *testing.T) {
 			},
 		},
 		{
-			desc:                "blob",
-			inputs:              []*UploadInput{{Content: []byte("foo")}},
-			wantScheduledChecks: []*uploadItem{uploadItemFromBlob("digest 2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae/3", []byte("foo"))},
-		},
-		{
 			desc:                "medium",
-			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "medium-dir")}},
+			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "medium-dir")}},
 			wantScheduledChecks: []*uploadItem{mediumDirItem, mediumItem},
 		},
 		{
 			desc:                "symlinks-preserved",
 			opt:                 UploadOptions{PreserveSymlinks: true},
-			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
 		},
 		{
 			desc:                "symlinks-not-preserved",
-			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
 		},
 		{
 			desc:    "dangling-symlinks-disallow",
-			inputs:  []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
+			inputs:  []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
 			wantErr: os.ErrNotExist,
 		},
 		{
 			desc:                "dangling-symlinks-allow",
 			opt:                 UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
-			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
+			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
 			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
 		},
 		{
 			desc: "dangling-symlink-via-filtering",
 			opt:  UploadOptions{PreserveSymlinks: true},
-			inputs: []*UploadInput{{
+			inputs: []*PathSpec{{
 				Path:        filepath.Join(tmpDir, "with-symlinks"),
 				PathExclude: regexp.MustCompile("root"),
 			}},
@@ -233,7 +228,7 @@ func TestFS(t *testing.T) {
 		{
 			desc: "dangling-symlink-via-filtering-allow",
 			opt:  UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
-			inputs: []*UploadInput{{
+			inputs: []*PathSpec{{
 				Path:        filepath.Join(tmpDir, "with-symlinks"),
 				PathExclude: regexp.MustCompile("root"),
 			}},
@@ -280,7 +275,7 @@ func TestFS(t *testing.T) {
 	}
 }
 
-func TestSmallBlobs(t *testing.T) {
+func TestSmallFiles(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -288,13 +283,15 @@ func TestSmallBlobs(t *testing.T) {
 	var gotDigestChecks []*repb.Digest
 	var gotDigestCheckRequestSizes []int
 	var gotUploadBlobReqs []*repb.BatchUpdateBlobsRequest_Request
-	failCBlob := true // blob "c" is uploaded below.
+	var missing []*repb.Digest
+	failFirstMissing := true
 	cas := &fakeCAS{
 		findMissingBlobs: func(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			gotDigestChecks = append(gotDigestChecks, in.BlobDigests...)
 			gotDigestCheckRequestSizes = append(gotDigestCheckRequestSizes, len(in.BlobDigests))
+			missing = append(missing, in.BlobDigests[0])
 			return &repb.FindMissingBlobsResponse{MissingBlobDigests: in.BlobDigests[:1]}, nil
 		},
 		batchUpdateBlobs: func(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
@@ -308,9 +305,9 @@ func TestSmallBlobs(t *testing.T) {
 			}
 			for i, r := range in.Requests {
 				res.Responses[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest}
-				if string(r.Data) == "c" && failCBlob {
+				if proto.Equal(r.Digest, missing[0]) && failFirstMissing {
 					res.Responses[i].Status = status.New(codes.Internal, "internal retrible error").Proto()
-					failCBlob = false
+					failFirstMissing = false
 				}
 			}
 			return res, nil
@@ -324,11 +321,16 @@ func TestSmallBlobs(t *testing.T) {
 	client.Config.FindMissingBlobs.MaxItems = 2
 	client.init()
 
+	tmpDir := t.TempDir()
+	putFile(t, filepath.Join(tmpDir, "a"), "a")
+	putFile(t, filepath.Join(tmpDir, "b"), "b")
+	putFile(t, filepath.Join(tmpDir, "c"), "c")
+	putFile(t, filepath.Join(tmpDir, "d"), "d")
 	inputC := inputChanFrom(
-		&UploadInput{Content: []byte("a")},
-		&UploadInput{Content: []byte("b")},
-		&UploadInput{Content: []byte("c")},
-		&UploadInput{Content: []byte("d")},
+		&PathSpec{Path: filepath.Join(tmpDir, "a")},
+		&PathSpec{Path: filepath.Join(tmpDir, "b")},
+		&PathSpec{Path: filepath.Join(tmpDir, "c")},
+		&PathSpec{Path: filepath.Join(tmpDir, "d")},
 	)
 	if _, err := client.Upload(ctx, UploadOptions{}, inputC); err != nil {
 		t.Fatalf("failed to upload: %s", err)
@@ -350,21 +352,24 @@ func TestSmallBlobs(t *testing.T) {
 		t.Error(diff)
 	}
 
-	wantUploadBlobsReqs := []*repb.BatchUpdateBlobsRequest_Request{
-		{
-			Digest: &repb.Digest{Hash: "2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6", SizeBytes: 1},
-			Data:   []byte("c"),
-		},
-		// We expect two requets for c because the first one failed transiently.
-		{
-			Digest: &repb.Digest{Hash: "2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6", SizeBytes: 1},
-			Data:   []byte("c"),
-		},
-		{
-			Digest: &repb.Digest{Hash: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", SizeBytes: 1},
-			Data:   []byte("a"),
-		},
+	if len(missing) != 2 {
+		t.Fatalf("want 2 missing, got %d", len(missing))
 	}
+	var wantUploadBlobsReqs []*repb.BatchUpdateBlobsRequest_Request
+	for _, blob := range []string{"a", "b", "c", "d"} {
+		blobBytes := []byte(blob)
+		req := &repb.BatchUpdateBlobsRequest_Request{Data: blobBytes, Digest: digest.NewFromBlob(blobBytes).ToProto()}
+		switch {
+		case proto.Equal(req.Digest, missing[0]):
+			wantUploadBlobsReqs = append(wantUploadBlobsReqs, req, req)
+		case proto.Equal(req.Digest, missing[1]):
+			wantUploadBlobsReqs = append(wantUploadBlobsReqs, req)
+		}
+
+	}
+	sort.Slice(wantUploadBlobsReqs, func(i, j int) bool {
+		return wantUploadBlobsReqs[i].Digest.Hash < wantUploadBlobsReqs[j].Digest.Hash
+	})
 	sort.Slice(gotUploadBlobReqs, func(i, j int) bool {
 		return gotUploadBlobReqs[i].Digest.Hash < gotUploadBlobReqs[j].Digest.Hash
 	})
@@ -396,12 +401,12 @@ func TestStreaming(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	largeFilePath := filepath.Join(t.TempDir(), "testdata", "large")
+	tmpDir := t.TempDir()
+	largeFilePath := filepath.Join(tmpDir, "testdata", "large")
 	putFile(t, largeFilePath, "laaaaaaaaaaarge")
 
 	inputC := inputChanFrom(
-		&UploadInput{Content: []byte("medium")}, // large blob
-		&UploadInput{Path: largeFilePath},       // large file
+		&PathSpec{Path: largeFilePath}, // large file
 	)
 	gotStats, err := client.Upload(ctx, UploadOptions{}, inputC)
 	if err != nil {
@@ -409,13 +414,8 @@ func TestStreaming(t *testing.T) {
 	}
 
 	cas := e.Server.CAS
-	if cas.WriteReqs() != 2 {
-		t.Errorf("want 2 write requests, got %d", cas.WriteReqs())
-	}
-
-	blobDigest := digest.Digest{Hash: "c082456a7766e23a18db084cd34b6ff510baef506548b897cc80e9b7d3e121c8", Size: 6}
-	if got := cas.BlobWrites(blobDigest); got != 1 {
-		t.Errorf("want 1 write of %s, got %d", blobDigest, got)
+	if cas.WriteReqs() != 1 {
+		t.Errorf("want 1 write requests, got %d", cas.WriteReqs())
 	}
 
 	fileDigest := digest.Digest{Hash: "71944dd83e7e86354c3a9284e299e0d76c0b1108be62c8e7cefa72adf22128bf", Size: 15}
@@ -424,15 +424,15 @@ func TestStreaming(t *testing.T) {
 	}
 
 	wantStats := &TransferStats{
-		CacheMisses: DigestStat{Digests: 2, Bytes: 21},
-		Streamed:    DigestStat{Digests: 2, Bytes: 21},
+		CacheMisses: DigestStat{Digests: 1, Bytes: 15},
+		Streamed:    DigestStat{Digests: 1, Bytes: 15},
 	}
 	if diff := cmp.Diff(wantStats, gotStats); diff != "" {
 		t.Errorf("unexpected stats (-want +got):\n%s", diff)
 	}
 
 	// Upload the large file again.
-	if _, err := client.Upload(ctx, UploadOptions{}, inputChanFrom(&UploadInput{Path: largeFilePath})); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, inputChanFrom(&PathSpec{Path: largeFilePath})); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 }
@@ -451,8 +451,8 @@ func mustReadAll(item *uploadItem) []byte {
 	return data
 }
 
-func inputChanFrom(inputs ...*UploadInput) chan *UploadInput {
-	inputC := make(chan *UploadInput, len(inputs))
+func inputChanFrom(inputs ...*PathSpec) chan *PathSpec {
+	inputC := make(chan *PathSpec, len(inputs))
 	for _, in := range inputs {
 		inputC <- in
 	}

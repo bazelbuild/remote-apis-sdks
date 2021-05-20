@@ -28,7 +28,7 @@ import (
 )
 
 // ErrFilteredSymlinkTarget is returned when a symlink's target was filtered out
-// via UploadInput.PathExclude or ErrSkip, while the symlink itself wasn't.
+// via PathSpec.PathExclude or ErrSkip, while the symlink itself wasn't.
 var ErrFilteredSymlinkTarget = errors.New("symlink's target was filtered out")
 
 // zstdEncoders is a pool of ZStd encoders.
@@ -41,20 +41,13 @@ var zstdEncoders = sync.Pool{
 	},
 }
 
-// UploadInput is one of inputs to Client.Upload function.
-//
-// It can be either a reference to a file/dir (see Path) or it can be an
-// in-memory blob (see Content).
-type UploadInput struct {
+// PathSpec specifies a subset of the file system.
+type PathSpec struct {
 	// Path to the file or a directory to upload.
 	// If empty, the Content is uploaded instead.
 	//
 	// Must be absolute or relative to CWD.
 	Path string
-
-	// Contents to upload.
-	// Ignored if Path is not empty.
-	Content []byte
 
 	// PathExclude is a file/dir filter. If PathExclude is not nil and the
 	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
@@ -102,7 +95,7 @@ type UploadOptions struct {
 	// If it returns another error, then the upload is halted with that error.
 	//
 	// Prelude might be called multiple times for the same file if different
-	// UploadInputs directly/indirectly refer to the same file, but with different
+	// PathSpecs directly/indirectly refer to the same file, but with different
 	// PathExclude.
 	//
 	// Prelude is called from different goroutines.
@@ -118,7 +111,7 @@ type UploadOptions struct {
 var ErrSkip = errors.New("skip file")
 
 // Upload uploads all inputs. It exits when inputC is closed or ctx is canceled.
-func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput) (stats *TransferStats, err error) {
+func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *PathSpec) (stats *TransferStats, err error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
 	defer eg.Wait()
@@ -172,11 +165,11 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case in, ok := <-inputC:
+			case ps, ok := <-pathC:
 				if !ok {
 					return nil
 				}
-				if err := u.startProcessing(ctx, in); err != nil {
+				if err := u.startProcessing(ctx, ps); err != nil {
 					return err
 				}
 			}
@@ -219,20 +212,15 @@ type uploader struct {
 }
 
 // startProcessing adds the item to the appropriate stage depending on its type.
-func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
-	if in.Path == "" {
-		// Simple case: the blob is in memory.
-		return u.scheduleCheck(ctx, uploadItemFromBlob("", in.Content))
-	}
-
+func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
 	// Schedule a file system walk.
 	u.wgFS.Add(1)
 	u.eg.Go(func() error {
 		defer u.wgFS.Done()
 		// Compute the absolute path only once per directory tree.
-		absPath, err := filepath.Abs(in.Path)
+		absPath, err := filepath.Abs(ps.Path)
 		if err != nil {
-			return errors.Wrapf(err, "failed to get absolute path of %q", in.Path)
+			return errors.Wrapf(err, "failed to get absolute path of %q", ps.Path)
 		}
 
 		// Do not use os.Stat() here. We want to know if it is a symlink.
@@ -241,7 +229,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 			return errors.WithStack(err)
 		}
 
-		_, err = u.visitPath(ctx, absPath, info, in.PathExclude)
+		_, err = u.visitPath(ctx, absPath, info, ps.PathExclude)
 		return errors.Wrapf(err, "%q", absPath)
 	})
 	return nil
@@ -306,7 +294,6 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 //
 // It distinguishes three categories of file sizes:
 //  - small: small files are buffered in memory entirely, thus read only once.
-//    They are treated same as UploadInput with Contents and without Path.
 //    See also ClientConfig.SmallFileThreshold.
 //  - medium: the hash is computed, the file is closed and a presence check is
 //    scheduled.
