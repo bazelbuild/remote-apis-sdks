@@ -531,6 +531,36 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "File relative symlink (preserved based on InputSpec)",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "fooSym", isSymlink: true, symlinkTarget: "fooDir/foo"},
+			},
+			spec: &command.InputSpec{
+				// The symlink target will be traversed recursively.
+				Inputs: []string{"fooSym"},
+				SymlinkBehavior: command.PreserveSymlink,
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDgPb}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "fooSym", Target: "fooDir/foo"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir/foo": 1,
+				"fooSym":     1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2,
+				InputFiles:       1,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				FollowsTarget: true,
+			},
+		},
+		{
 			desc: "File relative symlink (preserved but not followed)",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},

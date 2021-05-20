@@ -483,6 +483,7 @@ func TestToFromProto(t *testing.T) {
 				"k":  "v",
 				"k1": "v1",
 			},
+			SymlinkBehavior: ResolveSymlink,
 		},
 		OutputFiles: []string{"a/b/out"},
 	}
