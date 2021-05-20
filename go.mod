@@ -4,7 +4,6 @@ go 1.15
 
 require (
 	cloud.google.com/go v0.65.0 // indirect
-	github.com/bazelbuild/bazelisk v1.8.1 // indirect
 	github.com/bazelbuild/remote-apis v0.0.0-20210430163111-3b7a4b50d27b
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/golang/protobuf v1.4.2
