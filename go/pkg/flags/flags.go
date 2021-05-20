@@ -60,8 +60,6 @@ var (
 	StartupCapabilities = flag.Bool("startup_capabilities", true, "Whether to self-configure based on remote server capabilities on startup.")
 	// RPCTimeouts stores the per-RPC timeout values.
 	RPCTimeouts map[string]string
-	// PreserveSymlink specifies whether to preserve symlinks in a tree.
-	PreserveSymlink = flag.Bool("preserve_symlink", false, "Whether to preserve symlinks in a tree")
 )
 
 func init() {
@@ -92,11 +90,6 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 			timeouts[rpc] = d
 		}
 		opts = append(opts, client.RPCTimeouts(timeouts))
-	}
-	if *PreserveSymlink {
-		treeSymOpts := client.DefaultTreeSymlinkOpts()
-		treeSymOpts.Preserved = true
-		opts = append(opts, treeSymOpts)
 	}
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
