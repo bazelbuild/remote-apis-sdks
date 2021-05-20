@@ -95,19 +95,19 @@ func TestFS(t *testing.T) {
 
 	tests := []struct {
 		desc                string
-		inputs              []*PathSpec
+		paths               []*PathSpec
 		wantScheduledChecks []*uploadItem
 		wantErr             error
 		opt                 UploadOptions
 	}{
 		{
 			desc:                "root",
-			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
 			wantScheduledChecks: []*uploadItem{rootItem, aItem, bItem, subdirItem, cItem},
 		},
 		{
-			desc:   "root-without-a-using-callback",
-			inputs: []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			desc:  "root-without-a-using-callback",
+			paths: []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
 			opt: UploadOptions{
 				Prelude: func(absPath string, mode os.FileMode) error {
 					if filepath.Base(absPath) == "a" {
@@ -132,7 +132,7 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc: "root-without-b-using-exclude",
-			inputs: []*PathSpec{{
+			paths: []*PathSpec{{
 				Path:        filepath.Join(tmpDir, "root"),
 				PathExclude: regexp.MustCompile(`[/\\]b$`),
 			}},
@@ -154,7 +154,7 @@ func TestFS(t *testing.T) {
 			desc: "same-regular-file-is-read-only-once",
 			// The two regexps below do not exclude anything.
 			// This test ensures that same files aren't checked twice.
-			inputs: []*PathSpec{
+			paths: []*PathSpec{
 				{
 					Path:        filepath.Join(tmpDir, "root"),
 					PathExclude: regexp.MustCompile(`1$`),
@@ -168,8 +168,8 @@ func TestFS(t *testing.T) {
 			wantScheduledChecks: []*uploadItem{rootItem, rootItem, aItem, bItem, subdirItem, subdirItem, cItem},
 		},
 		{
-			desc:   "root-without-subdir",
-			inputs: []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			desc:  "root-without-subdir",
+			paths: []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
 			opt: UploadOptions{
 				Prelude: func(absPath string, mode os.FileMode) error {
 					if strings.Contains(absPath, "subdir") {
@@ -191,35 +191,35 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc:                "medium",
-			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "medium-dir")}},
+			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "medium-dir")}},
 			wantScheduledChecks: []*uploadItem{mediumDirItem, mediumItem},
 		},
 		{
 			desc:                "symlinks-preserved",
 			opt:                 UploadOptions{PreserveSymlinks: true},
-			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
 		},
 		{
 			desc:                "symlinks-not-preserved",
-			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
 		},
 		{
 			desc:    "dangling-symlinks-disallow",
-			inputs:  []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
+			paths:   []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
 			wantErr: os.ErrNotExist,
 		},
 		{
 			desc:                "dangling-symlinks-allow",
 			opt:                 UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
-			inputs:              []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
+			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
 			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
 		},
 		{
 			desc: "dangling-symlink-via-filtering",
 			opt:  UploadOptions{PreserveSymlinks: true},
-			inputs: []*PathSpec{{
+			paths: []*PathSpec{{
 				Path:        filepath.Join(tmpDir, "with-symlinks"),
 				PathExclude: regexp.MustCompile("root"),
 			}},
@@ -228,7 +228,7 @@ func TestFS(t *testing.T) {
 		{
 			desc: "dangling-symlink-via-filtering-allow",
 			opt:  UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
-			inputs: []*PathSpec{{
+			paths: []*PathSpec{{
 				Path:        filepath.Join(tmpDir, "with-symlinks"),
 				PathExclude: regexp.MustCompile("root"),
 			}},
@@ -254,7 +254,7 @@ func TestFS(t *testing.T) {
 			client.Config.LargeFileThreshold = 10
 			client.init()
 
-			_, err := client.Upload(ctx, tc.opt, inputChanFrom(tc.inputs...))
+			_, err := client.Upload(ctx, tc.opt, pathSpecChanFrom(tc.paths...))
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("error mismatch: want %q, got %q", tc.wantErr, err)
@@ -326,13 +326,13 @@ func TestSmallFiles(t *testing.T) {
 	putFile(t, filepath.Join(tmpDir, "b"), "b")
 	putFile(t, filepath.Join(tmpDir, "c"), "c")
 	putFile(t, filepath.Join(tmpDir, "d"), "d")
-	inputC := inputChanFrom(
+	pathC := pathSpecChanFrom(
 		&PathSpec{Path: filepath.Join(tmpDir, "a")},
 		&PathSpec{Path: filepath.Join(tmpDir, "b")},
 		&PathSpec{Path: filepath.Join(tmpDir, "c")},
 		&PathSpec{Path: filepath.Join(tmpDir, "d")},
 	)
-	if _, err := client.Upload(ctx, UploadOptions{}, inputC); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, pathC); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 
@@ -405,10 +405,10 @@ func TestStreaming(t *testing.T) {
 	largeFilePath := filepath.Join(tmpDir, "testdata", "large")
 	putFile(t, largeFilePath, "laaaaaaaaaaarge")
 
-	inputC := inputChanFrom(
+	pathC := pathSpecChanFrom(
 		&PathSpec{Path: largeFilePath}, // large file
 	)
-	gotStats, err := client.Upload(ctx, UploadOptions{}, inputC)
+	gotStats, err := client.Upload(ctx, UploadOptions{}, pathC)
 	if err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
@@ -432,7 +432,7 @@ func TestStreaming(t *testing.T) {
 	}
 
 	// Upload the large file again.
-	if _, err := client.Upload(ctx, UploadOptions{}, inputChanFrom(&PathSpec{Path: largeFilePath})); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, pathSpecChanFrom(&PathSpec{Path: largeFilePath})); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 }
@@ -451,13 +451,13 @@ func mustReadAll(item *uploadItem) []byte {
 	return data
 }
 
-func inputChanFrom(inputs ...*PathSpec) chan *PathSpec {
-	inputC := make(chan *PathSpec, len(inputs))
-	for _, in := range inputs {
-		inputC <- in
+func pathSpecChanFrom(pathSpecs ...*PathSpec) chan *PathSpec {
+	ch := make(chan *PathSpec, len(pathSpecs))
+	for _, ps := range pathSpecs {
+		ch <- ps
 	}
-	close(inputC)
-	return inputC
+	close(ch)
+	return ch
 }
 
 type fakeCAS struct {

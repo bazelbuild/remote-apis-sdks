@@ -110,7 +110,8 @@ type UploadOptions struct {
 // result in a dangling symlink.
 var ErrSkip = errors.New("skip file")
 
-// Upload uploads all inputs. It exits when inputC is closed or ctx is canceled.
+// Upload uploads all path specs.
+// It exits when pathC is closed or ctx is canceled.
 func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *PathSpec) (stats *TransferStats, err error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
@@ -149,7 +150,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *Pa
 	u.batchBundler.BundleByteLimit = c.Config.BatchUpdateBlobs.MaxSizeBytes - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
 	u.batchBundler.BundleCountThreshold = c.Config.BatchUpdateBlobs.MaxItems
 
-	// Start processing input.
+	// Start processing path specs.
 	eg.Go(func() error {
 		// Before exiting this main goroutine, ensure all the work has been completed.
 		// Just waiting for u.eg isn't enough because some work may be temporarily
