@@ -376,7 +376,7 @@ func TestBatchWriteBlobsRpcRetriesExhausted(t *testing.T) {
 	err := f.client.BatchWriteBlobs(f.ctx, blobs)
 	if err == nil {
 		t.Error("BatchWriteBlobs(ctx, {}) = nil; expected Canceled error got nil")
-	} else if s, ok := status.FromError(errors.Unwrap(err)); ok && s.Code() != codes.Canceled {
+	} else if s, ok := status.FromError(err); ok && s.Code() != codes.Canceled {
 		t.Errorf("BatchWriteBlobs(ctx, {}) = %v; expected Canceled error, got %v", err, s.Code())
 	} else if !ok {
 		t.Errorf("BatchWriteBlobs(ctx, {}) = %v; expected Canceled error (status.FromError failed)", err)
