@@ -28,7 +28,7 @@ import (
 )
 
 // ErrFilteredSymlinkTarget is returned when a symlink's target was filtered out
-// via PathSpec.PathExclude or ErrSkip, while the symlink itself wasn't.
+// via PathSpec.Exclude or ErrSkip, while the symlink itself wasn't.
 var ErrFilteredSymlinkTarget = errors.New("symlink's target was filtered out")
 
 // zstdEncoders is a pool of ZStd encoders.
@@ -523,7 +523,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	case !u.PreserveSymlinks:
 		return targetNode, nil
 	case targetNode == nil && !u.AllowDanglingSymlinks:
-		// The target got skipped via Prelude or PathExclude,
+		// The target got skipped via Prelude or PathSpec.Exclude,
 		// resulting in a dangling symlink, which is not allowed.
 		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
 	default:
