@@ -111,6 +111,8 @@ var ErrSkip = errors.New("skip file")
 // Close pathC to indicate that there are no more files/dirs to upload.
 // When pathC is closed, Upload finishes uploading the remaining files/dirs and
 // exits successfully.
+//
+// If ctx is canceled, the Upload returns with an error.
 func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *PathSpec) (stats *TransferStats, err error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
