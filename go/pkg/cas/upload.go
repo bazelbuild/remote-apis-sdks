@@ -764,7 +764,7 @@ func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *re
 		req.ResourceName = fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", u.InstanceName, uuid.New(), digest.Hash, digest.SizeBytes)
 	}
 
-	buf := u.streamBufs.Get().([]byte)
+	buf := u.streamBufs.Get().(*[]byte)
 	defer u.streamBufs.Put(buf)
 
 chunkLoop:
@@ -776,14 +776,14 @@ chunkLoop:
 
 		// Read the next chunk from the pipe.
 		// Use ReadFull to ensure we aren't sending tiny blobs over RPC.
-		n, err := io.ReadFull(r, buf)
+		n, err := io.ReadFull(r, *buf)
 		switch {
 		case err == io.EOF || err == io.ErrUnexpectedEOF:
 			req.FinishWrite = true
 		case err != nil:
 			return err
 		}
-		req.Data = buf[:n] // must limit by `:n` in ErrUnexpectedEOF case
+		req.Data = (*buf)[:n] // must limit by `:n` in ErrUnexpectedEOF case
 
 		// Send the chunk.
 		withTimeout(func() {
