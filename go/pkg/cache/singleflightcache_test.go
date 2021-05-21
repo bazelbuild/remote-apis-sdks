@@ -69,7 +69,7 @@ func TestValFnFailure(t *testing.T) {
 	fnErr := errors.New("error")
 	val, err := s.LoadOrStore(key1, func() (interface{}, error) { return nil, fnErr })
 	if err == nil {
-		t.Errorf("LoadOrStore(%v) failed: val - %v, err is nil", key1, val)
+		t.Errorf("LoadOrStore(%v) failed: val is %v, err is nil", key1, val)
 	}
 
 	val, err = s.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
