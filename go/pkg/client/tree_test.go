@@ -1430,7 +1430,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.paths, cache)
+			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.paths, cache, command.ResolveSymlink)
 			if err != nil {
 				t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
@@ -1542,7 +1542,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, []string{"a/b/fooDir"}, cache)
+			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, []string{"a/b/fooDir"}, cache, command.ResolveSymlink)
 			if err != nil {
 				t.Fatalf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
