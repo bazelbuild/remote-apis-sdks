@@ -280,7 +280,8 @@ func (c *Client) init() {
 		streamBufSize = int(c.Config.ByteStreamWrite.MaxSizeBytes)
 	}
 	c.streamBufs.New = func() interface{} {
-		return make([]byte, streamBufSize)
+		buf := make([]byte, streamBufSize)
+		return &buf
 	}
 }
 
