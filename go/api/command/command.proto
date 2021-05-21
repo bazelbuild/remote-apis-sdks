@@ -116,7 +116,7 @@ message InputSpec {
   // Environment variables the command relies on.
   map<string,string> environment_variables = 4;
 
-  // symlinks are handled in this way.
+  // Determines how symlinks should be treated when constructing the input tree.
   SymlinkBehaviorType.Value symlink_behavior = 6;
 }
 

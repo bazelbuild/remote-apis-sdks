@@ -538,7 +538,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			spec: &command.InputSpec{
 				// The symlink target will be traversed recursively.
-				Inputs: []string{"fooSym"},
+				Inputs:          []string{"fooSym"},
 				SymlinkBehavior: command.PreserveSymlink,
 			},
 			rootDir: &repb.Directory{
