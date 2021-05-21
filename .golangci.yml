@@ -10,3 +10,9 @@ issues:
 linters:
   enable:
     - wrapcheck
+
+linters-settings:
+  stylecheck:
+    go: "1.15"
+  staticcheck:
+    go: "1.15"
