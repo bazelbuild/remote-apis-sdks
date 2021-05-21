@@ -9,7 +9,7 @@ import (
 
 var globalCache cache.SingleFlight
 
-// Reset clears the cache globally.
+// ResetGlobalCache clears the cache globally.
 // Applies to all Cache instances created by NewSingleFlightCache.
 func ResetGlobalCache() {
 	globalCache.Reset()
