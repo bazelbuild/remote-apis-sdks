@@ -44,7 +44,7 @@ var zstdEncoders = sync.Pool{
 // PathSpec specifies a subset of the file system.
 type PathSpec struct {
 	// Path to the file or a directory to upload.
-	// Must be absolute or relative to CWD.
+	// Must be absolute.
 	Path string
 
 	// Exclude is a file/dir filter. If Exclude is not nil and the
@@ -217,24 +217,22 @@ type uploader struct {
 
 // startProcessing adds the item to the appropriate stage depending on its type.
 func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
+	if !filepath.IsAbs(ps.Path) {
+		return errors.Errorf("%q is not absolute", ps.Path)
+	}
+
 	// Schedule a file system walk.
 	u.wgFS.Add(1)
 	u.eg.Go(func() error {
 		defer u.wgFS.Done()
-		// Compute the absolute path only once per directory tree.
-		absPath, err := filepath.Abs(ps.Path)
-		if err != nil {
-			return errors.Wrapf(err, "failed to get absolute path of %q", ps.Path)
-		}
-
 		// Do not use os.Stat() here. We want to know if it is a symlink.
-		info, err := os.Lstat(absPath)
+		info, err := os.Lstat(ps.Path)
 		if err != nil {
 			return errors.WithStack(err)
 		}
 
-		_, err = u.visitPath(ctx, absPath, info, ps.Exclude)
-		return errors.Wrapf(err, "%q", absPath)
+		_, err = u.visitPath(ctx, ps.Path, info, ps.Exclude)
+		return errors.Wrapf(err, "%q", ps.Path)
 	})
 	return nil
 }
