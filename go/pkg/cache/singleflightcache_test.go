@@ -67,12 +67,12 @@ func TestSingleFlightStore(t *testing.T) {
 func TestValFnFailure(t *testing.T) {
 	s := &SingleFlight{}
 	fnErr := errors.New("error")
-	_, err := s.LoadOrStore(key1, func() (interface{}, error) { return nil, fnErr })
+	val, err := s.LoadOrStore(key1, func() (interface{}, error) { return nil, fnErr })
 	if err == nil {
-		t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
+		t.Errorf("LoadOrStore(%v) failed: val - %v, err is nil", key1, val)
 	}
 
-	val, err := s.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
+	val, err = s.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
 	if err != fnErr {
 		t.Errorf("LoadOrStore(%v) didn't fail: (%v, %v)", key1, val, err)
 	}
