@@ -64,7 +64,7 @@ var symlinkBehaviorType = [...]string{"UnspecifiedSymlinkBehavior", "ResolveSyml
 
 func (s SymlinkBehaviorType) String() string {
 	if UnspecifiedSymlinkBehavior <= s && s <= PreserveSymlink {
-		return symlinkBehaviorType[s - UnspecifiedSymlinkBehavior]
+		return symlinkBehaviorType[s-UnspecifiedSymlinkBehavior]
 	}
 	return fmt.Sprintf("InvalidSymlinkBehaviorType(%d)", s)
 }
