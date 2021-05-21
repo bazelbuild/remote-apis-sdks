@@ -30,7 +30,8 @@ var (
 	// copyBufs is a pool of 32KiB []byte slices, used to compute hashes.
 	copyBufs = sync.Pool{
 		New: func() interface{} {
-			return make([]byte, 32*1024)
+			buf := make([]byte, 32*1024)
+			return &buf
 		},
 	}
 )
@@ -156,9 +157,9 @@ func NewFromFile(path string) (Digest, error) {
 // It returns an error if there was a problem reading the file.
 func NewFromReader(r io.Reader) (Digest, error) {
 	h := HashFn.New()
-	buf := copyBufs.Get().([]byte)
+	buf := copyBufs.Get().(*[]byte)
 	defer copyBufs.Put(buf)
-	size, err := io.CopyBuffer(h, r, buf)
+	size, err := io.CopyBuffer(h, r, *buf)
 	if err != nil {
 		return Empty, err
 	}

@@ -100,7 +100,7 @@ type UploadOptions struct {
 	Prelude func(absPath string, mode os.FileMode) error
 }
 
-// ErrSkip, when returned by UploadOptions.Prelude, means the file/dir must be
+// ErrSkip when returned by UploadOptions.Prelude, means the file/dir must be
 // not be uploaded.
 //
 // Note that if UploadOptions.PreserveSymlinks is true and the ErrSkip is
