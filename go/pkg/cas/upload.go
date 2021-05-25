@@ -100,6 +100,12 @@ type UploadOptions struct {
 	Prelude func(absPath string, mode os.FileMode) error
 }
 
+// digested is a result of preprocessing a file/dir.
+type digested struct {
+	dirEntry proto.Message // FileNode, DirectoryNode or SymlinkNode
+	digest   *repb.Digest
+}
+
 // ErrSkip, when returned by UploadOptions.Prelude, means the file/dir must be
 // not be uploaded.
 //
@@ -142,7 +148,7 @@ func (r *UploadResult) Digest(ps *PathSpec) (*digest.Digest, error) {
 	case err != nil:
 		return nil, err
 	default:
-		val := val.(*fsCacheValue)
+		val := val.(*digested)
 		dig := digest.NewFromProtoUnvalidated(val.digest)
 		return &dig, nil
 	}
@@ -244,7 +250,8 @@ type uploader struct {
 	wgFS sync.WaitGroup
 
 	// fsCache contains already-processed files.
-	// The keys and values are of type fsCacheKey and fsCacheValue respectively.
+	// A key can be produced by makeFSCacheKey.
+	// The values are of type *digested.
 	fsCache cache.SingleFlight
 
 	// checkBundler bundles digests that need to be checked for presence on the
@@ -254,16 +261,6 @@ type uploader struct {
 
 	// batchBundler bundles blobs that can be uploaded using UploadBlobs RPC.
 	batchBundler *bundler.Bundler
-}
-
-type fsCacheKey struct {
-	AbsPath       string
-	ExcludeRegexp string
-}
-
-type fsCacheValue struct {
-	dirEntry proto.Message // FileNode, DirectoryNode or SymlinkNode
-	digest   *repb.Digest  // may be nil if a symlink is dangling
 }
 
 // startProcessing adds the item to the appropriate stage depending on its type.
@@ -289,8 +286,14 @@ func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
 }
 
 // makeFSCacheKey returns a key for u.fsCache.
-func makeFSCacheKey(absPath string, mode os.FileMode, pathExclude *regexp.Regexp) fsCacheKey {
-	key := fsCacheKey{
+func makeFSCacheKey(absPath string, mode os.FileMode, pathExclude *regexp.Regexp) interface{} {
+	// The structure of the cache key is incapsulated by this function.
+	type cacheKey struct {
+		AbsPath       string
+		ExcludeRegexp string
+	}
+
+	key := cacheKey{
 		AbsPath: absPath,
 	}
 
@@ -334,16 +337,16 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
 			node, digest, err := u.visitSymlink(ctx, absPath, pathExclude)
-			return &fsCacheValue{dirEntry: node, digest: digest}, err
+			return &digested{dirEntry: node, digest: digest}, err
 
 		case info.Mode().IsDir():
 			node, err := u.visitDir(ctx, absPath, pathExclude)
-			return &fsCacheValue{dirEntry: node, digest: node.GetDigest()}, err
+			return &digested{dirEntry: node, digest: node.GetDigest()}, err
 
 		case info.Mode().IsRegular():
 			// Note: makeFSCacheKey assumes that pathExclude is not used here.
 			node, err := u.visitRegularFile(ctx, absPath, info)
-			return &fsCacheValue{dirEntry: node, digest: node.GetDigest()}, err
+			return &digested{dirEntry: node, digest: node.GetDigest()}, err
 
 		default:
 			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
@@ -352,8 +355,8 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 	if err != nil {
 		return nil, nil, err
 	}
-	cached := cachedUntyped.(*fsCacheValue)
-	return cached.dirEntry, cached.digest, nil
+	d := cachedUntyped.(*digested)
+	return d.dirEntry, d.digest, nil
 }
 
 // visitRegularFile computes the hash of a regular file and schedules a presence
