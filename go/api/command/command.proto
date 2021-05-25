@@ -87,6 +87,17 @@ message VirtualInput {
   bool is_empty_directory = 4;
 }
 
+message SymlinkBehaviorType {
+  enum Value {
+    // Use Client.TreeSymlinkOpts or default if it is not set.
+    UNSPECIFIED = 0;
+    // Resolves symlinks.
+    RESOLVE = 1;
+    // Preserve symlinks as-is.
+    PRESERVE = 2;
+  }
+}
+
 message InputSpec {
   // Input paths (files or directories) that need to be uploaded to the remote
   // server for the command execution.
@@ -104,6 +115,9 @@ message InputSpec {
 
   // Environment variables the command relies on.
   map<string,string> environment_variables = 4;
+
+  // Determines how symlinks should be treated when constructing the input tree.
+  SymlinkBehaviorType.Value symlink_behavior = 6;
 }
 
 message OutputSpec {

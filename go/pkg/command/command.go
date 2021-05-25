@@ -45,6 +45,30 @@ func (s InputType) String() string {
 	return fmt.Sprintf("InvalidInputType(%d)", s)
 }
 
+// SymlinkBehaviorType represents how symlinks are handled.
+type SymlinkBehaviorType int
+
+const (
+	// UnspecifiedSymlinkBehavior means following clients.TreeSymlinkOpts
+	// or DefaultTreeSymlinkOpts if clients.TreeSymlinkOpts is null.
+	UnspecifiedSymlinkBehavior SymlinkBehaviorType = iota
+
+	// ResolveSymlink means symlinks are resolved.
+	ResolveSymlink
+
+	// PreserveSymlink means symlinks are kept as-is.
+	PreserveSymlink
+)
+
+var symlinkBehaviorType = [...]string{"UnspecifiedSymlinkBehavior", "ResolveSymlink", "PreserveSymlink"}
+
+func (s SymlinkBehaviorType) String() string {
+	if UnspecifiedSymlinkBehavior <= s && s <= PreserveSymlink {
+		return symlinkBehaviorType[s-UnspecifiedSymlinkBehavior]
+	}
+	return fmt.Sprintf("InvalidSymlinkBehaviorType(%d)", s)
+}
+
 // InputExclusion represents inputs to be excluded from being considered for command execution.
 type InputExclusion struct {
 	// Required: the path regular expression to match for exclusion.
@@ -85,6 +109,9 @@ type InputSpec struct {
 
 	// Environment variables the command relies on.
 	EnvironmentVariables map[string]string
+
+	// SymlinkBehavior represents the way symlinks will be handled.
+	SymlinkBehavior SymlinkBehaviorType
 }
 
 // String returns the string representation of the VirtualInput.
@@ -566,6 +593,7 @@ func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
 		VirtualInputs:        vis,
 		InputExclusions:      excl,
 		EnvironmentVariables: is.GetEnvironmentVariables(),
+		SymlinkBehavior:      symlinkBehaviorFromProto(is.GetSymlinkBehavior()),
 	}
 }
 
@@ -593,6 +621,7 @@ func inputSpecToProto(is *InputSpec) *cpb.InputSpec {
 		VirtualInputs:        vis,
 		ExcludeInputs:        excl,
 		EnvironmentVariables: is.EnvironmentVariables,
+		SymlinkBehavior:      symlinkBehaviorToProto(is.SymlinkBehavior),
 	}
 }
 
@@ -615,6 +644,28 @@ func inputTypeToProto(t InputType) cpb.InputType_Value {
 		return cpb.InputType_FILE
 	default:
 		return cpb.InputType_UNSPECIFIED
+	}
+}
+
+func symlinkBehaviorFromProto(t cpb.SymlinkBehaviorType_Value) SymlinkBehaviorType {
+	switch t {
+	case cpb.SymlinkBehaviorType_RESOLVE:
+		return ResolveSymlink
+	case cpb.SymlinkBehaviorType_PRESERVE:
+		return PreserveSymlink
+	default:
+		return UnspecifiedSymlinkBehavior
+	}
+}
+
+func symlinkBehaviorToProto(t SymlinkBehaviorType) cpb.SymlinkBehaviorType_Value {
+	switch t {
+	case ResolveSymlink:
+		return cpb.SymlinkBehaviorType_RESOLVE
+	case PreserveSymlink:
+		return cpb.SymlinkBehaviorType_PRESERVE
+	default:
+		return cpb.SymlinkBehaviorType_UNSPECIFIED
 	}
 }
 

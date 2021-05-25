@@ -74,6 +74,20 @@ func DefaultTreeSymlinkOpts() *TreeSymlinkOpts {
 	}
 }
 
+// treeSymlinkOpts returns a TreeSymlinkOpts object based on the given SymlinkBehaviorType.
+func treeSymlinkOpts(opts *TreeSymlinkOpts, sb command.SymlinkBehaviorType) *TreeSymlinkOpts {
+	if opts == nil {
+		opts = DefaultTreeSymlinkOpts()
+	}
+	switch sb {
+	case command.ResolveSymlink:
+		opts.Preserved = false
+	case command.PreserveSymlink:
+		opts.Preserved = true
+	}
+	return opts
+}
+
 // shouldIgnore returns whether a given input should be excluded based on the given InputExclusions,
 func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusion) bool {
 	for _, r := range excl {
@@ -240,7 +254,7 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 		}
 	}
 
-	if e := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, c.TreeSymlinkOpts); e != nil {
+	if e := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); e != nil {
 		return digest.Empty, nil, nil, e
 	}
 	ft := buildTree(fs)
@@ -465,7 +479,7 @@ func packageDirectories(t *treeNode) (root *repb.Directory, children map[digest.
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
 // The paths have to be relative to execRoot.
 // It also populates the remote ActionResult, packaging output directories as trees where required.
-func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache filemetadata.Cache) (map[digest.Digest]*uploadinfo.Entry, *repb.ActionResult, error) {
+func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache filemetadata.Cache, sb command.SymlinkBehaviorType) (map[digest.Digest]*uploadinfo.Entry, *repb.ActionResult, error) {
 	outs := make(map[digest.Digest]*uploadinfo.Entry)
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {
@@ -490,7 +504,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache f
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, nil, []string{"."}, fs, cache, c.TreeSymlinkOpts); e != nil {
+		if e := loadFiles(absPath, nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb)); e != nil {
 			return nil, nil, e
 		}
 		ft := buildTree(fs)
