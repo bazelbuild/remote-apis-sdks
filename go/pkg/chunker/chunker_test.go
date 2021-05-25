@@ -196,7 +196,9 @@ func TestChunkerFromBlob_Reset(t *testing.T) {
 					}
 					gotChunks = append(gotChunks, got)
 					if i == reset {
-						c.Reset()
+						if err := c.Reset(); err != nil {
+							t.Errorf("failed to reset: %v", err)
+						}
 						break
 					}
 				}
@@ -260,7 +262,9 @@ func TestChunkerFromFile_Reset(t *testing.T) {
 						}
 						gotChunks = append(gotChunks, got)
 						if i == reset {
-							c.Reset()
+							if err := c.Reset(); err != nil {
+								t.Errorf("failed to reset: %v", err)
+							}
 							break
 						}
 					}
@@ -334,7 +338,9 @@ func TestChunkerResetOptimization_SmallFile(t *testing.T) {
 	if diff := cmp.Diff(wantChunk, got); diff != "" {
 		t.Errorf("c.Next() gave result diff (-want +got):\n%s", diff)
 	}
-	c.Reset()
+	if err := c.Reset(); err != nil {
+		t.Errorf("failed to reset: %v", err)
+	}
 	// Change the file contents.
 	if err := ioutil.WriteFile(path, []byte("321"), 0777); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
@@ -376,7 +382,9 @@ func TestChunkerResetOptimization_FullData(t *testing.T) {
 	if !bytes.Equal(got, blob) {
 		t.Errorf("c.FullData() gave result diff, want %q, got %q", string(blob), string(got))
 	}
-	c.Reset()
+	if err := c.Reset(); err != nil {
+		t.Errorf("failed to reset: %v", err)
+	}
 	// Change the file contents.
 	if err := ioutil.WriteFile(path, []byte("987654321"), 0777); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)

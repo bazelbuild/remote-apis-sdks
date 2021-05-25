@@ -7,11 +7,12 @@ import (
 	"io"
 	"os"
 
+	log "github.com/golang/glog"
+	"github.com/pkg/errors"
+	bspb "google.golang.org/genproto/googleapis/bytestream"
+
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-
-	log "github.com/golang/glog"
-	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
 // WriteBytes uploads a byte slice.
@@ -29,7 +30,10 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker) (int64, error) {
 	var totalBytes int64
 	closure := func() error {
-		ch.Reset() // Retry by starting the stream from the beginning.
+		// Retry by starting the stream from the beginning.
+		if err := ch.Reset(); err != nil {
+			return errors.Wrap(err, "failed to Reset")
+		}
 		totalBytes = int64(0)
 		// TODO(olaola): implement resumable uploads.
 
