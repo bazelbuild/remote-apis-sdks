@@ -397,7 +397,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 
 	missing, err := c.MissingBlobs(ctx, dgs)
 	if err != nil {
-		return nil, 0, errors.Wrap(err, "error while determining missing blobs")
+		return nil, 0, status.Errorf(status.Code(err), "error while determining missing blobs: %v", err)
 	}
 	LogContextInfof(ctx, log.Level(2), "%d items to store", len(missing))
 	var batches [][]digest.Digest
