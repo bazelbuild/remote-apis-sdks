@@ -2,14 +2,15 @@
 package chunker
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 
+	"github.com/klauspost/compress/zstd"
+	"github.com/pkg/errors"
+
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/reader"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/klauspost/compress/zstd"
 )
 
 // DefaultChunkSize is the default chunk size for ByteStream.Write RPCs.
@@ -108,19 +109,23 @@ func (c *Chunker) ChunkSize() int {
 // Reset the Chunker state to when it was newly constructed.
 // Useful for upload retries.
 // TODO(olaola): implement Seek(offset) when we have resumable uploads.
-func (c *Chunker) Reset() {
+func (c *Chunker) Reset() error {
 	if c.r != nil {
-		// We're ignoring the error here, as not to change the fn signature.
-		c.r.SeekOffset(0)
+		if err := c.r.SeekOffset(0); err != nil {
+			return errors.Wrapf(err, "failed to call SeekOffset(0) for %s", c.ue.Path)
+		}
 	}
 	c.offset = 0
 	c.reachedEOF = false
+	return nil
 }
 
 // FullData returns the overall (non-chunked) underlying data. The Chunker is Reset.
 // It is supposed to be used for batch uploading small inputs.
 func (c *Chunker) FullData() ([]byte, error) {
-	c.Reset()
+	if err := c.Reset(); err != nil {
+		return nil, err
+	}
 	if c.contents != nil {
 		return c.contents, nil
 	}
