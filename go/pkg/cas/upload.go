@@ -101,11 +101,9 @@ type UploadOptions struct {
 }
 
 // digested is a result of preprocessing a file/dir.
-// The dirEntry is guarantee to be provided, but digest is not.
-// For example, digest is unknown for dangling symlinks.
 type digested struct {
 	dirEntry proto.Message // FileNode, DirectoryNode or SymlinkNode
-	digest   *repb.Digest
+	digest   *repb.Digest  // may be nil, e.g. for dangling symlinks
 }
 
 // ErrSkip, when returned by UploadOptions.Prelude, means the file/dir must be
@@ -150,8 +148,7 @@ func (r *UploadResult) Digest(ps *PathSpec) (*digest.Digest, error) {
 	case err != nil:
 		return nil, err
 	default:
-		val := val.(*digested)
-		dig := digest.NewFromProtoUnvalidated(val.digest)
+		dig := digest.NewFromProtoUnvalidated(val.(*digested).digest)
 		return &dig, nil
 	}
 }
