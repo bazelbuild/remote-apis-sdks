@@ -101,6 +101,8 @@ type UploadOptions struct {
 }
 
 // digested is a result of preprocessing a file/dir.
+// The dirEntry is guarantee to be provided, but digest is not.
+// For example, digest is unknown for dangling symlinks.
 type digested struct {
 	dirEntry proto.Message // FileNode, DirectoryNode or SymlinkNode
 	digest   *repb.Digest
@@ -279,7 +281,7 @@ func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
 			return errors.WithStack(err)
 		}
 
-		_, _, err = u.visitPath(ctx, ps.Path, info, ps.Exclude)
+		_, err = u.visitPath(ctx, ps.Path, info, ps.Exclude)
 		return errors.Wrapf(err, "%q", ps.Path)
 	})
 	return nil
@@ -315,29 +317,28 @@ func makeFSCacheKey(absPath string, mode os.FileMode, pathExclude *regexp.Regexp
 // visitPath visits the file/dir depending on its type (regular, dir, symlink).
 // Visits each file only once.
 //
-// If the file should be skipped, then returns (nil, nil, nil).
-// The returned digest may also be nil if the symlink is dangling.
-func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, pathExclude *regexp.Regexp) (dirEntry proto.Message, dig *repb.Digest, err error) {
+// If the file should be skipped, then returns (nil, nil).
+// The returned digested.digest may also be nil if the symlink is dangling.
+func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, pathExclude *regexp.Regexp) (*digested, error) {
 	// First, check if the file passes all filters.
 	if pathExclude != nil && pathExclude.MatchString(filepath.ToSlash(absPath)) {
-		return nil, nil, nil
+		return nil, nil
 	}
 	// Call the Prelude only after checking the pathExclude.
 	if u.Prelude != nil {
 		switch err := u.Prelude(absPath, info.Mode()); {
 		case errors.Is(err, ErrSkip):
-			return nil, nil, nil
+			return nil, nil
 		case err != nil:
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
 	cacheKey := makeFSCacheKey(absPath, info.Mode(), pathExclude)
-	cachedUntyped, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
+	cached, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			node, digest, err := u.visitSymlink(ctx, absPath, pathExclude)
-			return &digested{dirEntry: node, digest: digest}, err
+			return u.visitSymlink(ctx, absPath, pathExclude)
 
 		case info.Mode().IsDir():
 			node, err := u.visitDir(ctx, absPath, pathExclude)
@@ -353,10 +354,9 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		}
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	d := cachedUntyped.(*digested)
-	return d.dirEntry, d.digest, nil
+	return cached.(*digested), nil
 }
 
 // visitRegularFile computes the hash of a regular file and schedules a presence
@@ -499,23 +499,26 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 				u.eg.Go(func() error {
 					defer wgChildren.Done()
 					defer u.wgFS.Done()
-					node, _, err := u.visitPath(ctx, absChild, info, pathExclude)
+					digested, err := u.visitPath(ctx, absChild, info, pathExclude)
 					mu.Lock()
 					defer mu.Unlock()
-					if err != nil {
+
+					switch {
+					case err != nil:
 						subErr = err
 						return err
+					case digested == nil:
+						// This file should be ignored.
+						return nil
 					}
 
-					switch node := node.(type) {
+					switch node := digested.dirEntry.(type) {
 					case *repb.FileNode:
 						dir.Files = append(dir.Files, node)
 					case *repb.DirectoryNode:
 						dir.Directories = append(dir.Directories, node)
 					case *repb.SymlinkNode:
 						dir.Symlinks = append(dir.Symlinks, node)
-					case nil:
-						// This file should be ignored.
 					default:
 						// This condition is impossible because all functions in this file
 						// return one of the three types above.
@@ -551,11 +554,11 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 // If u.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
 //
-// The returned digest is nil if the symlink is dangling.
-func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (proto.Message, *repb.Digest, error) {
+// The returned digested.digest is nil if the symlink is dangling.
+func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (*digested, error) {
 	target, err := os.Readlink(absPath)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "os.ReadLink")
+		return nil, errors.Wrapf(err, "os.ReadLink")
 	}
 
 	// Determine absolute and relative paths of the target.
@@ -565,7 +568,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	if filepath.IsAbs(target) {
 		absTarget = target
 		if relTarget, err = filepath.Rel(symlinkDir, absTarget); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	} else {
 		relTarget = target
@@ -583,22 +586,26 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	switch {
 	case os.IsNotExist(err) && u.PreserveSymlinks && u.AllowDanglingSymlinks:
 		// Special case for preserved dangling links.
-		return symlinkNode, nil, nil
+		return &digested{dirEntry: symlinkNode}, nil
 	case err != nil:
-		return nil, nil, errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
 
-	switch targetNode, targetDigest, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
+	switch digestedTarget, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
 	case err != nil:
-		return nil, nil, err
+		return nil, err
 	case !u.PreserveSymlinks:
-		return targetNode, targetDigest, nil
-	case targetNode == nil && !u.AllowDanglingSymlinks:
+		return digestedTarget, nil
+	case digestedTarget == nil && !u.AllowDanglingSymlinks:
 		// The target got skipped via Prelude or PathSpec.Exclude,
 		// resulting in a dangling symlink, which is not allowed.
-		return nil, nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
+		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
 	default:
-		return symlinkNode, targetDigest, nil
+		ret := &digested{dirEntry: symlinkNode}
+		if digestedTarget != nil {
+			ret.digest = digestedTarget.digest
+		}
+		return ret, nil
 	}
 }
 
