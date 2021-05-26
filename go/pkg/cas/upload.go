@@ -123,7 +123,8 @@ type UploadResult struct {
 
 // Digest returns the digest computed for a file/dir at ps.Path.
 //
-// To retrieve a digest of a regular file, only ps.Path is required.
+// To retrieve a digest of a regular file, only ps.Path is checked - other
+// fields are ignored.
 //
 // To retrieve a digest of a directory or a symlink, ps.Exclude must match one
 // of the PathSpecs passed to Client.Upload earlier.
