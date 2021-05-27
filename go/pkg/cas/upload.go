@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -942,6 +943,10 @@ const pathSep = string(filepath.Separator)
 // joinFilePathsFast is a faster version of filepath.Join because it does not
 // call filepath.Clean.
 func joinFilePathsFast(a, b string) string {
+	if strings.HasSuffix(a, pathSep) {
+		// May happen if a is the root.
+		return a + b
+	}
 	return a + pathSep + b
 }
 
