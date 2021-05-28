@@ -173,7 +173,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *Pa
 				if !ok {
 					return nil
 				}
-				if err := u.startProcessing(ctx, *ps); err != nil {
+				if err := u.startProcessing(ctx, ps); err != nil {
 					return err
 				}
 			}
@@ -216,10 +216,12 @@ type uploader struct {
 }
 
 // startProcessing adds the item to the appropriate stage depending on its type.
-func (u *uploader) startProcessing(ctx context.Context, ps PathSpec) error {
+func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
 	if !filepath.IsAbs(ps.Path) {
 		return errors.Errorf("%q is not absolute", ps.Path)
 	}
+	cpy := *ps
+	ps = &cpy
 	ps.Path = filepath.Clean(ps.Path)
 
 	// Schedule a file system walk.
