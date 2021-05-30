@@ -98,13 +98,19 @@ def remote_apis_sdks_go_deps():
     )
     _maybe(
         go_repository,
+        name = "com_github_golang_snappy",
+        importpath = "github.com/golang/snappy",
+        tag = "v0.0.3",
+    )
+    _maybe(
+        go_repository,
         name = "com_github_klauspost_compress",
         importpath = "github.com/klauspost/compress",
-        tag = "v1.11.6",
+        tag = "v1.12.3",
     )
     _maybe(
         go_repository,
         name = "com_github_mostynb_zstdpool_syncpool",
         importpath = "github.com/mostynb/zstdpool-syncpool",
-        tag = "v0.0.3",
+        tag = "v0.0.7",
     )
