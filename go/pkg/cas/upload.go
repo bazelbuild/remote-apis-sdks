@@ -220,6 +220,9 @@ func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
 	if !filepath.IsAbs(ps.Path) {
 		return errors.Errorf("%q is not absolute", ps.Path)
 	}
+	cpy := *ps
+	ps = &cpy
+	ps.Path = filepath.Clean(ps.Path)
 
 	// Schedule a file system walk.
 	u.wgFS.Add(1)
