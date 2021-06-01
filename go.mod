@@ -9,8 +9,8 @@ require (
 	github.com/golang/protobuf v1.4.2
 	github.com/google/go-cmp v0.5.1
 	github.com/google/uuid v1.1.1
-	github.com/klauspost/compress v1.11.6
-	github.com/mostynb/zstdpool-syncpool v0.0.3
+	github.com/klauspost/compress v1.12.3
+	github.com/mostynb/zstdpool-syncpool v0.0.7
 	github.com/pborman/uuid v1.2.0
 	github.com/pkg/errors v0.9.1
 	golang.org/x/net v0.0.0-20200904194848-62affa334b73 // indirect
