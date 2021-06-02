@@ -34,6 +34,20 @@ func (s *SingleFlight) LoadOrStore(key interface{}, valFn func() (interface{}, e
 	return e.val, e.err
 }
 
+// Load is similar to a sync.Map.Load.
+func (s *SingleFlight) Load(key interface{}) (val interface{}, err error, loaded bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var eUntyped interface{}
+	eUntyped, loaded = s.store.Load(key)
+	if loaded {
+		e := eUntyped.(*entry)
+		val = e.val
+		err = e.err
+	}
+	return
+}
+
 // Store forcefully updates the given cache key with val. Note that unlike LoadOrStore,
 // Store accepts a value instead of a valFn since it is intended to be only used in
 // cases where updates are lightweight and do not involve computing the cache value.

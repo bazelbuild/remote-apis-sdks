@@ -53,6 +53,20 @@ func TestFS(t *testing.T) {
 			{Name: "subdir", Digest: subdirItem.Digest},
 		},
 	})
+	rootWithoutAItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "b", Digest: bItem.Digest},
+		},
+		Directories: []*repb.DirectoryNode{
+			{Name: "subdir", Digest: subdirItem.Digest},
+		},
+	})
+	rootWithoutSubdirItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "a", Digest: aItem.Digest},
+			{Name: "b", Digest: bItem.Digest},
+		},
+	})
 
 	putFile(t, filepath.Join(tmpDir, "medium-dir", "medium"), "medium")
 	mediumItem := uploadItemFromBlob(filepath.Join(tmpDir, "medium-dir", "medium"), []byte("medium"))
@@ -94,9 +108,19 @@ func TestFS(t *testing.T) {
 		},
 	})
 
+	digSlice := func(items ...*uploadItem) []*digest.Digest {
+		ret := make([]*digest.Digest, len(items))
+		for i, item := range items {
+			dig := digest.NewFromProtoUnvalidated(item.Digest)
+			ret[i] = &dig
+		}
+		return ret
+	}
+
 	tests := []struct {
 		desc                string
 		paths               []*PathSpec
+		wantDigests         []*digest.Digest
 		wantScheduledChecks []*uploadItem
 		wantErr             error
 		opt                 UploadOptions
@@ -104,11 +128,13 @@ func TestFS(t *testing.T) {
 		{
 			desc:                "root",
 			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			wantDigests:         digSlice(rootItem),
 			wantScheduledChecks: []*uploadItem{rootItem, aItem, bItem, subdirItem, cItem},
 		},
 		{
-			desc:  "root-without-a-using-callback",
-			paths: []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			desc:        "root-without-a-using-callback",
+			paths:       []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			wantDigests: digSlice(rootWithoutAItem),
 			opt: UploadOptions{
 				Prelude: func(absPath string, mode os.FileMode) error {
 					if filepath.Base(absPath) == "a" {
@@ -117,39 +143,16 @@ func TestFS(t *testing.T) {
 					return nil
 				},
 			},
-			wantScheduledChecks: []*uploadItem{
-				uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
-					Files: []*repb.FileNode{
-						{Name: "b", Digest: bItem.Digest},
-					},
-					Directories: []*repb.DirectoryNode{
-						{Name: "subdir", Digest: subdirItem.Digest},
-					},
-				}),
-				bItem,
-				subdirItem,
-				cItem,
-			},
+			wantScheduledChecks: []*uploadItem{rootWithoutAItem, bItem, subdirItem, cItem},
 		},
 		{
 			desc: "root-without-b-using-exclude",
 			paths: []*PathSpec{{
 				Path:    filepath.Join(tmpDir, "root"),
-				Exclude: regexp.MustCompile(`[/\\]b$`),
+				Exclude: regexp.MustCompile(`[/\\]a$`),
 			}},
-			wantScheduledChecks: []*uploadItem{
-				uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
-					Files: []*repb.FileNode{
-						{Name: "a", Digest: aItem.Digest},
-					},
-					Directories: []*repb.DirectoryNode{
-						{Name: "subdir", Digest: subdirItem.Digest},
-					},
-				}),
-				aItem,
-				subdirItem,
-				cItem,
-			},
+			wantDigests:         digSlice(rootWithoutAItem),
+			wantScheduledChecks: []*uploadItem{rootWithoutAItem, bItem, subdirItem, cItem},
 		},
 		{
 			desc: "same-regular-file-is-read-only-once",
@@ -165,6 +168,8 @@ func TestFS(t *testing.T) {
 					Exclude: regexp.MustCompile(`2$`),
 				},
 			},
+			// OnDigest is called for each UploadItem separately.
+			wantDigests: digSlice(rootItem, rootItem),
 			// Directories are checked twice, but files are checked only once.
 			wantScheduledChecks: []*uploadItem{rootItem, rootItem, aItem, bItem, subdirItem, subdirItem, cItem},
 		},
@@ -179,31 +184,26 @@ func TestFS(t *testing.T) {
 					return nil
 				},
 			},
-			wantScheduledChecks: []*uploadItem{
-				uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
-					Files: []*repb.FileNode{
-						{Name: "a", Digest: aItem.Digest},
-						{Name: "b", Digest: bItem.Digest},
-					},
-				}),
-				aItem,
-				bItem,
-			},
+			wantDigests:         digSlice(rootWithoutSubdirItem),
+			wantScheduledChecks: []*uploadItem{rootWithoutSubdirItem, aItem, bItem},
 		},
 		{
 			desc:                "medium",
 			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "medium-dir")}},
+			wantDigests:         digSlice(mediumDirItem),
 			wantScheduledChecks: []*uploadItem{mediumDirItem, mediumItem},
 		},
 		{
 			desc:                "symlinks-preserved",
 			opt:                 UploadOptions{PreserveSymlinks: true},
 			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			wantDigests:         digSlice(withSymlinksItemPreserved),
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
 		},
 		{
 			desc:                "symlinks-not-preserved",
 			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			wantDigests:         digSlice(withSymlinksItemNotPreserved),
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
 		},
 		{
@@ -215,6 +215,7 @@ func TestFS(t *testing.T) {
 			desc:                "dangling-symlinks-allow",
 			opt:                 UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
 			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
+			wantDigests:         digSlice(withDanglingSymlinksItem),
 			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
 		},
 		{
@@ -233,6 +234,7 @@ func TestFS(t *testing.T) {
 				Path:    filepath.Join(tmpDir, "with-symlinks"),
 				Exclude: regexp.MustCompile("root"),
 			}},
+			wantDigests:         digSlice(withSymlinksItemPreserved),
 			wantScheduledChecks: []*uploadItem{withSymlinksItemPreserved},
 		},
 	}
@@ -255,7 +257,7 @@ func TestFS(t *testing.T) {
 			client.Config.LargeFileThreshold = 10
 			client.init()
 
-			_, err := client.Upload(ctx, tc.opt, pathSpecChanFrom(tc.paths...))
+			res, err := client.Upload(ctx, tc.opt, pathSpecChanFrom(tc.paths...))
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("error mismatch: want %q, got %q", tc.wantErr, err)
@@ -271,6 +273,19 @@ func TestFS(t *testing.T) {
 			})
 			if diff := cmp.Diff(tc.wantScheduledChecks, gotScheduledChecks, cmp.Comparer(compareUploadItems)); diff != "" {
 				t.Errorf("unexpected scheduled checks (-want +got):\n%s", diff)
+			}
+
+			gotDigests := make([]*digest.Digest, 0, len(tc.paths))
+			for _, ps := range tc.paths {
+				dig, err := res.Digest(ps)
+				if err != nil {
+					t.Errorf("UploadResult.Digest(%#v) failed: %s", ps, err)
+				} else {
+					gotDigests = append(gotDigests, dig)
+				}
+			}
+			if diff := cmp.Diff(tc.wantDigests, gotDigests); diff != "" {
+				t.Errorf("unexpected digests (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -409,7 +424,7 @@ func TestStreaming(t *testing.T) {
 	pathC := pathSpecChanFrom(
 		&PathSpec{Path: largeFilePath}, // large file
 	)
-	gotStats, err := client.Upload(ctx, UploadOptions{}, pathC)
+	res, err := client.Upload(ctx, UploadOptions{}, pathC)
 	if err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
@@ -428,7 +443,7 @@ func TestStreaming(t *testing.T) {
 		CacheMisses: DigestStat{Digests: 1, Bytes: 15},
 		Streamed:    DigestStat{Digests: 1, Bytes: 15},
 	}
-	if diff := cmp.Diff(wantStats, gotStats); diff != "" {
+	if diff := cmp.Diff(wantStats, &res.Stats); diff != "" {
 		t.Errorf("unexpected stats (-want +got):\n%s", diff)
 	}
 
