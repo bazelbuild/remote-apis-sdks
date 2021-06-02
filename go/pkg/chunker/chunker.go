@@ -42,8 +42,7 @@ type Chunker struct {
 	offset     int64
 	reachedEOF bool
 
-	ue         *uploadinfo.Entry
-	compressed bool
+	ue *uploadinfo.Entry
 }
 
 // New creates a new chunker from an uploadinfo.Entry.
