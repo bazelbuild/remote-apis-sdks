@@ -23,7 +23,7 @@ type entry struct {
 // LoadOrStore is similar to a sync.Map except that it receives a function that computes the value
 // to store instead of the value directly. It ensures that the function is only executed once for
 // concurrent callers of the LoadOrStore function.
-func (s *SingleFlight) LoadOrStore(key interface{}, valFn func() (interface{}, error)) (interface{}, error) {
+func (s *SingleFlight) LoadOrStore(key interface{}, valFn func() (val interface{}, err error)) (interface{}, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	eUntyped, _ := s.store.LoadOrStore(key, &entry{})
