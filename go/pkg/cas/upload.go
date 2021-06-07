@@ -147,7 +147,7 @@ func (r *UploadResult) Digest(ps *PathSpec) (digest.Digest, error) {
 	// TODO(nodir): cache this syscall too.
 	info, err := os.Lstat(ps.Path)
 	if err != nil {
-		return digest.Digest{}, err
+		return digest.Digest{}, errors.WithStack(err)
 	}
 
 	key := makeFSCacheKey(ps.Path, info.Mode().IsRegular(), ps.Exclude)
@@ -155,7 +155,7 @@ func (r *UploadResult) Digest(ps *PathSpec) (digest.Digest, error) {
 	case !loaded:
 		return digest.Digest{}, errors.Wrapf(ErrNoDigest, "digest not found for %#v", ps)
 	case err != nil:
-		return digest.Digest{}, err
+		return digest.Digest{}, errors.WithStack(err)
 	default:
 		return digest.NewFromProtoUnvalidated(val.(*digested).digest), nil
 	}
@@ -232,7 +232,8 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *Pa
 			}
 		}
 	})
-	return &UploadResult{Stats: u.stats, u: u}, eg.Wait()
+
+	return &UploadResult{Stats: u.stats, u: u}, errors.WithStack(eg.Wait())
 }
 
 // uploader implements a concurrent multi-stage pipeline to read blobs from the
