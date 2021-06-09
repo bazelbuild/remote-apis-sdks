@@ -121,6 +121,9 @@ type UploadResult struct {
 	u     *uploader
 }
 
+// ErrNoDigest indicates that the requested digest is uknown.
+var ErrNoDigest = errors.New("the requested digest is unknown")
+
 // Digest returns the digest computed for a file/dir at ps.Path.
 //
 // To retrieve a digest of a regular file, only ps.Path is checked - other
@@ -131,26 +134,25 @@ type UploadResult struct {
 //
 // If the digest is unknown, returns (nil, nil).
 // If the file is a danging symlink, then its digest is unknown.
-func (r *UploadResult) Digest(ps *PathSpec) (*digest.Digest, error) {
+func (r *UploadResult) Digest(ps *PathSpec) (digest.Digest, error) {
 	if !filepath.IsAbs(ps.Path) {
-		return nil, errors.Errorf("%q is not absolute", ps.Path)
+		return digest.Digest{}, errors.Errorf("%q is not absolute", ps.Path)
 	}
 
 	// TODO(nodir): cache this syscall too.
 	info, err := os.Lstat(ps.Path)
 	if err != nil {
-		return nil, err
+		return digest.Digest{}, err
 	}
 
 	key := makeFSCacheKey(ps.Path, info.Mode(), ps.Exclude)
 	switch val, err, loaded := r.u.fsCache.Load(key); {
 	case !loaded:
-		return nil, nil
+		return digest.Digest{}, ErrNoDigest
 	case err != nil:
-		return nil, err
+		return digest.Digest{}, err
 	default:
-		dig := digest.NewFromProtoUnvalidated(val.(*digested).digest)
-		return &dig, nil
+		return digest.NewFromProtoUnvalidated(val.(*digested).digest), nil
 	}
 }
 

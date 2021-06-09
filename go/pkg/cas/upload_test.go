@@ -108,11 +108,10 @@ func TestFS(t *testing.T) {
 		},
 	})
 
-	digSlice := func(items ...*uploadItem) []*digest.Digest {
-		ret := make([]*digest.Digest, len(items))
+	digSlice := func(items ...*uploadItem) []digest.Digest {
+		ret := make([]digest.Digest, len(items))
 		for i, item := range items {
-			dig := digest.NewFromProtoUnvalidated(item.Digest)
-			ret[i] = &dig
+			ret[i] = digest.NewFromProtoUnvalidated(item.Digest)
 		}
 		return ret
 	}
@@ -120,7 +119,7 @@ func TestFS(t *testing.T) {
 	tests := []struct {
 		desc                string
 		paths               []*PathSpec
-		wantDigests         []*digest.Digest
+		wantDigests         []digest.Digest
 		wantScheduledChecks []*uploadItem
 		wantErr             error
 		opt                 UploadOptions
@@ -275,7 +274,7 @@ func TestFS(t *testing.T) {
 				t.Errorf("unexpected scheduled checks (-want +got):\n%s", diff)
 			}
 
-			gotDigests := make([]*digest.Digest, 0, len(tc.paths))
+			gotDigests := make([]digest.Digest, 0, len(tc.paths))
 			for _, ps := range tc.paths {
 				dig, err := res.Digest(ps)
 				if err != nil {
