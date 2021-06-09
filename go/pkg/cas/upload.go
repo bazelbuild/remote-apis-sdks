@@ -142,7 +142,7 @@ func (r *UploadResult) Digest(ps *PathSpec) (*digest.Digest, error) {
 		return nil, err
 	}
 
-	key := makeFSCacheKey(ps.Path, info.Mode(), ps.Exclude)
+	key := makeFSCacheKey(ps.Path, info.Mode().IsRegular(), ps.Exclude)
 	switch val, err, loaded := r.u.fsCache.Load(key); {
 	case !loaded:
 		return nil, nil
@@ -289,7 +289,7 @@ func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
 }
 
 // makeFSCacheKey returns a key for u.fsCache.
-func makeFSCacheKey(absPath string, mode os.FileMode, pathExclude *regexp.Regexp) interface{} {
+func makeFSCacheKey(absPath string, isRegularFile bool, pathExclude *regexp.Regexp) interface{} {
 	// The structure of the cache key is incapsulated by this function.
 	type cacheKey struct {
 		AbsPath       string
@@ -300,7 +300,7 @@ func makeFSCacheKey(absPath string, mode os.FileMode, pathExclude *regexp.Regexp
 		AbsPath: absPath,
 	}
 
-	if mode.IsRegular() {
+	if isRegularFile {
 		// This is a regular file.
 		// Its digest depends only on the file path (assuming content didn't change),
 		// so the cache key is complete. Just return it.
@@ -335,7 +335,7 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		}
 	}
 
-	cacheKey := makeFSCacheKey(absPath, info.Mode(), pathExclude)
+	cacheKey := makeFSCacheKey(absPath, info.Mode().IsRegular(), pathExclude)
 	cached, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
@@ -513,18 +513,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 						return nil
 					}
 
-					switch node := digested.dirEntry.(type) {
-					case *repb.FileNode:
-						dir.Files = append(dir.Files, node)
-					case *repb.DirectoryNode:
-						dir.Directories = append(dir.Directories, node)
-					case *repb.SymlinkNode:
-						dir.Symlinks = append(dir.Symlinks, node)
-					default:
-						// This condition is impossible because all functions in this file
-						// return one of the three types above.
-						panic(fmt.Sprintf("unexpected node type %T", node))
-					}
+					addDirEntry(dir, digested.dirEntry)
 					return nil
 				})
 			}
@@ -943,7 +932,7 @@ func uploadItemFromBlob(title string, blob []byte) *uploadItem {
 const pathSep = string(filepath.Separator)
 
 // joinFilePathsFast is a faster version of filepath.Join because it does not
-// call filepath.Clean.
+// call filepath.Clean. Assumes arguments are clean.
 func joinFilePathsFast(a, b string) string {
 	return a + pathSep + b
 }
@@ -969,4 +958,19 @@ func marshalledRequestSize(d *repb.Digest) int64 {
 		reqSize += marshalledFieldSize(int64(d.SizeBytes))
 	}
 	return marshalledFieldSize(reqSize)
+}
+
+func addDirEntry(dir *repb.Directory, node proto.Message) {
+	switch node := node.(type) {
+	case *repb.FileNode:
+		dir.Files = append(dir.Files, node)
+	case *repb.DirectoryNode:
+		dir.Directories = append(dir.Directories, node)
+	case *repb.SymlinkNode:
+		dir.Symlinks = append(dir.Symlinks, node)
+	default:
+		// This condition is impossible because all functions in this file
+		// return one of the three types above.
+		panic(fmt.Sprintf("unexpected node type %T", node))
+	}
 }
