@@ -932,7 +932,7 @@ func uploadItemFromBlob(title string, blob []byte) *uploadItem {
 const pathSep = string(filepath.Separator)
 
 // joinFilePathsFast is a faster version of filepath.Join because it does not
-// call filepath.Clean. Assumes arguments are clean.
+// call filepath.Clean. Assumes arguments are clean according to filepath.Clean specs.
 func joinFilePathsFast(a, b string) string {
 	return a + pathSep + b
 }
