@@ -35,6 +35,11 @@ func (s *SingleFlight) LoadOrStore(key interface{}, valFn func() (val interface{
 }
 
 // Load is similar to a sync.Map.Load.
+//
+// Callers must check loaded before val and err. Their value is meaninful only
+// if loaded is true. The err is not the last returned value because it would
+// likely lead the reader to think that err must be checked before loaded.
+//lint:ignore ST1008 loaded must be last, see above.
 func (s *SingleFlight) Load(key interface{}) (val interface{}, err error, loaded bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
