@@ -106,13 +106,19 @@ type digested struct {
 	digest   *repb.Digest  // may be nil, e.g. for dangling symlinks
 }
 
-// ErrSkip when returned by UploadOptions.Prelude, means the file/dir must be
-// not be uploaded.
-//
-// Note that if UploadOptions.PreserveSymlinks is true and the ErrSkip is
-// returned for a symlink target, but not the symlink itself, then it may
-// result in a dangling symlink.
-var ErrSkip = errors.New("skip file")
+var (
+	// ErrSkip when returned by UploadOptions.Prelude, means the file/dir must be
+	// not be uploaded.
+	//
+	// Note that if UploadOptions.PreserveSymlinks is true and the ErrSkip is
+	// returned for a symlink target, but not the symlink itself, then it may
+	// result in a dangling symlink.
+	ErrSkip = errors.New("skip file")
+
+	// ErrNoDigest indicates that the requested digest is uknown.
+	// Use errors.Is instead of direct equality check.
+	ErrNoDigest = errors.New("the requested digest is unknown")
+)
 
 // UploadResult is the result of a Client.Upload call.
 // It provides file/dir digests and statistics.
@@ -120,9 +126,6 @@ type UploadResult struct {
 	Stats TransferStats
 	u     *uploader
 }
-
-// ErrNoDigest indicates that the requested digest is uknown.
-var ErrNoDigest = errors.New("the requested digest is unknown")
 
 // Digest returns the digest computed for a file/dir at ps.Path.
 //
@@ -132,7 +135,8 @@ var ErrNoDigest = errors.New("the requested digest is unknown")
 // To retrieve a digest of a directory or a symlink, ps.Exclude must match one
 // of the PathSpecs passed to Client.Upload earlier.
 //
-// If the digest is unknown, returns (nil, nil).
+// If the digest is unknown, returns (nil, err), where err is ErrDigestUnknown
+// according to errors.Is.
 // If the file is a danging symlink, then its digest is unknown.
 func (r *UploadResult) Digest(ps *PathSpec) (digest.Digest, error) {
 	if !filepath.IsAbs(ps.Path) {
@@ -148,7 +152,7 @@ func (r *UploadResult) Digest(ps *PathSpec) (digest.Digest, error) {
 	key := makeFSCacheKey(ps.Path, info.Mode(), ps.Exclude)
 	switch val, err, loaded := r.u.fsCache.Load(key); {
 	case !loaded:
-		return digest.Digest{}, ErrNoDigest
+		return digest.Digest{}, errors.Wrapf(ErrNoDigest, "digest not found for %#v", ps)
 	case err != nil:
 		return digest.Digest{}, err
 	default:
