@@ -61,10 +61,10 @@ type UploadInput struct {
 	// pathInfo is result of Lstat(UploadInput.Path)
 	pathInfo os.FileInfo
 
-	digest             *repb.Digest
-	digestComputed     chan struct{}
-	digestComputedInit sync.Once
-	u                  *uploader
+	digest              *repb.Digest
+	digestsComputed     chan struct{}
+	digestsComputedInit sync.Once
+	u                   *uploader
 }
 
 // Digest returns the digest computed for a file/dir.
@@ -104,20 +104,20 @@ func (in *UploadInput) Digest(relPath string) (digest.Digest, error) {
 	}
 }
 
-func (in *UploadInput) ensureDigestComputedInited() chan struct{} {
-	in.digestComputedInit.Do(func() {
-		in.digestComputed = make(chan struct{})
+func (in *UploadInput) ensureDigestsComputedInited() chan struct{} {
+	in.digestsComputedInit.Do(func() {
+		in.digestsComputed = make(chan struct{})
 	})
-	return in.digestComputed
+	return in.digestsComputed
 }
 
-// DigestComputed returns a channel which is closed when all digests, including
+// DigestsComputed returns a channel which is closed when all digests, including
 // descendants, are computed.
 // It is guaranteed to be closed by the time Client.Upload() returns successfully.
 //
-// DigestComputed() is always safe to call.
-func (in *UploadInput) DigestComputed() <-chan struct{} {
-	return in.ensureDigestComputedInited()
+// DigestsComputed() is always safe to call.
+func (in *UploadInput) DigestsComputed() <-chan struct{} {
+	return in.ensureDigestsComputedInited()
 }
 
 // TransferStats is upload/download statistics.
@@ -326,7 +326,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 			return errors.Wrapf(err, "%q", in.Path)
 		}
 		in.digest = dig.digest
-		close(in.ensureDigestComputedInited())
+		close(in.ensureDigestsComputedInited())
 		return nil
 	})
 	return nil

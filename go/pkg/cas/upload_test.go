@@ -313,7 +313,7 @@ func TestDigest(t *testing.T) {
 	}
 
 	in := &UploadInput{Path: filepath.Join(tmpDir, "root")}
-	if in.DigestComputed() == nil {
+	if in.DigestsComputed() == nil {
 		t.Fatalf("DigestCopmuted() returned nil")
 	}
 
@@ -322,7 +322,7 @@ func TestDigest(t *testing.T) {
 	}
 
 	select {
-	case <-in.DigestComputed():
+	case <-in.DigestsComputed():
 		// Good
 	case <-time.After(time.Millisecond):
 		t.Errorf("Upload succeeded, but DigestComputed() is closed")
