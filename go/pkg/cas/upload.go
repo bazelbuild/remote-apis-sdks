@@ -29,7 +29,7 @@ import (
 )
 
 // ErrFilteredSymlinkTarget is returned when a symlink's target was filtered out
-// via PathSpec.Exclude or ErrSkip, while the symlink itself wasn't.
+// via UploadInput.Exclude or ErrSkip, while the symlink itself wasn't.
 var ErrFilteredSymlinkTarget = errors.New("symlink's target was filtered out")
 
 // zstdEncoders is a pool of ZStd encoders.
@@ -42,11 +42,14 @@ var zstdEncoders = sync.Pool{
 	},
 }
 
-// PathSpec specifies a subset of the file system.
-type PathSpec struct {
+// UploadInput specifies a file or directory to upload.
+type UploadInput struct {
 	// Path to the file or a directory to upload.
 	// Must be absolute.
-	Path string
+	Path      string
+	cleanPath string
+	// pathInfo is result of Lstat(UploadInput.Path)
+	pathInfo os.FileInfo
 
 	// Exclude is a file/dir filter. If Exclude is not nil and the
 	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
@@ -56,6 +59,64 @@ type PathSpec struct {
 	// in the subtree.
 	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
 	Exclude *regexp.Regexp
+
+	digest             *repb.Digest
+	digestComputed     chan struct{}
+	digestComputedInit sync.Once
+	u                  *uploader
+}
+
+// Digest returns the digest computed for a file/dir.
+// The relPath is relative to UploadInput.Path. Use "." for the digest of the
+// UploadInput.Path itself.
+//
+// Digest is safe to call only after the channel returned by DigestComputed()
+// is closed.
+//
+// If the digest is unknown, returns (nil, err), where err is ErrDigestUnknown
+// according to errors.Is.
+// If the file is a danging symlink, then its digest is unknown.
+func (in *UploadInput) Digest(relPath string) (digest.Digest, error) {
+	if in.cleanPath == "" {
+		return digest.Digest{}, errors.Errorf("Digest called too soon")
+	}
+	if relPath == "." {
+		return digest.NewFromProtoUnvalidated(in.digest), nil
+	}
+
+	absPath := filepath.Join(in.cleanPath, relPath)
+
+	// TODO(nodir): cache this syscall, perhaps using filemetadata package.
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		return digest.Digest{}, errors.WithStack(err)
+	}
+
+	key := makeFSCacheKey(absPath, info.Mode().IsRegular(), in.Exclude)
+	switch val, err, loaded := in.u.fsCache.Load(key); {
+	case !loaded:
+		return digest.Digest{}, errors.Wrapf(ErrDigestUnknown, "digest not found for %#v", absPath)
+	case err != nil:
+		return digest.Digest{}, errors.WithStack(err)
+	default:
+		return digest.NewFromProtoUnvalidated(val.(*digested).digest), nil
+	}
+}
+
+func (in *UploadInput) ensureDigestComputedInited() chan struct{} {
+	in.digestComputedInit.Do(func() {
+		in.digestComputed = make(chan struct{})
+	})
+	return in.digestComputed
+}
+
+// DigestComputed returns a channel which is closed when all digests, including
+// descendants, are computed.
+// It is guaranteed to be closed by the time Client.Upload() returns successfully.
+//
+// DigestComputed() is always safe to call.
+func (in *UploadInput) DigestComputed() <-chan struct{} {
+	return in.ensureDigestComputedInited()
 }
 
 // TransferStats is upload/download statistics.
@@ -94,8 +155,8 @@ type UploadOptions struct {
 	// If it returns another error, then the upload is halted with that error.
 	//
 	// Prelude might be called multiple times for the same file if different
-	// PathSpecs directly/indirectly refer to the same file, but with different
-	// PathSpec.Exclude.
+	// UploadInputs directly/indirectly refer to the same file, but with different
+	// UploadInput.Exclude.
 	//
 	// Prelude is called from different goroutines.
 	Prelude func(absPath string, mode os.FileMode) error
@@ -116,9 +177,9 @@ var (
 	// result in a dangling symlink.
 	ErrSkip = errors.New("skip file")
 
-	// ErrNoDigest indicates that the requested digest is uknown.
+	// ErrDigestUnknown indicates that the requested digest is unknown.
 	// Use errors.Is instead of direct equality check.
-	ErrNoDigest = errors.New("the requested digest is unknown")
+	ErrDigestUnknown = errors.New("the requested digest is unknown")
 )
 
 // UploadResult is the result of a Client.Upload call.
@@ -128,47 +189,17 @@ type UploadResult struct {
 	u     *uploader
 }
 
-// Digest returns the digest computed for a file/dir at ps.Path.
+// Upload uploads all files/directories specified by inputC.
 //
-// To retrieve a digest of a regular file, only ps.Path is checked - other
-// fields are ignored.
+// Upload assumes ownership of UploadInputs received from inputC.
+// They must not be mutated after sending.
 //
-// To retrieve a digest of a directory or a symlink, ps.Exclude must match one
-// of the PathSpecs passed to Client.Upload earlier.
-//
-// If the digest is unknown, returns (nil, err), where err is ErrDigestUnknown
-// according to errors.Is.
-// If the file is a danging symlink, then its digest is unknown.
-func (r *UploadResult) Digest(ps *PathSpec) (digest.Digest, error) {
-	if !filepath.IsAbs(ps.Path) {
-		return digest.Digest{}, errors.Errorf("%q is not absolute", ps.Path)
-	}
-
-	// TODO(nodir): cache this syscall too.
-	info, err := os.Lstat(ps.Path)
-	if err != nil {
-		return digest.Digest{}, errors.WithStack(err)
-	}
-
-	key := makeFSCacheKey(ps.Path, info.Mode().IsRegular(), ps.Exclude)
-	switch val, err, loaded := r.u.fsCache.Load(key); {
-	case !loaded:
-		return digest.Digest{}, errors.Wrapf(ErrNoDigest, "digest not found for %#v", ps)
-	case err != nil:
-		return digest.Digest{}, errors.WithStack(err)
-	default:
-		return digest.NewFromProtoUnvalidated(val.(*digested).digest), nil
-	}
-}
-
-// Upload uploads all files/directories specified by pathC.
-//
-// Close pathC to indicate that there are no more files/dirs to upload.
-// When pathC is closed, Upload finishes uploading the remaining files/dirs and
+// Close inputC to indicate that there are no more files/dirs to upload.
+// When inputC is closed, Upload finishes uploading the remaining files/dirs and
 // exits successfully.
 //
 // If ctx is canceled, the Upload returns with an error.
-func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *PathSpec) (*UploadResult, error) {
+func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput) (*UploadResult, error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
 	defer eg.Wait()
@@ -222,11 +253,11 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, pathC <-chan *Pa
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case ps, ok := <-pathC:
+			case in, ok := <-inputC:
 				if !ok {
 					return nil
 				}
-				if err := u.startProcessing(ctx, ps); err != nil {
+				if err := u.startProcessing(ctx, in); err != nil {
 					return err
 				}
 			}
@@ -272,26 +303,30 @@ type uploader struct {
 }
 
 // startProcessing adds the item to the appropriate stage depending on its type.
-func (u *uploader) startProcessing(ctx context.Context, ps *PathSpec) error {
-	if !filepath.IsAbs(ps.Path) {
-		return errors.Errorf("%q is not absolute", ps.Path)
+func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
+	if !filepath.IsAbs(in.Path) {
+		return errors.Errorf("%q is not absolute", in.Path)
 	}
-	cpy := *ps
-	ps = &cpy
-	ps.Path = filepath.Clean(ps.Path)
+	in.u = u
+	in.cleanPath = filepath.Clean(in.Path)
 
 	// Schedule a file system walk.
 	u.wgFS.Add(1)
 	u.eg.Go(func() error {
 		defer u.wgFS.Done()
 		// Do not use os.Stat() here. We want to know if it is a symlink.
-		info, err := os.Lstat(ps.Path)
-		if err != nil {
+		var err error
+		if in.pathInfo, err = os.Lstat(in.cleanPath); err != nil {
 			return errors.WithStack(err)
 		}
 
-		_, err = u.visitPath(ctx, ps.Path, info, ps.Exclude)
-		return errors.Wrapf(err, "%q", ps.Path)
+		dig, err := u.visitPath(ctx, in.cleanPath, in.pathInfo, in.Exclude)
+		if err != nil {
+			return errors.Wrapf(err, "%q", in.Path)
+		}
+		in.digest = dig.digest
+		close(in.ensureDigestComputedInited())
+		return nil
 	})
 	return nil
 }
@@ -595,7 +630,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	case !u.PreserveSymlinks:
 		return digestedTarget, nil
 	case digestedTarget == nil && !u.AllowDanglingSymlinks:
-		// The target got skipped via Prelude or PathSpec.Exclude,
+		// The target got skipped via Prelude or UploadInput.Exclude,
 		// resulting in a dangling symlink, which is not allowed.
 		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
 	default:
