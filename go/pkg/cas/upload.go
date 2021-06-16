@@ -46,10 +46,7 @@ var zstdEncoders = sync.Pool{
 type UploadInput struct {
 	// Path to the file or a directory to upload.
 	// Must be absolute.
-	Path      string
-	cleanPath string
-	// pathInfo is result of Lstat(UploadInput.Path)
-	pathInfo os.FileInfo
+	Path string
 
 	// Exclude is a file/dir filter. If Exclude is not nil and the
 	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
@@ -59,6 +56,10 @@ type UploadInput struct {
 	// in the subtree.
 	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
 	Exclude *regexp.Regexp
+
+	cleanPath string
+	// pathInfo is result of Lstat(UploadInput.Path)
+	pathInfo os.FileInfo
 
 	digest             *repb.Digest
 	digestComputed     chan struct{}
