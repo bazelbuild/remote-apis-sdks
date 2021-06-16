@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
@@ -118,7 +119,7 @@ func TestFS(t *testing.T) {
 
 	tests := []struct {
 		desc                string
-		paths               []*PathSpec
+		inputs              []*UploadInput
 		wantDigests         []digest.Digest
 		wantScheduledChecks []*uploadItem
 		wantErr             error
@@ -126,13 +127,13 @@ func TestFS(t *testing.T) {
 	}{
 		{
 			desc:                "root",
-			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
 			wantDigests:         digSlice(rootItem),
 			wantScheduledChecks: []*uploadItem{rootItem, aItem, bItem, subdirItem, cItem},
 		},
 		{
 			desc:        "root-without-a-using-callback",
-			paths:       []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			inputs:      []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
 			wantDigests: digSlice(rootWithoutAItem),
 			opt: UploadOptions{
 				Prelude: func(absPath string, mode os.FileMode) error {
@@ -146,7 +147,7 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc: "root-without-b-using-exclude",
-			paths: []*PathSpec{{
+			inputs: []*UploadInput{{
 				Path:    filepath.Join(tmpDir, "root"),
 				Exclude: regexp.MustCompile(`[/\\]a$`),
 			}},
@@ -157,7 +158,7 @@ func TestFS(t *testing.T) {
 			desc: "same-regular-file-is-read-only-once",
 			// The two regexps below do not exclude anything.
 			// This test ensures that same files aren't checked twice.
-			paths: []*PathSpec{
+			inputs: []*UploadInput{
 				{
 					Path:    filepath.Join(tmpDir, "root"),
 					Exclude: regexp.MustCompile(`1$`),
@@ -173,8 +174,8 @@ func TestFS(t *testing.T) {
 			wantScheduledChecks: []*uploadItem{rootItem, rootItem, aItem, bItem, subdirItem, subdirItem, cItem},
 		},
 		{
-			desc:  "root-without-subdir",
-			paths: []*PathSpec{{Path: filepath.Join(tmpDir, "root")}},
+			desc:   "root-without-subdir",
+			inputs: []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
 			opt: UploadOptions{
 				Prelude: func(absPath string, mode os.FileMode) error {
 					if strings.Contains(absPath, "subdir") {
@@ -188,39 +189,39 @@ func TestFS(t *testing.T) {
 		},
 		{
 			desc:                "medium",
-			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "medium-dir")}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "medium-dir")}},
 			wantDigests:         digSlice(mediumDirItem),
 			wantScheduledChecks: []*uploadItem{mediumDirItem, mediumItem},
 		},
 		{
 			desc:                "symlinks-preserved",
 			opt:                 UploadOptions{PreserveSymlinks: true},
-			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantDigests:         digSlice(withSymlinksItemPreserved),
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
 		},
 		{
 			desc:                "symlinks-not-preserved",
-			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-symlinks")}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantDigests:         digSlice(withSymlinksItemNotPreserved),
 			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
 		},
 		{
 			desc:    "dangling-symlinks-disallow",
-			paths:   []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
+			inputs:  []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlinks")}},
 			wantErr: os.ErrNotExist,
 		},
 		{
 			desc:                "dangling-symlinks-allow",
 			opt:                 UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
-			paths:               []*PathSpec{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-dangling-symlink")}},
 			wantDigests:         digSlice(withDanglingSymlinksItem),
 			wantScheduledChecks: []*uploadItem{withDanglingSymlinksItem},
 		},
 		{
 			desc: "dangling-symlink-via-filtering",
 			opt:  UploadOptions{PreserveSymlinks: true},
-			paths: []*PathSpec{{
+			inputs: []*UploadInput{{
 				Path:    filepath.Join(tmpDir, "with-symlinks"),
 				Exclude: regexp.MustCompile("root"),
 			}},
@@ -229,7 +230,7 @@ func TestFS(t *testing.T) {
 		{
 			desc: "dangling-symlink-via-filtering-allow",
 			opt:  UploadOptions{PreserveSymlinks: true, AllowDanglingSymlinks: true},
-			paths: []*PathSpec{{
+			inputs: []*UploadInput{{
 				Path:    filepath.Join(tmpDir, "with-symlinks"),
 				Exclude: regexp.MustCompile("root"),
 			}},
@@ -256,7 +257,7 @@ func TestFS(t *testing.T) {
 			client.Config.LargeFileThreshold = 10
 			client.init()
 
-			res, err := client.Upload(ctx, tc.opt, pathSpecChanFrom(tc.paths...))
+			_, err := client.Upload(ctx, tc.opt, uploadInputChanFrom(tc.inputs...))
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("error mismatch: want %q, got %q", tc.wantErr, err)
@@ -274,11 +275,11 @@ func TestFS(t *testing.T) {
 				t.Errorf("unexpected scheduled checks (-want +got):\n%s", diff)
 			}
 
-			gotDigests := make([]digest.Digest, 0, len(tc.paths))
-			for _, ps := range tc.paths {
-				dig, err := res.Digest(ps)
+			gotDigests := make([]digest.Digest, 0, len(tc.inputs))
+			for _, in := range tc.inputs {
+				dig, err := in.Digest(".")
 				if err != nil {
-					t.Errorf("UploadResult.Digest(%#v) failed: %s", ps, err)
+					t.Errorf("UploadResult.Digest(%#v) failed: %s", in.Path, err)
 				} else {
 					gotDigests = append(gotDigests, dig)
 				}
@@ -290,6 +291,59 @@ func TestFS(t *testing.T) {
 	}
 }
 
+func TestDigest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	putFile(t, filepath.Join(tmpDir, "root", "a"), "a")
+	putFile(t, filepath.Join(tmpDir, "root", "b"), "b")
+	putFile(t, filepath.Join(tmpDir, "root", "subdir", "c"), "c")
+
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	conn, err := e.Server.NewClientConn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := NewClientWithConfig(ctx, conn, "instance", DefaultClientConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	in := &UploadInput{Path: filepath.Join(tmpDir, "root")}
+	if in.DigestsComputed() == nil {
+		t.Fatalf("DigestCopmuted() returned nil")
+	}
+
+	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(in)); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-in.DigestsComputed():
+		// Good
+	case <-time.After(time.Second):
+		t.Errorf("Upload succeeded, but DigestsComputed() is not closed")
+	}
+
+	wantDigests := map[string]digest.Digest{
+		".":      {Hash: "9a0af914385de712675cd780ae2dcb5e17b8943dc62cf9fc6fbf8ccd6f8c940d", Size: 230},
+		"a":      {Hash: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", Size: 1},
+		"subdir": {Hash: "2d5c8ba78600fcadae65bab790bdf1f6f88278ec4abe1dc3aa7c26e60137dfc8", Size: 75},
+	}
+	for relPath, wantDig := range wantDigests {
+		gotDig, err := in.Digest(relPath)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		if diff := cmp.Diff(wantDig, gotDig); diff != "" {
+			t.Errorf("unexpected digest for %s (-want +got):\n%s", relPath, diff)
+		}
+	}
+}
 func TestSmallFiles(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -341,13 +395,13 @@ func TestSmallFiles(t *testing.T) {
 	putFile(t, filepath.Join(tmpDir, "b"), "b")
 	putFile(t, filepath.Join(tmpDir, "c"), "c")
 	putFile(t, filepath.Join(tmpDir, "d"), "d")
-	pathC := pathSpecChanFrom(
-		&PathSpec{Path: filepath.Join(tmpDir, "a")},
-		&PathSpec{Path: filepath.Join(tmpDir, "b")},
-		&PathSpec{Path: filepath.Join(tmpDir, "c")},
-		&PathSpec{Path: filepath.Join(tmpDir, "d")},
+	inputC := uploadInputChanFrom(
+		&UploadInput{Path: filepath.Join(tmpDir, "a")},
+		&UploadInput{Path: filepath.Join(tmpDir, "b")},
+		&UploadInput{Path: filepath.Join(tmpDir, "c")},
+		&UploadInput{Path: filepath.Join(tmpDir, "d")},
 	)
-	if _, err := client.Upload(ctx, UploadOptions{}, pathC); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, inputC); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 
@@ -420,10 +474,9 @@ func TestStreaming(t *testing.T) {
 	largeFilePath := filepath.Join(tmpDir, "testdata", "large")
 	putFile(t, largeFilePath, "laaaaaaaaaaarge")
 
-	pathC := pathSpecChanFrom(
-		&PathSpec{Path: largeFilePath}, // large file
-	)
-	res, err := client.Upload(ctx, UploadOptions{}, pathC)
+	res, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(
+		&UploadInput{Path: largeFilePath}, // large file
+	))
 	if err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
@@ -447,7 +500,7 @@ func TestStreaming(t *testing.T) {
 	}
 
 	// Upload the large file again.
-	if _, err := client.Upload(ctx, UploadOptions{}, pathSpecChanFrom(&PathSpec{Path: largeFilePath})); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(&UploadInput{Path: largeFilePath})); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 }
@@ -466,10 +519,10 @@ func mustReadAll(item *uploadItem) []byte {
 	return data
 }
 
-func pathSpecChanFrom(pathSpecs ...*PathSpec) chan *PathSpec {
-	ch := make(chan *PathSpec, len(pathSpecs))
-	for _, ps := range pathSpecs {
-		ch <- ps
+func uploadInputChanFrom(inputs ...*UploadInput) chan *UploadInput {
+	ch := make(chan *UploadInput, len(inputs))
+	for _, in := range inputs {
+		ch <- in
 	}
 	close(ch)
 	return ch
