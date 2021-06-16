@@ -71,7 +71,7 @@ type UploadInput struct {
 // The relPath is relative to UploadInput.Path. Use "." for the digest of the
 // UploadInput.Path itself.
 //
-// Digest is safe to call only after the channel returned by DigestComputed()
+// Digest is safe to call only after the channel returned by DigestsComputed()
 // is closed.
 //
 // If the digest is unknown, returns (nil, err), where err is ErrDigestUnknown

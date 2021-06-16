@@ -324,8 +324,8 @@ func TestDigest(t *testing.T) {
 	select {
 	case <-in.DigestsComputed():
 		// Good
-	case <-time.After(time.Millisecond):
-		t.Errorf("Upload succeeded, but DigestComputed() is closed")
+	case <-time.After(time.Second):
+		t.Errorf("Upload succeeded, but DigestsComputed() is not closed")
 	}
 
 	wantDigests := map[string]digest.Digest{
