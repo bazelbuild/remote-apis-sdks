@@ -48,6 +48,17 @@ type UploadInput struct {
 	// Must be absolute.
 	Path string
 
+	// Allowlist is a filter for files/directories under Path.
+	// If a file is not a present in Allowlist and does not reside in a directory
+	// present in the Allowlist, then the file is ignored.
+	// This is equivalent to deleting all not-matched files/dirs before
+	// uploading.
+	//
+	// Each path in the Allowlist must be relative to UploadInput.Path.
+	//
+	// Must be empty if Path points to a regular file.
+	Allowlist []string
+
 	// Exclude is a file/dir filter. If Exclude is not nil and the
 	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
 	// Forward-slash-separated paths are matched aginst the regexp: PathExclude
@@ -57,11 +68,24 @@ type UploadInput struct {
 	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
 	Exclude *regexp.Regexp
 
-	cleanPath string
+	cleanPath      string
+	cleanAllowlist []string
+
 	// pathInfo is result of Lstat(UploadInput.Path)
 	pathInfo os.FileInfo
 
-	digest              *repb.Digest
+	// tree maps from a file/dir path to its digest and a directory node.
+	// The path is relative to UploadInput.Path.
+	//
+	// Once digests are computed successfully, guaranteed to have key ".".
+	// If allowlist is not empty, then also has a key for each clean allowlisted
+	// path, as well as each intermediate directory between the root and an
+	// allowlisted dir.
+	//
+	// The main purpose of this field is an UploadInput-local cache that couldn't
+	// be placed in uploader.fsCache because of UploadInput-specific parameters
+	// that are hard to incorporate into the cache key, namedly the allowlist.
+	tree                map[string]*digested
 	digestsComputed     chan struct{}
 	digestsComputedInit sync.Once
 	u                   *uploader
@@ -81,8 +105,13 @@ func (in *UploadInput) Digest(relPath string) (digest.Digest, error) {
 	if in.cleanPath == "" {
 		return digest.Digest{}, errors.Errorf("Digest called too soon")
 	}
-	if relPath == "." {
-		return digest.NewFromProtoUnvalidated(in.digest), nil
+
+	relPath = filepath.Clean(relPath)
+
+	// Check if this is the root or one of the intermediate nodes in the partial
+	// Merkle tee.
+	if dig, ok := in.tree[relPath]; ok {
+		return digest.NewFromProtoUnvalidated(dig.digest), nil
 	}
 
 	absPath := filepath.Join(in.cleanPath, relPath)
@@ -118,6 +147,102 @@ func (in *UploadInput) ensureDigestsComputedInited() chan struct{} {
 // DigestsComputed() is always safe to call.
 func (in *UploadInput) DigestsComputed() <-chan struct{} {
 	return in.ensureDigestsComputedInited()
+}
+
+var oneDot = []string{"."}
+
+// init initializes internal fields.
+func (in *UploadInput) init(u *uploader) error {
+	in.u = u
+
+	if !filepath.IsAbs(in.Path) {
+		return errors.Errorf("%q is not absolute", in.Path)
+	}
+	in.cleanPath = filepath.Clean(in.Path)
+
+	// Do not use os.Stat() here. We want to know if it is a symlink.
+	var err error
+	if in.pathInfo, err = os.Lstat(in.cleanPath); err != nil {
+		return errors.WithStack(err)
+	}
+
+	// Process the allowlist.
+	in.tree = make(map[string]*digested, 1+len(in.Allowlist))
+	switch {
+	case len(in.Allowlist) == 0:
+		in.cleanAllowlist = oneDot
+
+	case in.pathInfo.Mode().IsRegular():
+		return errors.Errorf("the Allowlist is not supported for regular files")
+
+	default:
+		in.cleanAllowlist = make([]string, len(in.Allowlist))
+		for i, subPath := range in.Allowlist {
+			if filepath.IsAbs(subPath) {
+				return errors.Errorf("the allowlisted path %q is not relative", subPath)
+			}
+
+			cleanSubPath := filepath.Clean(subPath)
+			if cleanSubPath == ".." || strings.HasPrefix(cleanSubPath, parentDirPrefix) {
+				return errors.Errorf("the allowlisted path %q is not contained by %q", subPath, in.Path)
+			}
+			in.cleanAllowlist[i] = cleanSubPath
+		}
+	}
+	return nil
+}
+
+// partialMerkleTree ensures that for each node in in.tree, not included by any
+// other node, all its ancestors are also present in the tree. For example, if
+// the tree contains only "foo/bar" and "foo/baz", then partialMerkleTree adds
+// "foo" and ".". The latter is the root.
+//
+// All tree keys must be clean relative paths.
+// Returns prepared *uploadItems that represent the ancestors that were added to
+// the tree.
+func (in *UploadInput) partialMerkleTree() (added []*uploadItem) {
+	// Establish parent->child edges.
+	children := map[string]map[string]struct{}{}
+	for relPath := range in.tree {
+		for relPath != "." {
+			parent := dirNameRelFast(relPath)
+			if childSet, ok := children[parent]; ok {
+				childSet[relPath] = struct{}{}
+			} else {
+				children[parent] = map[string]struct{}{relPath: {}}
+			}
+			relPath = parent
+		}
+	}
+
+	// Add the missing ancestors by traversing in post-order.
+	var dfs func(relPath string) proto.Message
+	dfs = func(relPath string) proto.Message {
+		if dig, ok := in.tree[relPath]; ok {
+			return dig.dirEntry
+		}
+
+		dir := &repb.Directory{}
+		for child := range children[relPath] {
+			addDirEntry(dir, dfs(child))
+		}
+
+		// Prepare an uploadItem.
+		absPath := joinFilePathsFast(in.cleanPath, relPath)
+		item := uploadItemFromDirMsg(absPath, dir) // normalizes the dir
+		added = append(added, item)
+
+		// Compute a directory entry for the parent.
+		node := &repb.DirectoryNode{
+			Name:   filepath.Base(absPath),
+			Digest: item.Digest,
+		}
+
+		in.tree[relPath] = &digested{dirEntry: node, digest: item.Digest}
+		return node
+	}
+	dfs(".")
+	return added
 }
 
 // TransferStats is upload/download statistics.
@@ -308,24 +433,61 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 	if !filepath.IsAbs(in.Path) {
 		return errors.Errorf("%q is not absolute", in.Path)
 	}
-	in.u = u
-	in.cleanPath = filepath.Clean(in.Path)
+
+	if err := in.init(u); err != nil {
+		return errors.WithStack(err)
+	}
 
 	// Schedule a file system walk.
 	u.wgFS.Add(1)
 	u.eg.Go(func() error {
 		defer u.wgFS.Done()
-		// Do not use os.Stat() here. We want to know if it is a symlink.
-		var err error
-		if in.pathInfo, err = os.Lstat(in.cleanPath); err != nil {
+
+		// Concurrently visit each allowlisted path, and use the results to
+		// construct a partial Merkle tree. Note that we are not visiting
+		// the entire in.cleanPath, which may be much larger than the union of the
+		// allowlisted paths.
+		localEg, ctx := errgroup.WithContext(ctx)
+		var treeMu sync.Mutex
+		for _, relPath := range in.cleanAllowlist {
+			relPath := relPath
+			// Schedule a file system walk.
+			localEg.Go(func() error {
+				absPath := in.cleanPath
+				info := in.pathInfo
+				if relPath != "." {
+					absPath = joinFilePathsFast(in.cleanPath, relPath)
+					var err error
+					// TODO(nodir): cache this syscall too.
+					if info, err = os.Lstat(absPath); err != nil {
+						return errors.WithStack(err)
+					}
+				}
+
+				switch dig, err := u.visitPath(ctx, absPath, info, in.Exclude); {
+				case err != nil:
+					return errors.Wrapf(err, "%q", absPath)
+				case dig != nil:
+					treeMu.Lock()
+					in.tree[relPath] = dig
+					treeMu.Unlock()
+				}
+				return nil
+			})
+		}
+		if err := localEg.Wait(); err != nil {
 			return errors.WithStack(err)
 		}
 
-		dig, err := u.visitPath(ctx, in.cleanPath, in.pathInfo, in.Exclude)
-		if err != nil {
-			return errors.Wrapf(err, "%q", in.Path)
+		// At this point, all allowlisted paths are digest'ed, and we only need to
+		// compute a partial Merkle tree and upload the implied ancestors.
+		for _, item := range in.partialMerkleTree() {
+			if err := u.scheduleCheck(ctx, item); err != nil {
+				return err
+			}
 		}
-		in.digest = dig.digest
+
+		// The entire tree is digested. Notify the caller.
 		close(in.ensureDigestsComputedInited())
 		return nil
 	})
@@ -973,16 +1135,33 @@ func uploadItemFromBlob(title string, blob []byte) *uploadItem {
 	return item
 }
 
-const pathSep = string(filepath.Separator)
+const (
+	pathSep         = string(filepath.Separator)
+	parentDirPrefix = ".." + pathSep
+)
 
 // joinFilePathsFast is a faster version of filepath.Join because it does not
 // call filepath.Clean. Assumes arguments are clean according to filepath.Clean specs.
 func joinFilePathsFast(a, b string) string {
+	if b == "." {
+		return a
+	}
 	if strings.HasSuffix(a, pathSep) {
 		// May happen if a is the root.
 		return a + b
 	}
 	return a + pathSep + b
+}
+
+// dirNameRelFast is a faster version of filepath.Dir because it does not call
+// filepath.Clean. Assumes the argument is clean and relative.
+// Does not work for absolute paths.
+func dirNameRelFast(relPath string) string {
+	i := strings.LastIndex(relPath, pathSep)
+	if i < 0 {
+		return "."
+	}
+	return relPath[:i]
 }
 
 func marshalledFieldSize(size int64) int64 {

@@ -39,12 +39,30 @@ func TestFS(t *testing.T) {
 	putFile(t, filepath.Join(tmpDir, "root", "subdir", "c"), "c")
 	cItem := uploadItemFromBlob(filepath.Join(tmpDir, "root", "subdir", "c"), []byte("c"))
 
+	putFile(t, filepath.Join(tmpDir, "root", "subdir", "d"), "d")
+	dItem := uploadItemFromBlob(filepath.Join(tmpDir, "root", "subdir", "d"), []byte("d"))
+
 	subdirItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "root", "subdir"), &repb.Directory{
-		Files: []*repb.FileNode{{
-			Name:   "c",
-			Digest: cItem.Digest,
-		}},
+		Files: []*repb.FileNode{
+			{
+				Name:   "c",
+				Digest: cItem.Digest,
+			},
+			{
+				Name:   "d",
+				Digest: dItem.Digest,
+			},
+		},
 	})
+	subdirWithoutDItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "root", "subdir"), &repb.Directory{
+		Files: []*repb.FileNode{
+			{
+				Name:   "c",
+				Digest: cItem.Digest,
+			},
+		},
+	})
+
 	rootItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
 		Files: []*repb.FileNode{
 			{Name: "a", Digest: aItem.Digest},
@@ -66,6 +84,15 @@ func TestFS(t *testing.T) {
 		Files: []*repb.FileNode{
 			{Name: "a", Digest: aItem.Digest},
 			{Name: "b", Digest: bItem.Digest},
+		},
+	})
+	rootWithoutDItem := uploadItemFromDirMsg(filepath.Join(tmpDir, "root"), &repb.Directory{
+		Files: []*repb.FileNode{
+			{Name: "a", Digest: aItem.Digest},
+			{Name: "b", Digest: bItem.Digest},
+		},
+		Directories: []*repb.DirectoryNode{
+			{Name: "subdir", Digest: subdirWithoutDItem.Digest},
 		},
 	})
 
@@ -129,7 +156,7 @@ func TestFS(t *testing.T) {
 			desc:                "root",
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
 			wantDigests:         digSlice(rootItem),
-			wantScheduledChecks: []*uploadItem{rootItem, aItem, bItem, subdirItem, cItem},
+			wantScheduledChecks: []*uploadItem{rootItem, aItem, bItem, subdirItem, cItem, dItem},
 		},
 		{
 			desc:        "root-without-a-using-callback",
@@ -143,7 +170,25 @@ func TestFS(t *testing.T) {
 					return nil
 				},
 			},
-			wantScheduledChecks: []*uploadItem{rootWithoutAItem, bItem, subdirItem, cItem},
+			wantScheduledChecks: []*uploadItem{rootWithoutAItem, bItem, subdirItem, cItem, dItem},
+		},
+		{
+			desc:                "root-without-a-using-allowlist",
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root"), Allowlist: []string{"b", "subdir"}}},
+			wantDigests:         digSlice(rootWithoutAItem),
+			wantScheduledChecks: []*uploadItem{rootWithoutAItem, bItem, subdirItem, cItem, dItem},
+		},
+		{
+			desc:                "root-without-subdir-using-allowlist",
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root"), Allowlist: []string{"a", "b"}}},
+			wantDigests:         digSlice(rootWithoutSubdirItem),
+			wantScheduledChecks: []*uploadItem{rootWithoutSubdirItem, aItem, bItem},
+		},
+		{
+			desc:                "root-without-d-using-allowlist",
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root"), Allowlist: []string{"a", "b", filepath.Join("subdir", "c")}}},
+			wantDigests:         digSlice(rootWithoutDItem),
+			wantScheduledChecks: []*uploadItem{rootWithoutDItem, aItem, bItem, subdirWithoutDItem, cItem},
 		},
 		{
 			desc: "root-without-b-using-exclude",
@@ -152,7 +197,7 @@ func TestFS(t *testing.T) {
 				Exclude: regexp.MustCompile(`[/\\]a$`),
 			}},
 			wantDigests:         digSlice(rootWithoutAItem),
-			wantScheduledChecks: []*uploadItem{rootWithoutAItem, bItem, subdirItem, cItem},
+			wantScheduledChecks: []*uploadItem{rootWithoutAItem, bItem, subdirItem, cItem, dItem},
 		},
 		{
 			desc: "same-regular-file-is-read-only-once",
@@ -171,7 +216,7 @@ func TestFS(t *testing.T) {
 			// OnDigest is called for each UploadItem separately.
 			wantDigests: digSlice(rootItem, rootItem),
 			// Directories are checked twice, but files are checked only once.
-			wantScheduledChecks: []*uploadItem{rootItem, rootItem, aItem, bItem, subdirItem, subdirItem, cItem},
+			wantScheduledChecks: []*uploadItem{rootItem, rootItem, aItem, bItem, subdirItem, subdirItem, cItem, dItem},
 		},
 		{
 			desc:   "root-without-subdir",
@@ -198,13 +243,13 @@ func TestFS(t *testing.T) {
 			opt:                 UploadOptions{PreserveSymlinks: true},
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantDigests:         digSlice(withSymlinksItemPreserved),
-			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemPreserved},
+			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, dItem, withSymlinksItemPreserved},
 		},
 		{
 			desc:                "symlinks-not-preserved",
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantDigests:         digSlice(withSymlinksItemNotPreserved),
-			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, withSymlinksItemNotPreserved},
+			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, dItem, withSymlinksItemNotPreserved},
 		},
 		{
 			desc:    "dangling-symlinks-disallow",
@@ -299,6 +344,7 @@ func TestDigest(t *testing.T) {
 	putFile(t, filepath.Join(tmpDir, "root", "a"), "a")
 	putFile(t, filepath.Join(tmpDir, "root", "b"), "b")
 	putFile(t, filepath.Join(tmpDir, "root", "subdir", "c"), "c")
+	putFile(t, filepath.Join(tmpDir, "root", "subdir", "d"), "d")
 
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
@@ -312,35 +358,64 @@ func TestDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	in := &UploadInput{Path: filepath.Join(tmpDir, "root")}
-	if in.DigestsComputed() == nil {
-		t.Fatalf("DigestCopmuted() returned nil")
+	inputs := []struct {
+		input       *UploadInput
+		wantDigests map[string]digest.Digest
+	}{
+		{
+			input: &UploadInput{
+				Path:      filepath.Join(tmpDir, "root"),
+				Allowlist: []string{"a", "b", filepath.Join("subdir", "c")},
+			},
+			wantDigests: map[string]digest.Digest{
+				".":      {Hash: "9a0af914385de712675cd780ae2dcb5e17b8943dc62cf9fc6fbf8ccd6f8c940d", Size: 230},
+				"a":      {Hash: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", Size: 1},
+				"subdir": {Hash: "2d5c8ba78600fcadae65bab790bdf1f6f88278ec4abe1dc3aa7c26e60137dfc8", Size: 75},
+			},
+		},
+		{
+			input: &UploadInput{
+				Path:      filepath.Join(tmpDir, "root"),
+				Allowlist: []string{"a", "b", filepath.Join("subdir", "d")},
+			},
+			wantDigests: map[string]digest.Digest{
+				".":      {Hash: "2ab9cc3c9d504c883a66da62b57eb44fc9ca57abe05e75633b435e017920d8df", Size: 230},
+				"a":      {Hash: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", Size: 1},
+				"subdir": {Hash: "ce33c7475f9ff2f2ee501eafcb2f21825b24a63de6fbabf7fbb886d606a448b9", Size: 75},
+			},
+		},
 	}
 
-	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(in)); err != nil {
+	uploadInputs := make([]*UploadInput, len(inputs))
+	for i, in := range inputs {
+		uploadInputs[i] = in.input
+		if in.input.DigestsComputed() == nil {
+			t.Fatalf("DigestCopmuted() returned nil")
+		}
+	}
+
+	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(uploadInputs...)); err != nil {
 		t.Fatal(err)
 	}
 
-	select {
-	case <-in.DigestsComputed():
-		// Good
-	case <-time.After(time.Second):
-		t.Errorf("Upload succeeded, but DigestsComputed() is not closed")
-	}
-
-	wantDigests := map[string]digest.Digest{
-		".":      {Hash: "9a0af914385de712675cd780ae2dcb5e17b8943dc62cf9fc6fbf8ccd6f8c940d", Size: 230},
-		"a":      {Hash: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", Size: 1},
-		"subdir": {Hash: "2d5c8ba78600fcadae65bab790bdf1f6f88278ec4abe1dc3aa7c26e60137dfc8", Size: 75},
-	}
-	for relPath, wantDig := range wantDigests {
-		gotDig, err := in.Digest(relPath)
-		if err != nil {
-			t.Error(err)
-			continue
+	for i, in := range inputs {
+		t.Logf("input %d", i)
+		select {
+		case <-in.input.DigestsComputed():
+			// Good
+		case <-time.After(time.Second):
+			t.Errorf("Upload succeeded, but DigestsComputed() is not closed")
 		}
-		if diff := cmp.Diff(wantDig, gotDig); diff != "" {
-			t.Errorf("unexpected digest for %s (-want +got):\n%s", relPath, diff)
+
+		for relPath, wantDig := range in.wantDigests {
+			gotDig, err := in.input.Digest(relPath)
+			if err != nil {
+				t.Error(err)
+				continue
+			}
+			if diff := cmp.Diff(gotDig, wantDig); diff != "" {
+				t.Errorf("unexpected digest for %s (-want +got):\n%s", relPath, diff)
+			}
 		}
 	}
 }
@@ -448,9 +523,10 @@ func TestSmallFiles(t *testing.T) {
 }
 
 func TestStreaming(t *testing.T) {
-	// TODO(nodir): add tests for retries.
 	t.Parallel()
 	ctx := context.Background()
+
+	// TODO(nodir): add tests for retries.
 
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
@@ -502,6 +578,234 @@ func TestStreaming(t *testing.T) {
 	// Upload the large file again.
 	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(&UploadInput{Path: largeFilePath})); err != nil {
 		t.Fatalf("failed to upload: %s", err)
+	}
+}
+
+func TestPartialMerkleTree(t *testing.T) {
+	t.Parallel()
+
+	mustDigest := func(m proto.Message) *repb.Digest {
+		d, err := digest.NewFromMessage(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.ToProto()
+	}
+
+	type testCase struct {
+		tree      map[string]*digested
+		wantItems []*uploadItem
+	}
+
+	test := func(t *testing.T, tc testCase) {
+		in := &UploadInput{
+			tree:      tc.tree,
+			cleanPath: "/",
+		}
+		gotItems := in.partialMerkleTree()
+		sort.Slice(gotItems, func(i, j int) bool {
+			return gotItems[i].Title < gotItems[j].Title
+		})
+
+		if diff := cmp.Diff(tc.wantItems, gotItems, cmp.Comparer(compareUploadItems)); diff != "" {
+			t.Errorf("unexpected digests (-want +got):\n%s", diff)
+		}
+	}
+
+	t.Run("works", func(t *testing.T) {
+		barDigest := digest.NewFromBlob([]byte("bar")).ToProto()
+		bazDigest := mustDigest(&repb.Directory{})
+
+		foo := &repb.Directory{
+			Files: []*repb.FileNode{{
+				Name:   "bar",
+				Digest: barDigest,
+			}},
+			Directories: []*repb.DirectoryNode{{
+				Name:   "baz",
+				Digest: bazDigest,
+			}},
+		}
+
+		root := &repb.Directory{
+			Directories: []*repb.DirectoryNode{{
+				Name:   "foo",
+				Digest: mustDigest(foo),
+			}},
+		}
+
+		test(t, testCase{
+			tree: map[string]*digested{
+				"foo/bar": {
+					dirEntry: &repb.FileNode{
+						Name:   "bar",
+						Digest: barDigest,
+					},
+					digest: barDigest,
+				},
+				"foo/baz": {
+					dirEntry: &repb.DirectoryNode{
+						Name:   "baz",
+						Digest: bazDigest,
+					},
+					digest: bazDigest,
+				},
+			},
+			wantItems: []*uploadItem{
+				uploadItemFromDirMsg("/", root),
+				uploadItemFromDirMsg("/foo", foo),
+			},
+		})
+	})
+
+	t.Run("redundant info in the tree", func(t *testing.T) {
+		barDigest := mustDigest(&repb.Directory{})
+		barNode := &repb.DirectoryNode{
+			Name:   "bar",
+			Digest: barDigest,
+		}
+		foo := &repb.Directory{
+			Directories: []*repb.DirectoryNode{barNode},
+		}
+		root := &repb.Directory{
+			Directories: []*repb.DirectoryNode{{
+				Name:   "foo",
+				Digest: mustDigest(foo),
+			}},
+		}
+
+		test(t, testCase{
+			tree: map[string]*digested{
+				"foo/bar": {dirEntry: barNode, digest: barDigest},
+				// Redundant
+				"foo/bar/baz": {}, // content doesn't matter
+			},
+			wantItems: []*uploadItem{
+				uploadItemFromDirMsg("/", root),
+				uploadItemFromDirMsg("/foo", foo),
+			},
+		})
+	})
+
+	t.Run("nodes at different levels", func(t *testing.T) {
+		barDigest := digest.NewFromBlob([]byte("bar")).ToProto()
+		barNode := &repb.FileNode{
+			Name:   "bar",
+			Digest: barDigest,
+		}
+
+		bazDigest := digest.NewFromBlob([]byte("bar")).ToProto()
+		bazNode := &repb.FileNode{
+			Name:   "baz",
+			Digest: bazDigest,
+		}
+
+		foo := &repb.Directory{
+			Files: []*repb.FileNode{barNode},
+		}
+		root := &repb.Directory{
+			Directories: []*repb.DirectoryNode{{
+				Name:   "foo",
+				Digest: mustDigest(foo),
+			}},
+			Files: []*repb.FileNode{bazNode},
+		}
+
+		test(t, testCase{
+			tree: map[string]*digested{
+				"foo/bar": {dirEntry: barNode, digest: barDigest},
+				"baz":     {dirEntry: bazNode, digest: bazDigest}, // content doesn't matter
+			},
+			wantItems: []*uploadItem{
+				uploadItemFromDirMsg("/", root),
+				uploadItemFromDirMsg("/foo", foo),
+			},
+		})
+	})
+}
+
+func TestUploadInputInit(t *testing.T) {
+	t.Parallel()
+	absPath := filepath.Join(t.TempDir(), "foo")
+	testCases := []struct {
+		desc               string
+		in                 *UploadInput
+		dir                bool
+		wantCleanAllowlist []string
+		wantErrContain     string
+	}{
+		{
+			desc: "valid",
+			in:   &UploadInput{Path: absPath},
+		},
+		{
+			desc:           "relative path",
+			in:             &UploadInput{Path: "foo"},
+			wantErrContain: "not absolute",
+		},
+		{
+			desc:           "relative path",
+			in:             &UploadInput{Path: "foo"},
+			wantErrContain: "not absolute",
+		},
+		{
+			desc:           "regular file with allowlist",
+			in:             &UploadInput{Path: absPath, Allowlist: []string{"x"}},
+			wantErrContain: "the Allowlist is not supported for regular files",
+		},
+		{
+			desc:               "not clean allowlisted path",
+			in:                 &UploadInput{Path: absPath, Allowlist: []string{"bar/"}},
+			dir:                true,
+			wantCleanAllowlist: []string{"bar"},
+		},
+		{
+			desc:           "absolute allowlisted path",
+			in:             &UploadInput{Path: absPath, Allowlist: []string{"/bar"}},
+			dir:            true,
+			wantErrContain: "not relative",
+		},
+		{
+			desc:           "parent dir in allowlisted path",
+			in:             &UploadInput{Path: absPath, Allowlist: []string{"bar/../.."}},
+			dir:            true,
+			wantErrContain: "..",
+		},
+		{
+			desc:               "no allowlist",
+			in:                 &UploadInput{Path: absPath},
+			dir:                true,
+			wantCleanAllowlist: []string{"."},
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.desc, func(t *testing.T) {
+			tmpFilePath := absPath
+			if tc.dir {
+				tmpFilePath = filepath.Join(absPath, "bar")
+			}
+			putFile(t, tmpFilePath, "")
+			defer os.RemoveAll(absPath)
+
+			err := tc.in.init(&uploader{})
+			if tc.wantErrContain == "" {
+				if err != nil {
+					t.Error(err)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErrContain) {
+					t.Errorf("expected err to contain %q; got %v", tc.wantErrContain, err)
+				}
+			}
+
+			if len(tc.wantCleanAllowlist) != 0 {
+				if diff := cmp.Diff(tc.wantCleanAllowlist, tc.in.cleanAllowlist); diff != "" {
+					t.Errorf("unexpected cleanAllowlist (-want +got):\n%s", diff)
+				}
+			}
+		})
 	}
 }
 
