@@ -61,12 +61,19 @@ type UploadInput struct {
 
 	// Exclude is a file/dir filter. If Exclude is not nil and the
 	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
-	// Forward-slash-separated paths are matched aginst the regexp: PathExclude
-	// does not have to be conditional on the OS.
 	// If the Path is a directory, then the filter is evaluated against each file
 	// in the subtree.
 	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
+	//
+	// Forward-slash-separated paths are matched aginst the regexp by default, so
+	// that the pattern does not have to be conditional on the OS.
+	// This behavior can be changed by setting OSNativePattern to true.
 	Exclude *regexp.Regexp
+
+	// OSNativePattern is whether Exclude regexp is matched against OS-native paths,
+	// e.g. with backslashes on Windows.
+	// It exists for legacy reasons.
+	OSNativePattern bool
 
 	cleanPath      string
 	cleanAllowlist []string
@@ -122,7 +129,7 @@ func (in *UploadInput) Digest(relPath string) (digest.Digest, error) {
 		return digest.Digest{}, errors.WithStack(err)
 	}
 
-	key := makeFSCacheKey(absPath, info.Mode().IsRegular(), in.Exclude)
+	key := makeFSCacheKey(absPath, info.Mode().IsRegular(), in.pathFilter())
 	switch val, err, loaded := in.u.fsCache.Load(key); {
 	case !loaded:
 		return digest.Digest{}, errors.Wrapf(ErrDigestUnknown, "digest not found for %#v", absPath)
@@ -245,6 +252,10 @@ func (in *UploadInput) partialMerkleTree() (added []*uploadItem) {
 	return added
 }
 
+func (in *UploadInput) pathFilter() pathFilter {
+	return pathFilter{exclude: in.Exclude, osNative: in.OSNativePattern}
+}
+
 // TransferStats is upload/download statistics.
 type TransferStats struct {
 	CacheHits   DigestStat
@@ -363,7 +374,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 	u.batchBundler.BundleByteLimit = c.Config.BatchUpdateBlobs.MaxSizeBytes - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
 	u.batchBundler.BundleCountThreshold = c.Config.BatchUpdateBlobs.MaxItems
 
-	// Start processing path specs.
+	// Start processing inputs.
 	eg.Go(func() error {
 		// Before exiting this main goroutine, ensure all the work has been completed.
 		// Just waiting for u.eg isn't enough because some work may be temporarily
@@ -464,7 +475,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 					}
 				}
 
-				switch dig, err := u.visitPath(ctx, absPath, info, in.Exclude); {
+				switch dig, err := u.visitPath(ctx, absPath, info, in.pathFilter()); {
 				case err != nil:
 					return errors.Wrapf(err, "%q", absPath)
 				case dig != nil:
@@ -494,12 +505,29 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 	return nil
 }
 
+type pathFilter struct {
+	exclude  *regexp.Regexp
+	osNative bool
+}
+
+func (f *pathFilter) Match(fileName string) bool {
+	if f.exclude == nil {
+		return true
+	}
+
+	if !f.osNative {
+		fileName = filepath.ToSlash(fileName)
+	}
+	return !f.exclude.MatchString(fileName)
+}
+
 // makeFSCacheKey returns a key for u.fsCache.
-func makeFSCacheKey(absPath string, isRegularFile bool, pathExclude *regexp.Regexp) interface{} {
+func makeFSCacheKey(absPath string, isRegularFile bool, filter pathFilter) interface{} {
 	// The structure of the cache key is incapsulated by this function.
 	type cacheKey struct {
-		AbsPath       string
-		ExcludeRegexp string
+		AbsPath         string
+		ExcludeRegexp   string
+		OSNativePattern bool
 	}
 
 	key := cacheKey{
@@ -515,8 +543,9 @@ func makeFSCacheKey(absPath string, isRegularFile bool, pathExclude *regexp.Rege
 	// This is a directory and/or a symlink, so the digest also depends on fs-walk
 	// settings. Incroporate those too.
 
-	if pathExclude != nil {
-		key.ExcludeRegexp = pathExclude.String()
+	key.OSNativePattern = filter.osNative
+	if filter.exclude != nil {
+		key.ExcludeRegexp = filter.exclude.String()
 	}
 	return key
 }
@@ -526,9 +555,9 @@ func makeFSCacheKey(absPath string, isRegularFile bool, pathExclude *regexp.Rege
 //
 // If the file should be skipped, then returns (nil, nil).
 // The returned digested.digest may also be nil if the symlink is dangling.
-func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, pathExclude *regexp.Regexp) (*digested, error) {
+func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileInfo, filter pathFilter) (*digested, error) {
 	// First, check if the file passes all filters.
-	if pathExclude != nil && pathExclude.MatchString(filepath.ToSlash(absPath)) {
+	if !filter.Match(absPath) {
 		return nil, nil
 	}
 	// Call the Prelude only after checking the pathExclude.
@@ -541,14 +570,14 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		}
 	}
 
-	cacheKey := makeFSCacheKey(absPath, info.Mode().IsRegular(), pathExclude)
+	cacheKey := makeFSCacheKey(absPath, info.Mode().IsRegular(), filter)
 	cached, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
 		switch {
 		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
-			return u.visitSymlink(ctx, absPath, pathExclude)
+			return u.visitSymlink(ctx, absPath, filter)
 
 		case info.Mode().IsDir():
-			node, err := u.visitDir(ctx, absPath, pathExclude)
+			node, err := u.visitDir(ctx, absPath, filter)
 			return &digested{dirEntry: node, digest: node.GetDigest()}, err
 
 		case info.Mode().IsRegular():
@@ -668,7 +697,7 @@ func (u *uploader) openFileSource(absPath string) (uploadSource, error) {
 // visitDir reads a directory and its descendants. The function blocks until
 // each descendant is visited, but the visitation happens concurrently, using
 // u.eg.
-func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (*repb.DirectoryNode, error) {
+func (u *uploader) visitDir(ctx context.Context, absPath string, filter pathFilter) (*repb.DirectoryNode, error) {
 	var mu sync.Mutex
 	dir := &repb.Directory{}
 	var subErr error
@@ -706,7 +735,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 				u.eg.Go(func() error {
 					defer wgChildren.Done()
 					defer u.wgFS.Done()
-					digested, err := u.visitPath(ctx, absChild, info, pathExclude)
+					digested, err := u.visitPath(ctx, absChild, info, filter)
 					mu.Lock()
 					defer mu.Unlock()
 
@@ -751,7 +780,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 // returns the directory node of the target file.
 //
 // The returned digested.digest is nil if the symlink is dangling.
-func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (*digested, error) {
+func (u *uploader) visitSymlink(ctx context.Context, absPath string, filter pathFilter) (*digested, error) {
 	target, err := os.Readlink(absPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "os.ReadLink")
@@ -787,7 +816,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 		return nil, errors.WithStack(err)
 	}
 
-	switch digestedTarget, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
+	switch digestedTarget, err := u.visitPath(ctx, absTarget, targetInfo, filter); {
 	case err != nil:
 		return nil, err
 	case !u.PreserveSymlinks:
