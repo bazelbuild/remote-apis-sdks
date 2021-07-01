@@ -65,7 +65,7 @@ type UploadInput struct {
 	// in the subtree.
 	// See ErrSkip comments for more details on semantics regarding excluding symlinks .
 	//
-	// Forward-slash-separated paths are matched aginst the regexp by default, so
+	// Forward-slash-separated paths are matched against the regexp by default, so
 	// that the pattern does not have to be conditional on the OS.
 	// This behavior can be changed by setting OSNativePattern to true.
 	Exclude *regexp.Regexp
