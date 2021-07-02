@@ -438,6 +438,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 					if err != nil {
 						return errors.Wrapf(err, "error while fetching FullData for digest %v", dg)
 					}
+
+					if dg.Size != int64(len(data)) {
+						return errors.Errorf("blob size changed while uploading, given:%d now:%d for %s", dg.Size, int64(len(data)), ue.Path)
+					}
+
 					bchMap[dg] = data
 					atomic.AddInt64(&totalBytesTransferred, int64(len(data)))
 				}
