@@ -18,11 +18,13 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
+	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
+	"google.golang.org/grpc/status"
 
 	configpb "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer/proto"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -594,7 +596,7 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		casConn, err = Dial(ctx, params.CASService, params)
 	}
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return NewClientFromConnection(ctx, instanceName, conn, casConn, opts...)
 }
@@ -641,7 +643,7 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 	}
 	if client.StartupCapabilities {
 		if err := client.CheckCapabilities(ctx); err != nil {
-			return nil, err
+			return nil, statusWrap(err)
 		}
 	}
 	if client.casConcurrency < 1 {
@@ -747,7 +749,7 @@ func (c *Client) GetActionResult(ctx context.Context, req *repb.GetActionResultR
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -762,7 +764,7 @@ func (c *Client) UpdateActionResult(ctx context.Context, req *repb.UpdateActionR
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -793,7 +795,7 @@ func (c *Client) QueryWriteStatus(ctx context.Context, req *bspb.QueryWriteStatu
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -808,7 +810,7 @@ func (c *Client) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlob
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -825,7 +827,7 @@ func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlob
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -842,7 +844,7 @@ func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReq
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -882,7 +884,7 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientCo
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -897,7 +899,7 @@ func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -912,7 +914,7 @@ func (c *Client) ListOperations(ctx context.Context, req *oppb.ListOperationsReq
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -927,7 +929,7 @@ func (c *Client) CancelOperation(ctx context.Context, req *oppb.CancelOperationR
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -942,7 +944,16 @@ func (c *Client) DeleteOperation(ctx context.Context, req *oppb.DeleteOperationR
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
+}
+
+// gRPC errors are incompatible with simple wraps. See
+// https://github.com/grpc/grpc-go/issues/3115
+func statusWrap(err error) error {
+	if st, ok := status.FromError(err); ok {
+		return status.Errorf(st.Code(), errors.WithStack(err).Error())
+	}
+	return errors.WithStack(err)
 }
