@@ -842,6 +842,7 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 	if err := u.semFindMissingBlobs.Acquire(ctx, 1); err != nil {
 		return err
 	}
+	defer u.semFindMissingBlobs.Release(1)
 
 	req := &repb.FindMissingBlobsRequest{
 		InstanceName: u.InstanceName,
