@@ -276,7 +276,7 @@ func (c *Client) init() {
 	}
 
 	streamBufSize := 32 * 1024 // by default, send 32KiB chunks.
-	if streamBufSize > c.Config.ByteStreamWrite.MaxSizeBytes {
+	if streamBufSize < c.Config.ByteStreamWrite.MaxSizeBytes {
 		streamBufSize = int(c.Config.ByteStreamWrite.MaxSizeBytes)
 	}
 	c.streamBufs.New = func() interface{} {
