@@ -45,9 +45,9 @@ type Client struct {
 
 	// TODO(nodir): ensure it does not hurt streaming.
 	semFileIO *semaphore.Weighted
-	// muLargeFile ensures only one large file is read/written at a time.
+	// semLargeFile ensures only few large files are read/written at a time.
 	// TODO(nodir): ensure this doesn't hurt performance on SSDs.
-	muLargeFile sync.Mutex
+	semLargeFile *semaphore.Weighted
 
 	// fileBufReaders is a pool of reusable *bufio.Readers
 	// with buffer size = ClientConfig.FileIOSize, so e.g. 4MiB.
@@ -69,6 +69,9 @@ type ClientConfig struct {
 	// FSConcurrency is the maximum number of concurrent file system operations.
 	// TODO(nodir): ensure this does not hurt streaming performance
 	FSConcurrency int
+
+	// FSLargeConcurrency is the maximum number of concurrent large file read operation.
+	FSLargeConcurrency int
 
 	// SmallFileThreshold is a size threshold to categorize a file as small.
 	// Such files are buffered entirely (read only once).
@@ -141,6 +144,8 @@ func DefaultClientConfig() ClientConfig {
 		// https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-queue-depth
 		// TODO(nodir): tune this number.
 		FSConcurrency: 32,
+
+		FSLargeConcurrency: 2,
 
 		SmallFileThreshold: 1024 * 1024,       // 1MiB
 		LargeFileThreshold: 256 * 1024 * 1024, // 256MiB
@@ -271,6 +276,7 @@ func (c *Client) init() {
 	c.semByteStreamWrite = semaphore.NewWeighted(int64(c.Config.ByteStreamWrite.Concurrency))
 
 	c.semFileIO = semaphore.NewWeighted(int64(c.Config.FSConcurrency))
+	c.semLargeFile = semaphore.NewWeighted(int64(c.Config.FSLargeConcurrency))
 	c.fileBufReaders.New = func() interface{} {
 		return bufio.NewReaderSize(emptyReader, int(c.Config.FileIOSize))
 	}

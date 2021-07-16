@@ -589,9 +589,11 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 
 	// Lock the mutex before acquiring a semaphore to avoid hogging the latter.
 	if isLarge {
-		// Read only one large file at a time.
-		u.muLargeFile.Lock()
-		defer u.muLargeFile.Unlock()
+		// Read only a few large files at a time.
+		if err := u.semLargeFile.Acquire(ctx, 1); err != nil {
+			return nil, err
+		}
+		defer u.semLargeFile.Release(1)
 	}
 
 	if err := u.semFileIO.Acquire(ctx, 1); err != nil {
