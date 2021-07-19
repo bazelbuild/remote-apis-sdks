@@ -591,7 +591,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	if isLarge {
 		// Read only a few large files at a time.
 		if err := u.semLargeFile.Acquire(ctx, 1); err != nil {
-			return nil, err
+			return nil, errors.WithStack(err)
 		}
 		defer u.semLargeFile.Release(1)
 	}
