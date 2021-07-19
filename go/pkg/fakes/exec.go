@@ -117,7 +117,7 @@ func (c *Exec) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesReq
 			ExecEnabled:    true,
 		},
 		CacheCapabilities: &repb.CacheCapabilities{
-			DigestFunction: []repb.DigestFunction_Value{dgFn},
+			DigestFunctions: []repb.DigestFunction_Value{dgFn},
 			ActionCacheUpdateCapabilities: &repb.ActionCacheUpdateCapabilities{
 				UpdateEnabled: true,
 			},
