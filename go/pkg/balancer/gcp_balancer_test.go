@@ -43,6 +43,8 @@ func TestGCPBalancer_UpdatingConnectionStateIsMutuallyExclusive(t *testing.T) {
 }
 
 type fakeClientConn struct {
+	grpcbalancer.ClientConn
+
 	subconns []*fakeSubConn
 }
 

@@ -183,14 +183,14 @@ func CheckCapabilities(caps *repb.ServerCapabilities) error {
 	if caps.CacheCapabilities != nil {
 		cc := caps.CacheCapabilities
 		found := false
-		for _, serverFn := range cc.DigestFunction {
+		for _, serverFn := range cc.DigestFunctions {
 			if serverFn == fn {
 				found = true
 				break
 			}
 		}
 		if !found {
-			return fmt.Errorf("server requires one of %v, client uses %v", cc.DigestFunction, fn)
+			return fmt.Errorf("server requires one of %v, client uses %v", cc.DigestFunctions, fn)
 		}
 	}
 
