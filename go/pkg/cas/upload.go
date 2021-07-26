@@ -12,7 +12,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pborman/uuid"
@@ -383,9 +385,11 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 				if !ok {
 					return nil
 				}
+				glog.Infof("start startProcessing %s", in.Path)
 				if err := u.startProcessing(ctx, in); err != nil {
 					return err
 				}
+				glog.Infof("finish startProcessing %s", in.Path)
 			}
 		}
 	})
@@ -447,6 +451,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		// construct a partial Merkle tree. Note that we are not visiting
 		// the entire in.cleanPath, which may be much larger than the union of the
 		// allowlisted paths.
+		glog.Infof("start localEg %s", in.Path)
 		localEg, ctx := errgroup.WithContext(ctx)
 		var treeMu sync.Mutex
 		for _, relPath := range in.cleanAllowlist {
@@ -478,7 +483,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		if err := localEg.Wait(); err != nil {
 			return errors.WithStack(err)
 		}
-
+		glog.Infof("done localEg %s", in.Path)
 		// At this point, all allowlisted paths are digest'ed, and we only need to
 		// compute a partial Merkle tree and upload the implied ancestors.
 		for _, item := range in.partialMerkleTree() {
@@ -626,10 +631,12 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	// It is a medium or large file.
 
 	// Compute the hash.
+	now := time.Now()
 	dig, err := digest.NewFromReader(f)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to compute hash")
 	}
+	glog.Infof("compute digest %s: %s", info.Name(), time.Since(now))
 	ret.Digest = dig.ToProto()
 
 	item := &uploadItem{
@@ -956,6 +963,12 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 		return err
 	}
 	defer u.semByteStreamWrite.Release(1)
+
+	glog.Infof("start stream upload %s, size %d", item.Title, item.Digest.SizeBytes)
+	now := time.Now()
+	defer func() {
+		glog.Infof("finish stream upload %s, size %d: %s", item.Title, item.Digest.SizeBytes, time.Since(now))
+	}()
 
 	// Open the item.
 	r, err := item.Open()
