@@ -63,7 +63,7 @@ type UploadInput struct {
 
 	// Exclude is a file/dir filter. If Exclude is not nil and the
 	// absolute path of a file/dir match this regexp, then the file/dir is skipped.
-	// Forward-slash-separated paths are matched aginst the regexp: PathExclude
+	// Forward-slash-separated paths are matched against the regexp: PathExclude
 	// does not have to be conditional on the OS.
 	// If the Path is a directory, then the filter is evaluated against each file
 	// in the subtree.
@@ -259,9 +259,9 @@ type TransferStats struct {
 // DigestStat is aggregated statistics over a set of digests.
 type DigestStat struct {
 	Digests int64 // number of unique digests
-	Bytes   int64 // total sum of of digest sizes
+	Bytes   int64 // total sum of digest sizes
 
-	// TODO(nodir): add something like TransferBytes, i.e. how much was actually transfered
+	// TODO(nodir): add something like TransferBytes, i.e. how much was actually transferred
 }
 
 // UploadOptions is optional configuration for Upload function.
@@ -994,7 +994,7 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 			return u.streamFromReader(ctx, r, item.Digest, false, updateCacheStats)
 		}
 
-		// Compress using an in-memory pipe. This is mostly to accomodate the fact
+		// Compress using an in-memory pipe. This is mostly to accommodate the fact
 		// that zstd package expects a writer.
 		// Note that using io.Pipe() means we buffer only bytes that were not uploaded yet.
 		pr, pw := io.Pipe()
