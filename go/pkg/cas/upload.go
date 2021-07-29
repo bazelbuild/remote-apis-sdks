@@ -651,6 +651,16 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		// advantage of ByteStream's built-in presence check.
 		// https://github.com/bazelbuild/remote-apis/blob/0cd22f7b466ced15d7803e8845d08d3e8d2c51bc/build/bazel/remote/execution/v2/remote_execution.proto#L250-L254
 
+		if res, err := u.findMissingBlobs(ctx, []*uploadItem{item}); err != nil {
+			return nil, errors.Wrapf(err, "failed to check existence")
+		} else if len(res.MissingBlobDigests) == 0 {
+			// File is already there.
+			log.Infof("do not upload %s", absPath)
+			atomic.AddInt64(&u.stats.CacheHits.Digests, 1)
+			atomic.AddInt64(&u.stats.CacheHits.Bytes, ret.Digest.SizeBytes)
+			return ret, nil
+		}
+
 		item.Open = func() (uploadSource, error) {
 			return f, f.SeekStart(0)
 		}
@@ -845,11 +855,9 @@ func (u *uploader) scheduleCheck(ctx context.Context, item *uploadItem) error {
 	return u.checkBundler.AddWait(ctx, item, 0)
 }
 
-// check checks which items are present on the server, and schedules upload for
-// the missing ones.
-func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
+func (u *uploader) findMissingBlobs(ctx context.Context, items []*uploadItem) (res *repb.FindMissingBlobsResponse, err error) {
 	if err := u.semFindMissingBlobs.Acquire(ctx, 1); err != nil {
-		return err
+		return nil, errors.WithStack(err)
 	}
 	defer u.semFindMissingBlobs.Release(1)
 
@@ -857,21 +865,30 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 		InstanceName: u.InstanceName,
 		BlobDigests:  make([]*repb.Digest, len(items)),
 	}
-	byDigest := make(map[digest.Digest]*uploadItem, len(items))
-	totalBytes := int64(0)
+
 	for i, item := range items {
 		req.BlobDigests[i] = item.Digest
-		byDigest[digest.NewFromProtoUnvalidated(item.Digest)] = item
-		totalBytes += item.Digest.SizeBytes
 	}
 
-	var res *repb.FindMissingBlobsResponse
-	err := u.unaryRPC(ctx, &u.Config.FindMissingBlobs, func(ctx context.Context) (err error) {
+	err = u.unaryRPC(ctx, &u.Config.FindMissingBlobs, func(ctx context.Context) (err error) {
 		res, err = u.cas.FindMissingBlobs(ctx, req)
 		return
 	})
+	return res, err
+}
+
+// check checks which items are present on the server, and schedules upload for
+// the missing ones.
+func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
+	res, err := u.findMissingBlobs(ctx, items)
 	if err != nil {
 		return err
+	}
+	byDigest := make(map[digest.Digest]*uploadItem, len(items))
+	totalBytes := int64(0)
+	for _, item := range items {
+		byDigest[digest.NewFromProtoUnvalidated(item.Digest)] = item
+		totalBytes += item.Digest.SizeBytes
 	}
 
 	missingBytes := int64(0)
