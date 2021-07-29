@@ -654,8 +654,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		if res, err := u.findMissingBlobs(ctx, []*uploadItem{item}); err != nil {
 			return nil, errors.Wrapf(err, "failed to check existence")
 		} else if len(res.MissingBlobDigests) == 0 {
-			// File is already there.
-			log.Infof("do not upload %s", absPath)
+			log.Infof("the file already exists. do not upload %s", absPath)
 			atomic.AddInt64(&u.stats.CacheHits.Digests, 1)
 			atomic.AddInt64(&u.stats.CacheHits.Bytes, ret.Digest.SizeBytes)
 			return ret, nil
