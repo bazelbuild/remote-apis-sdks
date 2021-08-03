@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/trace"
 	"sort"
 	"strings"
 	"sync"
@@ -630,9 +631,15 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 
 	// It is a medium or large file.
 
+	tctx, task := trace.NewTask(ctx, "medium or large file")
+	defer task.End()
+	trace.Log(tctx, "file", info.Name())
+
 	// Compute the hash.
 	now := time.Now()
+	region := trace.StartRegion(tctx, "digest")
 	dig, err := digest.NewFromReader(f)
+	region.End()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to compute hash")
 	}
@@ -663,7 +670,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		item.Open = func() (uploadSource, error) {
 			return f, f.SeekStart(0)
 		}
-		return ret, u.stream(ctx, item, true)
+		return ret, u.stream(tctx, item, true)
 	}
 
 	// Schedule a check and close the file (in defer).
@@ -980,6 +987,9 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 	}
 	defer u.semByteStreamWrite.Release(1)
 
+	ctx, task := trace.NewTask(ctx, "uploader.stream")
+	defer task.End()
+
 	log.Infof("start stream upload %s, size %d", item.Title, item.Digest.SizeBytes)
 	now := time.Now()
 	defer func() {
@@ -1078,7 +1088,9 @@ chunkLoop:
 
 		// Read the next chunk from the pipe.
 		// Use ReadFull to ensure we aren't sending tiny blobs over RPC.
+		region := trace.StartRegion(ctx, "ReadFull in streamFromReader")
 		n, err := io.ReadFull(r, *buf)
+		region.End()
 		switch {
 		case err == io.EOF || err == io.ErrUnexpectedEOF:
 			req.FinishWrite = true
@@ -1089,7 +1101,9 @@ chunkLoop:
 
 		// Send the chunk.
 		withTimeout(func() {
-			err = stream.Send(req)
+			trace.WithRegion(ctx, "stream.Send", func() {
+				err = stream.Send(req)
+			})
 		})
 		switch {
 		case err == io.EOF:
