@@ -1080,7 +1080,7 @@ func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *re
 	defer u.streamBufs.Put(buf)
 
 chunkLoop:
-	for {
+	for cnt := 0; ; cnt++ {
 		// Before reading, check if the context if canceled.
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -1102,7 +1102,9 @@ chunkLoop:
 		// Send the chunk.
 		withTimeout(func() {
 			trace.WithRegion(ctx, "stream.Send", func() {
+				start := time.Now()
 				err = stream.Send(req)
+				log.Infof("stream.Send %d took %s", cnt, time.Since(start))
 			})
 		})
 		switch {
