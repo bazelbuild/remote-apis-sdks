@@ -392,7 +392,13 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 		}
 	})
 
-	return &UploadResult{Stats: u.stats, u: u}, errors.WithStack(eg.Wait())
+	err := eg.Wait()
+	if err != nil {
+		// Caller may not unwrap stack frame of github.com/pkg/error, so log error here.
+		log.Errorf("failed to upload at least one blob: %+v", err)
+	}
+
+	return &UploadResult{Stats: u.stats, u: u}, err
 }
 
 // uploader implements a concurrent multi-stage pipeline to read blobs from the
@@ -807,7 +813,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	// Need to check symlink if AllowDanglingSymlinks is not set.
 	targetInfo, err := os.Lstat(absTarget)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.Wrapf(err, "lstat to target of symlink (%s -> %s) has error", absPath, relTarget)
 	}
 
 	// TODO: detect cycles by symlink if needs to follow symlinks in this case.
