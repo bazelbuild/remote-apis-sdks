@@ -799,14 +799,17 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 		Target: filepath.ToSlash(relTarget),
 	}
 
-	targetInfo, err := os.Lstat(absTarget)
-	switch {
-	case os.IsNotExist(err) && u.PreserveSymlinks && u.AllowDanglingSymlinks:
-		// Special case for preserved dangling links.
+	if u.PreserveSymlinks && u.AllowDanglingSymlinks {
 		return &digested{dirEntry: symlinkNode}, nil
-	case err != nil:
+	}
+
+	// Need to check symlink if AllowDanglingSymlinks is not set.
+	targetInfo, err := os.Lstat(absTarget)
+	if err != nil {
 		return nil, errors.WithStack(err)
-	case u.PreserveSymlinks:
+	}
+
+	if u.PreserveSymlinks {
 		return &digested{dirEntry: symlinkNode}, nil
 	}
 
