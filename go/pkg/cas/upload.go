@@ -810,24 +810,11 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 		return &digested{dirEntry: symlinkNode}, nil
 	case err != nil:
 		return nil, errors.WithStack(err)
+	case u.PreserveSymlinks:
+		return &digested{dirEntry: symlinkNode}, nil
 	}
 
-	switch digestedTarget, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
-	case err != nil:
-		return nil, err
-	case !u.PreserveSymlinks:
-		return digestedTarget, nil
-	case digestedTarget == nil && !u.AllowDanglingSymlinks:
-		// The target got skipped via Prelude or UploadInput.Exclude,
-		// resulting in a dangling symlink, which is not allowed.
-		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
-	default:
-		ret := &digested{dirEntry: symlinkNode}
-		if digestedTarget != nil {
-			ret.digest = digestedTarget.digest
-		}
-		return ret, nil
-	}
+	return u.visitPath(ctx, absTarget, targetInfo, pathExclude)
 }
 
 // uploadItem is a blob to potentially upload.
