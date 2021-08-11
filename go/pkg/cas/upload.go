@@ -265,7 +265,8 @@ type DigestStat struct {
 // The default options are the zero value of this struct.
 type UploadOptions struct {
 	// PreserveSymlinks specifies whether to preserve symlinks or convert them
-	// to regular files.
+	// to regular files. This doesn't upload target of symlinks, caller needs
+	// to specify targets explicitly if those are necessary too.
 	PreserveSymlinks bool
 
 	// AllowDanglingSymlinks specifies whether to upload dangling links or halt
