@@ -398,7 +398,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 		log.Errorf("failed to upload at least one blob: %+v", err)
 	}
 
-	return &UploadResult{Stats: u.stats, u: u}, err
+	return &UploadResult{Stats: u.stats, u: u}, errors.WithStack(err)
 }
 
 // uploader implements a concurrent multi-stage pipeline to read blobs from the
