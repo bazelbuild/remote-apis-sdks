@@ -243,7 +243,7 @@ func TestFS(t *testing.T) {
 			opt:                 UploadOptions{PreserveSymlinks: true},
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "with-symlinks")}},
 			wantDigests:         digSlice(withSymlinksItemPreserved),
-			wantScheduledChecks: []*uploadItem{aItem, subdirItem, cItem, dItem, withSymlinksItemPreserved},
+			wantScheduledChecks: []*uploadItem{withSymlinksItemPreserved},
 		},
 		{
 			desc:                "symlinks-not-preserved",
@@ -270,7 +270,8 @@ func TestFS(t *testing.T) {
 				Path:    filepath.Join(tmpDir, "with-symlinks"),
 				Exclude: regexp.MustCompile("root"),
 			}},
-			wantErr: ErrFilteredSymlinkTarget,
+			wantDigests:         digSlice(withSymlinksItemPreserved),
+			wantScheduledChecks: []*uploadItem{withSymlinksItemPreserved},
 		},
 		{
 			desc: "dangling-symlink-via-filtering-allow",

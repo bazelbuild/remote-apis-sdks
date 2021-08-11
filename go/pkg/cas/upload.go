@@ -31,10 +31,6 @@ import (
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
-// ErrFilteredSymlinkTarget is returned when a symlink's target was filtered out
-// via UploadInput.Exclude or ErrSkip, while the symlink itself wasn't.
-var ErrFilteredSymlinkTarget = errors.New("symlink's target was filtered out")
-
 // zstdEncoders is a pool of ZStd encoders.
 // Clients of this pool must call Close() on the encoder after using the
 // encoder.
@@ -269,7 +265,8 @@ type DigestStat struct {
 // The default options are the zero value of this struct.
 type UploadOptions struct {
 	// PreserveSymlinks specifies whether to preserve symlinks or convert them
-	// to regular files.
+	// to regular files. This doesn't upload target of symlinks, caller needs
+	// to specify targets explicitly if those are necessary too.
 	PreserveSymlinks bool
 
 	// AllowDanglingSymlinks specifies whether to upload dangling links or halt
@@ -775,7 +772,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 // If u.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
 //
-// The returned digested.digest is nil if the symlink is dangling.
+// The returned digested.digest is nil if u.PreserveSymlinks is set.
 func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (*digested, error) {
 	target, err := os.Readlink(absPath)
 	if err != nil {
@@ -803,31 +800,22 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 		Target: filepath.ToSlash(relTarget),
 	}
 
-	targetInfo, err := os.Lstat(absTarget)
-	switch {
-	case os.IsNotExist(err) && u.PreserveSymlinks && u.AllowDanglingSymlinks:
-		// Special case for preserved dangling links.
+	if u.PreserveSymlinks && u.AllowDanglingSymlinks {
 		return &digested{dirEntry: symlinkNode}, nil
-	case err != nil:
+	}
+
+	// Need to check symlink if AllowDanglingSymlinks is not set.
+	targetInfo, err := os.Lstat(absTarget)
+	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	switch digestedTarget, err := u.visitPath(ctx, absTarget, targetInfo, pathExclude); {
-	case err != nil:
-		return nil, err
-	case !u.PreserveSymlinks:
-		return digestedTarget, nil
-	case digestedTarget == nil && !u.AllowDanglingSymlinks:
-		// The target got skipped via Prelude or UploadInput.Exclude,
-		// resulting in a dangling symlink, which is not allowed.
-		return nil, errors.Wrapf(ErrFilteredSymlinkTarget, "path: %q, target: %q", absPath, target)
-	default:
-		ret := &digested{dirEntry: symlinkNode}
-		if digestedTarget != nil {
-			ret.digest = digestedTarget.digest
-		}
-		return ret, nil
+	// TODO: detect cycles by symlink if needs to follow symlinks in this case.
+	if u.PreserveSymlinks {
+		return &digested{dirEntry: symlinkNode}, nil
 	}
+
+	return u.visitPath(ctx, absTarget, targetInfo, pathExclude)
 }
 
 // uploadItem is a blob to potentially upload.
