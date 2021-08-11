@@ -31,10 +31,6 @@ import (
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
-// ErrFilteredSymlinkTarget is returned when a symlink's target was filtered out
-// via UploadInput.Exclude or ErrSkip, while the symlink itself wasn't.
-var ErrFilteredSymlinkTarget = errors.New("symlink's target was filtered out")
-
 // zstdEncoders is a pool of ZStd encoders.
 // Clients of this pool must call Close() on the encoder after using the
 // encoder.

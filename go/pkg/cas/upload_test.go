@@ -272,7 +272,6 @@ func TestFS(t *testing.T) {
 			}},
 			wantDigests:         digSlice(withSymlinksItemPreserved),
 			wantScheduledChecks: []*uploadItem{withSymlinksItemPreserved},
-			// wantErr: ErrFilteredSymlinkTarget,
 		},
 		{
 			desc: "dangling-symlink-via-filtering-allow",
