@@ -771,7 +771,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 // If u.PreserveSymlinks is true, then returns a SymlinkNode, otherwise
 // returns the directory node of the target file.
 //
-// The returned digested.digest is nil if the symlink is dangling.
+// The returned digested.digest is nil if u.PreserveSymlinks is set.
 func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (*digested, error) {
 	target, err := os.Readlink(absPath)
 	if err != nil {
@@ -809,6 +809,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 		return nil, errors.WithStack(err)
 	}
 
+	// TODO: detect cycles by symlink if needs to follow symlinks in this case.
 	if u.PreserveSymlinks {
 		return &digested{dirEntry: symlinkNode}, nil
 	}
