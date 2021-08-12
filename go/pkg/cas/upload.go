@@ -392,13 +392,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 		}
 	})
 
-	err := eg.Wait()
-	if err != nil {
-		// Caller may not unwrap stack frame of github.com/pkg/error, so log error here.
-		log.Errorf("failed to upload at least one blob: %+v", err)
-	}
-
-	return &UploadResult{Stats: u.stats, u: u}, errors.WithStack(err)
+	return &UploadResult{Stats: u.stats, u: u}, errors.WithStack(eg.Wait())
 }
 
 // uploader implements a concurrent multi-stage pipeline to read blobs from the
