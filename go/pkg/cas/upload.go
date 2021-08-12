@@ -807,7 +807,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	// Need to check symlink if AllowDanglingSymlinks is not set.
 	targetInfo, err := os.Lstat(absTarget)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.Wrapf(err, "lstat to target of symlink (%s -> %s) has error", absPath, relTarget)
 	}
 
 	// TODO: detect cycles by symlink if needs to follow symlinks in this case.
