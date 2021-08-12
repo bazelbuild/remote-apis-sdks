@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	log "github.com/golang/glog"
 	"github.com/pkg/errors"
@@ -55,7 +56,13 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			if !ch.HasNext() {
 				req.FinishWrite = true
 			}
-			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })
+			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error {
+				start := time.Now()
+				defer func() {
+					log.Infof("stream.Send took %s", time.Since(start))
+				}()
+				return stream.Send(req)
+			})
 			if err == io.EOF {
 				break
 			}
