@@ -15,6 +15,7 @@ import (
 
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/ptypes"
+	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cas"
@@ -294,7 +295,7 @@ func (c *Client) UploadBlob(ctx context.Context, path string) error {
 func (c *Client) UploadBlobV2(ctx context.Context, path string) error {
 	casC, err := cas.NewClient(ctx, c.GrpcClient.Connection, c.GrpcClient.InstanceName)
 	if err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 	inputC := make(chan *cas.UploadInput)
 
@@ -310,10 +311,10 @@ func (c *Client) UploadBlobV2(ctx context.Context, path string) error {
 
 	eg.Go(func() error {
 		_, err := casC.Upload(ctx, cas.UploadOptions{}, inputC)
-		return err
+		return errors.WithStack(err)
 	})
 
-	return eg.Wait()
+	return errors.WithStack(eg.Wait())
 }
 
 // DownloadDirectory downloads a an input root from the remote cache into the specified path.
