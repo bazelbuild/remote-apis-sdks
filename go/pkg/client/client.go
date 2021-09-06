@@ -537,7 +537,7 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		// Set the ServerName and RootCAs fields, if needed.
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
-			return nil, fmt.Errorf("Could not create TLS config: %v", err)
+			return nil, fmt.Errorf("could not create TLS config: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
@@ -564,7 +564,7 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		}
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
-			return nil, fmt.Errorf("Could not create TLS config: %v", err)
+			return nil, fmt.Errorf("could not create TLS config: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
