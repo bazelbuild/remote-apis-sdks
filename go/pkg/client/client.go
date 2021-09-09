@@ -427,9 +427,14 @@ type DialParams struct {
 	// ActAsAccount is the service account to act as when making RPC calls.
 	ActAsAccount string
 
-	// NoSecurity is true if there is no security: no credentials are configured and
-	// grpc.WithInsecure() is passed in. Should only be used in test code.
+	// NoSecurity is true if there is no security: no credentials are configured
+	// (NoAuth is implied) and grpc.WithInsecure() is passed in. Should only be
+	// used in test code.
 	NoSecurity bool
+
+	// NoAuth is true if TLS is enabled (NoSecurity is false) but the client does
+	// not need to authenticate with the server.
+	NoAuth bool
 
 	// TransportCredsOnly is true if it's the caller's responsibility to set per-RPC credentials
 	// on individual calls. This overrides ActAsAccount, UseApplicationDefault, and UseComputeEngine.
@@ -528,6 +533,13 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 	}
 	if params.NoSecurity {
 		opts = append(opts, grpc.WithInsecure())
+	} else if params.NoAuth {
+		// Set the ServerName and RootCAs fields, if needed.
+		tlsConfig, err := createTLSConfig(params)
+		if err != nil {
+			return nil, fmt.Errorf("could not create TLS config: %v", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
 		credFile := params.CredFile
 		if strings.Contains(credFile, HomeDirMacro) {
@@ -552,7 +564,7 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		}
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
-			return nil, fmt.Errorf("Could not create TLS config: %v", err)
+			return nil, fmt.Errorf("could not create TLS config: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
