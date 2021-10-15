@@ -57,12 +57,12 @@ func (s *Exec) Clear() {
 	s.Status = nil
 	s.Cached = false
 	s.OutputBlobs = nil
-	s.numExecCalls = 0
+	atomic.StoreInt32(&s.numExecCalls, 0)
 }
 
 // ExecuteCalls returns the total number of Execute calls.
 func (s *Exec) ExecuteCalls() int {
-	return int(s.numExecCalls)
+	return int(atomic.LoadInt32(&s.numExecCalls))
 }
 
 func (s *Exec) fakeExecution(dg digest.Digest, skipCacheLookup bool) (*oppb.Operation, error) {
