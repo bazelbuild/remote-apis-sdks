@@ -216,11 +216,19 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 	e.Server.Exec.ActionResult = ar
 	switch res.Status {
 	case command.TimeoutResultStatus:
-		e.Server.Exec.Status = status.New(codes.DeadlineExceeded, "timeout")
+		if res.Err == nil {
+			e.Server.Exec.Status = status.New(codes.DeadlineExceeded, "timeout")
+		} else {
+			e.Server.Exec.Status = status.New(codes.DeadlineExceeded, res.Err.Error())
+		}
 	case command.RemoteErrorResultStatus:
 		st, ok := status.FromError(res.Err)
 		if !ok {
-			st = status.New(codes.Internal, "remote error")
+			if res.Err == nil {
+				st = status.New(codes.Internal, "remote error")
+			} else {
+				st = status.New(codes.Internal, res.Err.Error())
+			}
 		}
 		e.Server.Exec.Status = st
 	case command.CacheHitResultStatus:
