@@ -29,12 +29,26 @@ go_register_toolchains(version = "1.15.8")
 
 gazelle_dependencies()
 
+# protobuf.
+http_archive(
+    name = "rules_proto",
+    sha256 = "66bfdf8782796239d3875d37e7de19b1d94301e8972b3cbd2446b332429b4df1",
+    strip_prefix = "rules_proto-4.0.0",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_proto/archive/refs/tags/4.0.0.tar.gz",
+        "https://github.com/bazelbuild/rules_proto/archive/refs/tags/4.0.0.tar.gz",
+    ],
+)
+load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+rules_proto_dependencies()
+rules_proto_toolchains()
+
 # gRPC.
 http_archive(
     name = "com_github_grpc_grpc",
-    sha256 = "2fcb7f1ab160d6fd3aaade64520be3e5446fc4c6fa7ba6581afdc4e26094bd81",
-    strip_prefix = "grpc-1.26.0",
-    urls = ["https://github.com/grpc/grpc/archive/v1.26.0.tar.gz"],
+    sha256 = "12a4a6f8c06b96e38f8576ded76d0b79bce13efd7560ed22134c2f433bc496ad",
+    strip_prefix = "grpc-1.41.1",
+    urls = ["https://github.com/grpc/grpc/archive/v1.41.1.tar.gz"],
 )
 
 # Pull in all gRPC dependencies.
