@@ -254,10 +254,14 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 		}
 	}
 
-	if e := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); e != nil {
-		return digest.Empty, nil, nil, e
+	if err := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); err != nil {
+		return digest.Empty, nil, nil, err
 	}
-	ft := buildTree(fs)
+
+	ft, err := buildTree(fs)
+	if err != nil {
+		return digest.Empty, nil, nil, err
+	}
 	var blobs map[digest.Digest]*uploadinfo.Entry
 	root, blobs, err = packageTree(ft, stats)
 	if err != nil {
@@ -269,7 +273,7 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 	return root, inputs, stats, nil
 }
 
-func buildTree(files map[string]*fileSysNode) *treeNode {
+func buildTree(files map[string]*fileSysNode) (*treeNode, error) {
 	root := &treeNode{}
 	for name, fn := range files {
 		segs := strings.Split(name, string(filepath.Separator))
@@ -293,6 +297,9 @@ func buildTree(files map[string]*fileSysNode) *treeNode {
 			if node.dirs == nil {
 				node.dirs = make(map[string]*treeNode)
 			}
+			if node.dirs[base] != nil {
+				return nil, fmt.Errorf("path %v was tagged as an empty dir but isn't empty", name)
+			}
 			node.dirs[base] = &treeNode{}
 			continue
 		}
@@ -308,7 +315,7 @@ func buildTree(files map[string]*fileSysNode) *treeNode {
 			node.symlinks[base] = fn.symlink
 		}
 	}
-	return root
+	return root, nil
 }
 
 func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[digest.Digest]*uploadinfo.Entry, err error) {
@@ -507,7 +514,10 @@ func (c *Client) ComputeOutputsToUpload(execRoot string, paths []string, cache f
 		if e := loadFiles(absPath, nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb)); e != nil {
 			return nil, nil, e
 		}
-		ft := buildTree(fs)
+		ft, err := buildTree(fs)
+		if err != nil {
+			return nil, nil, err
+		}
 
 		treePb := &repb.Tree{}
 		rootDir, childDirs, files, err := packageDirectories(ft)
