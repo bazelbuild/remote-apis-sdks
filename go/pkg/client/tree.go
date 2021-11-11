@@ -490,7 +490,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 	outs := make(map[digest.Digest]*uploadinfo.Entry)
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {
-		absPath := filepath.Join(execRoot, path)
+		absPath := filepath.Join(execRoot, workingDir, path)
 		if _, err := getRelPath(execRoot, absPath); err != nil {
 			return nil, nil, err
 		}
