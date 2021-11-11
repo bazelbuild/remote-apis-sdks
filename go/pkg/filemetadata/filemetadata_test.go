@@ -1,6 +1,7 @@
 package filemetadata
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -17,7 +18,16 @@ var (
 	ignoreMtime = cmpopts.IgnoreFields(Metadata{}, "MTime")
 )
 
-func TestComputeFiles(t *testing.T) {
+var getXAttrMock func(path string, name string) ([]byte, error)
+
+type xattributeAccessorMock struct{}
+
+func (x xattributeAccessorMock) getXAttr(path string, name string) ([]byte, error) {
+	return getXAttrMock(path, name)
+}
+
+func TestComputeFilesNoXattr(t *testing.T) {
+	XattrName = ""
 	tests := []struct {
 		name       string
 		contents   string
@@ -64,7 +74,62 @@ func TestComputeFiles(t *testing.T) {
 	}
 }
 
+func TestComputeFilesWithXattr(t *testing.T) {
+	XattrName = "google.digest.sha256"
+	XattrAccess = xattributeAccessorMock{}
+	tests := []struct {
+		name       string
+		contents   string
+		executable bool
+	}{
+		{
+			name:     "empty",
+			contents: "",
+		},
+		{
+			name:     "non-executable",
+			contents: "bla",
+		},
+		{
+			name:       "executable",
+			contents:   "foo",
+			executable: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			getXAttrMock = func(path string, name string) ([]byte, error) {
+				return []byte(tc.name), nil
+			}
+
+			before := time.Now().Truncate(time.Second)
+			filename, err := testutil.CreateFile(t, tc.executable, tc.contents)
+			if err != nil {
+				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
+			}
+			after := time.Now().Truncate(time.Second).Add(time.Second)
+			defer os.RemoveAll(filename)
+			got := Compute(filename)
+			if got.Err != nil {
+				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
+			}
+			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", tc.name, len(tc.contents)))
+			want := &Metadata{
+				Digest:       wantDigest,
+				IsExecutable: tc.executable,
+			}
+			if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
+				t.Errorf("Compute(%v) returned diff. (-want +got)\n%s", filename, diff)
+			}
+			if got.MTime.Before(before) || got.MTime.After(after) {
+				t.Errorf("Compute(%v) returned MTime %v, want time in (%v, %v).", filename, got.MTime, before, after)
+			}
+		})
+	}
+}
+
 func TestComputeDirectory(t *testing.T) {
+	XattrName = ""
 	tmpDir, err := ioutil.TempDir("", "")
 	defer os.RemoveAll(tmpDir)
 	if err != nil {
@@ -83,6 +148,7 @@ func TestComputeDirectory(t *testing.T) {
 }
 
 func TestComputeSymlinksToFile(t *testing.T) {
+	XattrName = ""
 	tests := []struct {
 		name       string
 		contents   string
@@ -128,6 +194,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 }
 
 func TestComputeDanglingSymlinks(t *testing.T) {
+	XattrName = ""
 	// Create a temporary fake target so that os.Symlink() can work.
 	symlinkPath := filepath.Join(os.TempDir(), "dangling")
 	defer os.RemoveAll(symlinkPath)
@@ -148,6 +215,7 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 }
 
 func TestComputeSymlinksToDirectory(t *testing.T) {
+	XattrName = ""
 	symlinkPath := filepath.Join(os.TempDir(), "dir-symlink")
 	defer os.RemoveAll(symlinkPath)
 	targetPath, err := ioutil.TempDir(os.TempDir(), "")

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/pkg/xattr"
 )
 
 // SymlinkMetadata contains details if the given path is a symlink.
@@ -28,6 +29,26 @@ type Metadata struct {
 type FileError struct {
 	IsNotFound bool
 	Err        error
+}
+
+type xattributeAccessorInterface interface {
+	getXAttr(path string, name string) ([]byte, error)
+}
+
+type xattributeAccessor struct{}
+
+func (x xattributeAccessor) getXAttr(path string, name string) ([]byte, error) {
+	return xattr.Get(path, name)
+}
+
+var (
+	XattrName string
+	XattrAccess xattributeAccessorInterface
+)
+
+func init() {
+	XattrName = ""
+	XattrAccess = xattributeAccessor{}
 }
 
 // Error returns the error message.
@@ -78,6 +99,18 @@ func Compute(filename string) *Metadata {
 	if mode.IsDir() {
 		md.IsDirectory = true
 		return md
+	}
+
+	if len(XattrName) > 0 {
+		xattrValue, err := XattrAccess.getXAttr(filename, XattrName)
+		if err == nil {
+			md.Digest = digest.Digest{
+				Hash: string(xattrValue),
+				Size: file.Size(),
+			}
+			md.Err = nil
+			return md
+		}
 	}
 	md.Digest, md.Err = digest.NewFromFile(filename)
 	return md
