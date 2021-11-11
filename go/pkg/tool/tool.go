@@ -13,17 +13,20 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/golang/glog"
+	"github.com/golang/protobuf/ptypes"
+	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cas"
+	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/golang/protobuf/ptypes"
-
-	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	log "github.com/golang/glog"
 )
 
 const (
@@ -306,6 +309,32 @@ func (c *Client) UploadBlob(ctx context.Context, path string) error {
 		return err
 	}
 	return nil
+}
+
+// UploadBlobV2 uploads a blob from the specified path into the remote cache using newer cas implementation.
+func (c *Client) UploadBlobV2(ctx context.Context, path string) error {
+	casC, err := cas.NewClient(ctx, c.GrpcClient.Connection, c.GrpcClient.InstanceName)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	inputC := make(chan *cas.UploadInput)
+
+	eg, ctx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		inputC <- &cas.UploadInput{
+			Path: path,
+		}
+		close(inputC)
+		return nil
+	})
+
+	eg.Go(func() error {
+		_, err := casC.Upload(ctx, cas.UploadOptions{}, inputC)
+		return errors.WithStack(err)
+	})
+
+	return errors.WithStack(eg.Wait())
 }
 
 // DownloadDirectory downloads a an input root from the remote cache into the specified path.

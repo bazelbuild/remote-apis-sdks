@@ -22,6 +22,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	syncpool "github.com/mostynb/zstdpool-syncpool"
 	"github.com/pborman/uuid"
+	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -437,6 +438,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 					if err != nil {
 						return err
 					}
+
+					if dg.Size != int64(len(data)) {
+						return errors.Errorf("blob size changed while uploading, given:%d now:%d for %s", dg.Size, int64(len(data)), ue.Path)
+					}
+
 					bchMap[dg] = data
 					atomic.AddInt64(&totalBytesTransferred, int64(len(data)))
 				}
@@ -453,7 +459,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				}
 				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
 				}
 				atomic.AddInt64(&totalBytesTransferred, written)
 			}
@@ -1473,10 +1479,10 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	path := filepath.Join(r.outDir, r.output.Path)
 	LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
 	stats, err := c.ReadBlobToFile(ctx, r.output.Digest, path)
-	bytesMoved[r.output.Digest] = stats
 	if err != nil {
 		return err
 	}
+	bytesMoved[r.output.Digest] = stats
 	if r.output.IsExecutable {
 		if err := os.Chmod(path, c.ExecutableMode); err != nil {
 			return err
@@ -1657,12 +1663,12 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 				path := filepath.Join(outDir, out.Path)
 				LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
 				stats, err := c.ReadBlobToFile(ctx, out.Digest, path)
-				statsMu.Lock()
-				fullStats.addFrom(stats)
-				statsMu.Unlock()
 				if err != nil {
 					return err
 				}
+				statsMu.Lock()
+				fullStats.addFrom(stats)
+				statsMu.Unlock()
 				if out.IsExecutable {
 					if err := os.Chmod(path, c.ExecutableMode); err != nil {
 						return err

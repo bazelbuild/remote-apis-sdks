@@ -1,4 +1,4 @@
-package singleflightcache
+package cache
 
 import (
 	"errors"
@@ -17,26 +17,46 @@ const (
 )
 
 func TestSimpleValueStore(t *testing.T) {
-	c := &Cache{}
-	val, err := c.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
+	s := &SingleFlight{}
+	val, err := s.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
 	if err != nil {
 		t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
 	}
 	if val != val1 {
 		t.Errorf("LoadOrStore(%v) loaded wrong value: got %v, want %v", key1, val, val1)
 	}
+	val, err, loaded := s.Load(key1)
+	if !loaded {
+		t.Errorf("expected to load value")
+	}
+	if err != nil {
+		t.Errorf("Load(%v) failed: %v", key1, err)
+	}
+	if val != val1 {
+		t.Errorf("Load(%v) loaded wrong value: got %v, want %v", key1, val, val1)
+	}
 
-	val, err = c.LoadOrStore(key2, func() (interface{}, error) { return val2, nil })
+	val, err = s.LoadOrStore(key2, func() (interface{}, error) { return val2, nil })
 	if err != nil {
 		t.Errorf("LoadOrStore(%v) failed: %v", key2, err)
 	}
 	if val != val2 {
 		t.Errorf("LoadOrStore(%v) loaded wrong value: got %v, want %v", key2, val, val2)
 	}
+	val, err, loaded = s.Load(key2)
+	if !loaded {
+		t.Errorf("expected to load value")
+	}
+	if err != nil {
+		t.Errorf("Load(%v) failed: %v", key2, err)
+	}
+	if val != val2 {
+		t.Errorf("Load(%v) loaded wrong value: got %v, want %v", key2, val, val1)
+	}
 }
 
 func TestSingleFlightStore(t *testing.T) {
-	c := &Cache{}
+	s := &SingleFlight{}
 	var ops uint64
 	loadFn := func() (interface{}, error) {
 		atomic.AddUint64(&ops, 1)
@@ -44,7 +64,7 @@ func TestSingleFlightStore(t *testing.T) {
 	}
 	wg := &sync.WaitGroup{}
 	load := func() {
-		val, err := c.LoadOrStore(key1, loadFn)
+		val, err := s.LoadOrStore(key1, loadFn)
 		if err != nil {
 			t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
 		}
@@ -65,51 +85,22 @@ func TestSingleFlightStore(t *testing.T) {
 }
 
 func TestValFnFailure(t *testing.T) {
-	c := &Cache{}
-	val, err := c.LoadOrStore(key1, func() (interface{}, error) { return nil, errors.New("error") })
+	s := &SingleFlight{}
+	fnErr := errors.New("error")
+	val, err := s.LoadOrStore(key1, func() (interface{}, error) { return nil, fnErr })
 	if err == nil {
-		t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
+		t.Errorf("LoadOrStore(%v) failed: val is %v, err is nil", key1, val)
 	}
 
-	val, err = c.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
-	if err != nil {
-		t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
-	}
-	if val != val1 {
-		t.Errorf("LoadOrStore(%v) loaded wrong value: got %v, want %v", key1, val, val1)
-	}
-}
-
-func TestValFnMultipleFailure(t *testing.T) {
-	c := &Cache{}
-
-	wg := &sync.WaitGroup{}
-	want := errors.New("error")
-	var ops uint64
-	load := func() {
-		_, got := c.LoadOrStore(key1, func() (interface{}, error) {
-			atomic.AddUint64(&ops, 1)
-			return nil, want
-		})
-		if want != got {
-			t.Errorf("LoadOrStore(%v) = _,%v, want _,%v", key1, got, want)
-		}
-		wg.Done()
-	}
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go load()
-	}
-	wg.Wait()
-
-	if ops != 50 {
-		t.Errorf("Wrong number of loads executed: got %v, want 50", ops)
+	val, err = s.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
+	if err != fnErr {
+		t.Errorf("LoadOrStore(%v) didn't fail: (%v, %v)", key1, val, err)
 	}
 }
 
 func TestDelete(t *testing.T) {
-	c := &Cache{}
-	val, err := c.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
+	s := &SingleFlight{}
+	val, err := s.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
 	if err != nil {
 		t.Fatalf("LoadOrStore(%v) failed: %v", key1, err)
 	}
@@ -117,9 +108,9 @@ func TestDelete(t *testing.T) {
 		t.Fatalf("LoadOrStore(%v) loaded wrong value: got %v, want %v", key1, val, val1)
 	}
 
-	c.Delete(key1)
+	s.Delete(key1)
 
-	val, err = c.LoadOrStore(key1, func() (interface{}, error) { return val2, nil })
+	val, err = s.LoadOrStore(key1, func() (interface{}, error) { return val2, nil })
 	if err != nil {
 		t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
 	}
@@ -132,17 +123,17 @@ func TestDelete(t *testing.T) {
 // purpose of the test is to expose whether a race condition would result in an inconsistent state
 // of the internal maps of the cache, which would result in an error reported by LoadOrStore.
 func TestLoadDelete(t *testing.T) {
-	c := &Cache{}
+	s := &SingleFlight{}
 	wg := &sync.WaitGroup{}
 	load := func() {
-		val, err := c.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
+		val, err := s.LoadOrStore(key1, func() (interface{}, error) { return val1, nil })
 		if err != nil {
 			t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
 		}
 		if val != val1 {
 			t.Errorf("LoadOrStore(%v) loaded wrong value: got %v, want %v", key1, val, val1)
 		}
-		val, err = c.LoadOrStore(key2, func() (interface{}, error) { return val2, nil })
+		val, err = s.LoadOrStore(key2, func() (interface{}, error) { return val2, nil })
 		if err != nil {
 			t.Errorf("LoadOrStore(%v) failed: %v", key2, err)
 		}
@@ -152,8 +143,8 @@ func TestLoadDelete(t *testing.T) {
 		wg.Done()
 	}
 	del := func() {
-		c.Delete(key1)
-		c.Delete(key2)
+		s.Delete(key1)
+		s.Delete(key2)
 		wg.Done()
 	}
 	wg.Add(100)
@@ -165,17 +156,15 @@ func TestLoadDelete(t *testing.T) {
 }
 
 func TestStore(t *testing.T) {
-	c := &Cache{}
+	s := &SingleFlight{}
 	wg := &sync.WaitGroup{}
 	var mu sync.Mutex
 	load := func() {
 		mu.Lock()
-		if err := c.Store(key3, val3); err != nil {
-			t.Errorf("Store(%v) failed: %v", key3, err)
-		}
+		s.Store(key3, val3)
 		// LoadOrStore should load the already loaded value "val3" and shouldn't
 		// overwrite "val1" to "key3".
-		val, err := c.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
+		val, err := s.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
 		if err != nil {
 			t.Errorf("LoadOrStore(%v) failed: %v", key3, err)
 		}
@@ -187,7 +176,7 @@ func TestStore(t *testing.T) {
 	}
 	del := func() {
 		mu.Lock()
-		c.Delete(key3)
+		s.Delete(key3)
 		mu.Unlock()
 		wg.Done()
 	}
@@ -200,9 +189,9 @@ func TestStore(t *testing.T) {
 }
 
 func TestStoreOverwrite(t *testing.T) {
-	c := &Cache{}
+	s := &SingleFlight{}
 
-	val, err := c.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
+	val, err := s.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
 	if err != nil {
 		t.Errorf("LoadOrStore(%v) failed: %v", key3, err)
 	}
@@ -210,13 +199,11 @@ func TestStoreOverwrite(t *testing.T) {
 		t.Errorf("LoadOrStore(%v) = %v, want %v", key3, val, val1)
 	}
 
-	if err := c.Store(key3, val3); err != nil {
-		t.Errorf("Store(%v) failed: %v", key3, err)
-	}
+	s.Store(key3, val3)
 
 	// LoadOrStore should load the already loaded value "val3" and shouldn't
 	// overwrite "val1" to "key3".
-	val, err = c.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
+	val, err = s.LoadOrStore(key3, func() (interface{}, error) { return val1, nil })
 	if err != nil {
 		t.Errorf("LoadOrStore(%v) failed: %v", key3, err)
 	}
@@ -231,22 +218,22 @@ func TestStoreOverwrite(t *testing.T) {
 // the output of LoadOrStore is not tested for correctness. You can run the race
 // detector using: "bazelisk test --features race //go/pkg/cache/..."
 func TestRacedValueStore(t *testing.T) {
-	c := &Cache{}
+	s := &SingleFlight{}
 	wg := &sync.WaitGroup{}
 	load := func() {
-		if _, err := c.LoadOrStore(key1, func() (interface{}, error) { return val1, nil }); err != nil {
+		if _, err := s.LoadOrStore(key1, func() (interface{}, error) { return val1, nil }); err != nil {
 			t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
 		}
 		wg.Done()
 	}
 	load2 := func() {
-		if _, err := c.LoadOrStore(key1, func() (interface{}, error) { return val2, nil }); err != nil {
+		if _, err := s.LoadOrStore(key1, func() (interface{}, error) { return val2, nil }); err != nil {
 			t.Errorf("LoadOrStore(%v) failed: %v", key1, err)
 		}
 		wg.Done()
 	}
 	del := func() {
-		c.Delete(key1)
+		s.Delete(key1)
 		wg.Done()
 	}
 	wg.Add(150)

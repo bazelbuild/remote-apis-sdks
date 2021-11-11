@@ -28,7 +28,7 @@ func TestExecutableCacheLoad(t *testing.T) {
 		Digest:       wantDg,
 		IsExecutable: true,
 	}
-	if diff := cmp.Diff(want, got); diff != "" {
+	if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
 		t.Errorf("Get(%v) returned diff. (-want +got)\n%s", filename, diff)
 	}
 }

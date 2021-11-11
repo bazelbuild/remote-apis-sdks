@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -599,8 +600,8 @@ func TestUploadCancel(t *testing.T) {
 			eg, _ := errgroup.WithContext(cCtx)
 			ue := uploadinfo.EntryFromBlob(blob)
 			eg.Go(func() error {
-				if _, _, err := c.UploadIfMissing(cCtx, ue); err != context.Canceled {
-					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context.Canceled", err)
+				if _, _, err := c.UploadIfMissing(cCtx, ue); !errors.Is(err, context.Canceled) {
+					return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected to wrap context.Canceled", err)
 				}
 				return nil
 			})
@@ -685,8 +686,8 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			for i := 0; i < 50; i++ {
 				eg.Go(func() error {
 					// Verify that we got a context cancellation error. Sometimes, the request can succeed, if the original thread takes a while to run.
-					if _, _, err := c.UploadIfMissing(cCtx, input...); err != nil && err != context.Canceled {
-						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %v, expected context canceled", err)
+					if _, _, err := c.UploadIfMissing(cCtx, input...); err != nil && !errors.Is(err, context.Canceled) {
+						return fmt.Errorf("c.UploadIfMissing(ctx, input) gave error %+v!, expected context canceled", err)
 					}
 					return nil
 				})

@@ -12,32 +12,33 @@ def remote_apis_sdks_go_deps():
         go_repository,
         name = "com_github_pkg_errors",
         importpath = "github.com/pkg/errors",
-        tag = "v0.8.1",
+        tag = "v0.9.1",
     )
     _maybe(
         go_repository,
         name = "com_github_golang_protobuf",
         importpath = "github.com/golang/protobuf",
-        tag = "v1.3.2",
+        tag = "v1.4.2",
     )
     _maybe(
         go_repository,
         name = "com_github_google_go_cmp",
-        tag = "v0.3.1",
+        tag = "v0.5.1",
         importpath = "github.com/google/go-cmp",
+    )
+    _maybe(
+        go_repository,
+        name = "org_golang_google_api",
+        build_file_proto_mode = "disable",
+        importpath = "google.golang.org/api",
+        tag = "v0.30.0",
     )
     _maybe(
         go_repository,
         name = "org_golang_google_grpc",
         build_file_proto_mode = "disable",
         importpath = "google.golang.org/grpc",
-        tag = "v1.30.0",
-    )
-    _maybe(
-        go_repository,
-        name = "org_golang_x_oauth2",
-        commit = "9f3314589c9a9136388751d9adae6b0ed400978a",
-        importpath = "golang.org/x/oauth2",
+        tag = "v1.31.0",
     )
     _maybe(
         go_repository,
@@ -56,25 +57,25 @@ def remote_apis_sdks_go_deps():
         go_repository,
         name = "org_golang_x_net",
         importpath = "golang.org/x/net",
-        commit = "57efc9c3d9f91fb3277f8da1cff370539c4d3dc5",
+        commit = "62affa334b73ec65ed44a326519ac12c421905e3",
+    )
+    _maybe(
+        go_repository,
+        name = "org_golang_x_oauth2",
+        commit = "bf48bf16ab8d622ce64ec6ce98d2c98f916b6303",
+        importpath = "golang.org/x/oauth2",
     )
     _maybe(
         go_repository,
         name = "org_golang_x_sync",
-        commit = "112230192c580c3556b8cee6403af37a4fc5f28c",
+        commit = "6e8e738ad208923de99951fe0b48239bfd864f28",
         importpath = "golang.org/x/sync",
-    )
-    _maybe(
-        go_repository,
-        name = "org_golang_x_text",
-        importpath = "golang.org/x/text",
-        commit = "a9a820217f98f7c8a207ec1e45a874e1fe12c478",
     )
     _maybe(
         go_repository,
         name = "org_golang_x_sys",
         importpath = "golang.org/x/sys",
-        commit = "acbc56fc7007d2a01796d5bde54f39e3b3e95945",
+        commit = "be1d3432aa8f4fd677757447c4c9e7ff9bf25f73",
     )
     _maybe(
         go_repository,
@@ -86,29 +87,30 @@ def remote_apis_sdks_go_deps():
         go_repository,
         name = "com_github_bazelbuild_remote_apis",
         importpath = "github.com/bazelbuild/remote-apis",
-        commit = "9e72daff42c941baaf43a4c370e2607a984c58a7",  # 2020-12-09,
-    )
-    _maybe(
-        go_repository,
-        name = "com_github_kylelemons_godebug",
-        commit = "9ff306d4fbead574800b66369df5b6144732d58e",
-        importpath = "github.com/kylelemons/godebug",
+        commit = "0ecef08215cf8ae2f992d2861a8f91a8ef89acc2",  # 2021-07-19,
     )
     _maybe(
         go_repository,
         name = "com_google_cloud_go",
         commit = "09ad026a62f0561b7f7e276569eda11a6afc9773",
+        tag = "v0.65.0",
         importpath = "cloud.google.com/go",
+    )
+    _maybe(
+        go_repository,
+        name = "com_github_golang_snappy",
+        importpath = "github.com/golang/snappy",
+        tag = "v0.0.3",
     )
     _maybe(
         go_repository,
         name = "com_github_klauspost_compress",
         importpath = "github.com/klauspost/compress",
-        tag = "v1.11.6",
+        tag = "v1.12.3",
     )
     _maybe(
         go_repository,
         name = "com_github_mostynb_zstdpool_syncpool",
         importpath = "github.com/mostynb/zstdpool-syncpool",
-        tag = "v0.0.3",
+        tag = "v0.0.7",
     )

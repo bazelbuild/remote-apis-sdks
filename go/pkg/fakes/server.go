@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
@@ -40,7 +41,7 @@ type Server struct {
 }
 
 // NewServer creates a server that is ready to accept requests.
-func NewServer(t *testing.T) (s *Server, err error) {
+func NewServer(t testing.TB) (s *Server, err error) {
 	cas := NewCAS()
 	ac := NewActionCache()
 	s = &Server{Exec: NewExec(t, ac, cas), CAS: cas, ActionCache: ac}
@@ -73,10 +74,20 @@ func (s *Server) Stop() {
 
 // NewTestClient returns a new in-process Client connected to this server.
 func (s *Server) NewTestClient(ctx context.Context) (*rc.Client, error) {
-	return rc.NewClient(ctx, "instance", rc.DialParams{
+	return rc.NewClient(ctx, "instance", s.dialParams())
+}
+
+// NewClientConn returns a gRPC client connction to the server.
+func (s *Server) NewClientConn(ctx context.Context) (*grpc.ClientConn, error) {
+	p := s.dialParams()
+	return client.Dial(ctx, p.Service, p)
+}
+
+func (s *Server) dialParams() rc.DialParams {
+	return rc.DialParams{
 		Service:    s.listener.Addr().String(),
 		NoSecurity: true,
-	})
+	}
 }
 
 // TestEnv is a wrapper for convenient integration tests of remote execution.
@@ -84,13 +95,13 @@ type TestEnv struct {
 	Client   *rexec.Client
 	Server   *Server
 	ExecRoot string
-	t        *testing.T
+	t        testing.TB
 }
 
 // NewTestEnv initializes a TestEnv containing a fake server, a client connected to it,
 // and a temporary directory used as execution root for inputs and outputs.
 // It returns the new env and a cleanup function that should be called in the end of the test.
-func NewTestEnv(t *testing.T) (*TestEnv, func()) {
+func NewTestEnv(t testing.TB) (*TestEnv, func()) {
 	t.Helper()
 	// Set up temp directory.
 	execRoot, err := ioutil.TempDir("", strings.ReplaceAll(t.Name(), string(filepath.Separator), "_"))
@@ -205,11 +216,19 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 	e.Server.Exec.ActionResult = ar
 	switch res.Status {
 	case command.TimeoutResultStatus:
-		e.Server.Exec.Status = status.New(codes.DeadlineExceeded, "timeout")
+		if res.Err == nil {
+			e.Server.Exec.Status = status.New(codes.DeadlineExceeded, "timeout")
+		} else {
+			e.Server.Exec.Status = status.New(codes.DeadlineExceeded, res.Err.Error())
+		}
 	case command.RemoteErrorResultStatus:
 		st, ok := status.FromError(res.Err)
 		if !ok {
-			st = status.New(codes.Internal, "remote error")
+			if res.Err == nil {
+				st = status.New(codes.Internal, "remote error")
+			} else {
+				st = status.New(codes.Internal, res.Err.Error())
+			}
 		}
 		e.Server.Exec.Status = st
 	case command.CacheHitResultStatus:

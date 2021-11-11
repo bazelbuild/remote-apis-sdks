@@ -3,6 +3,7 @@ package fakes
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
@@ -36,15 +37,15 @@ type Exec struct {
 	// Any blobs that will be put in the CAS after the fake execution completes.
 	OutputBlobs [][]byte
 	// Number of Execute calls.
-	numExecCalls int
+	numExecCalls int32
 	// Used for errors.
-	t *testing.T
+	t testing.TB
 	// The digest of the fake action.
 	adg digest.Digest
 }
 
 // NewExec returns a new empty Exec.
-func NewExec(t *testing.T, ac *ActionCache, cas *CAS) *Exec {
+func NewExec(t testing.TB, ac *ActionCache, cas *CAS) *Exec {
 	c := &Exec{t: t, ac: ac, cas: cas}
 	c.Clear()
 	return c
@@ -56,12 +57,12 @@ func (s *Exec) Clear() {
 	s.Status = nil
 	s.Cached = false
 	s.OutputBlobs = nil
-	s.numExecCalls = 0
+	atomic.StoreInt32(&s.numExecCalls, 0)
 }
 
 // ExecuteCalls returns the total number of Execute calls.
 func (s *Exec) ExecuteCalls() int {
-	return s.numExecCalls
+	return int(atomic.LoadInt32(&s.numExecCalls))
 }
 
 func (s *Exec) fakeExecution(dg digest.Digest, skipCacheLookup bool) (*oppb.Operation, error) {
@@ -117,7 +118,7 @@ func (c *Exec) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesReq
 			ExecEnabled:    true,
 		},
 		CacheCapabilities: &repb.CacheCapabilities{
-			DigestFunction: []repb.DigestFunction_Value{dgFn},
+			DigestFunctions: []repb.DigestFunction_Value{dgFn},
 			ActionCacheUpdateCapabilities: &repb.ActionCacheUpdateCapabilities{
 				UpdateEnabled: true,
 			},
@@ -144,7 +145,7 @@ func (s *Exec) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_Execute
 	} else if err = stream.Send(op); err != nil {
 		return err
 	}
-	s.numExecCalls++
+	atomic.AddInt32(&s.numExecCalls, 1)
 	return nil
 }
 

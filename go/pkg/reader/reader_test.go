@@ -150,7 +150,7 @@ func TestCompressedReader(t *testing.T) {
 				t.Fatalf("Failed to initialize temp file: %v", err)
 			}
 
-			buf := bytes.NewBuffer(nil)
+			buf := bytes.NewBuffer([]byte{})
 			encd, err := zstd.NewWriter(buf)
 			if err != nil {
 				t.Fatalf("Failed to initialize compressor: %v", err)

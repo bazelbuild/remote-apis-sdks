@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/golang/protobuf/proto"
 
@@ -25,6 +26,14 @@ var (
 
 	// Empty is the digest of the empty blob.
 	Empty = NewFromBlob([]byte{})
+
+	// copyBufs is a pool of 32KiB []byte slices, used to compute hashes.
+	copyBufs = sync.Pool{
+		New: func() interface{} {
+			buf := make([]byte, 32*1024)
+			return &buf
+		},
+	}
 )
 
 // Digest is a Go type to mirror the repb.Digest message.
@@ -148,7 +157,9 @@ func NewFromFile(path string) (Digest, error) {
 // It returns an error if there was a problem reading the file.
 func NewFromReader(r io.Reader) (Digest, error) {
 	h := HashFn.New()
-	size, err := io.Copy(h, r)
+	buf := copyBufs.Get().(*[]byte)
+	defer copyBufs.Put(buf)
+	size, err := io.CopyBuffer(h, r, *buf)
 	if err != nil {
 		return Empty, err
 	}
@@ -156,6 +167,34 @@ func NewFromReader(r io.Reader) (Digest, error) {
 		Hash: hex.EncodeToString(h.Sum(nil)),
 		Size: size,
 	}, nil
+}
+
+// CheckCapabilities returns an error if the digest function is not supported
+// by the server.
+func CheckCapabilities(caps *repb.ServerCapabilities) error {
+	fn := GetDigestFunction()
+
+	if caps.ExecutionCapabilities != nil {
+		if serverFn := caps.ExecutionCapabilities.DigestFunction; serverFn != fn {
+			return fmt.Errorf("server requires %v, client uses %v", serverFn, fn)
+		}
+	}
+
+	if caps.CacheCapabilities != nil {
+		cc := caps.CacheCapabilities
+		found := false
+		for _, serverFn := range cc.DigestFunctions {
+			if serverFn == fn {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("server requires one of %v, client uses %v", cc.DigestFunctions, fn)
+		}
+	}
+
+	return nil
 }
 
 // TestNew is like New but also pads your hash with zeros if it is shorter than the required length,

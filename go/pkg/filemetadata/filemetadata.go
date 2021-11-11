@@ -3,6 +3,7 @@ package filemetadata
 
 import (
 	"os"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 )
@@ -18,6 +19,7 @@ type Metadata struct {
 	Digest       digest.Digest
 	IsExecutable bool
 	IsDirectory  bool
+	MTime        time.Time
 	Err          error
 	Symlink      *SymlinkMetadata
 }
@@ -71,6 +73,7 @@ func Compute(filename string) *Metadata {
 		return md
 	}
 	mode := file.Mode()
+	md.MTime = file.ModTime()
 	md.IsExecutable = (mode & 0100) != 0
 	if mode.IsDir() {
 		md.IsDirectory = true
@@ -85,7 +88,6 @@ type Cache interface {
 	Get(path string) *Metadata
 	Delete(filename string) error
 	Update(path string, cacheEntry *Metadata) error
-	Reset()
 	GetCacheHits() uint64
 	GetCacheMisses() uint64
 }
@@ -107,9 +109,6 @@ func (c *noopCache) Delete(string) error {
 func (c *noopCache) Update(string, *Metadata) error {
 	return nil
 }
-
-// Reset clears the cache. It is a noop for the Noop cache.
-func (c *noopCache) Reset() {}
 
 // GetCacheHits returns the number of cache hits. It returns 0 for Noop cache.
 func (c *noopCache) GetCacheHits() uint64 {

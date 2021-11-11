@@ -18,10 +18,10 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
+	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
 	"google.golang.org/grpc/status"
@@ -38,9 +38,7 @@ import (
 )
 
 const (
-	scopes      = "https://www.googleapis.com/auth/cloud-platform"
-	authority   = "test-server"
-	localPrefix = "localhost"
+	scopes = "https://www.googleapis.com/auth/cloud-platform"
 
 	// HomeDirMacro is replaced by the current user's home dir in the CredFile dial parameter.
 	HomeDirMacro = "${HOME}"
@@ -440,9 +438,14 @@ type DialParams struct {
 	// ActAsAccount is the service account to act as when making RPC calls.
 	ActAsAccount string
 
-	// NoSecurity is true if there is no security: no credentials are configured and
-	// grpc.WithInsecure() is passed in. Should only be used in test code.
+	// NoSecurity is true if there is no security: no credentials are configured
+	// (NoAuth is implied) and grpc.WithInsecure() is passed in. Should only be
+	// used in test code.
 	NoSecurity bool
+
+	// NoAuth is true if TLS is enabled (NoSecurity is false) but the client does
+	// not need to authenticate with the server.
+	NoAuth bool
 
 	// TransportCredsOnly is true if it's the caller's responsibility to set per-RPC credentials
 	// on individual calls. This overrides ActAsAccount, UseApplicationDefault, and UseComputeEngine.
@@ -541,6 +544,13 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 	}
 	if params.NoSecurity {
 		opts = append(opts, grpc.WithInsecure())
+	} else if params.NoAuth {
+		// Set the ServerName and RootCAs fields, if needed.
+		tlsConfig, err := createTLSConfig(params)
+		if err != nil {
+			return nil, fmt.Errorf("could not create TLS config: %v", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
 		credFile := params.CredFile
 		if strings.Contains(credFile, HomeDirMacro) {
@@ -565,7 +575,7 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		}
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
-			return nil, fmt.Errorf("Could not create TLS config: %v", err)
+			return nil, fmt.Errorf("could not create TLS config: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
@@ -609,7 +619,7 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		casConn, err = Dial(ctx, params.CASService, params)
 	}
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return NewClientFromConnection(ctx, instanceName, conn, casConn, opts...)
 }
@@ -657,7 +667,7 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 	}
 	if client.StartupCapabilities {
 		if err := client.CheckCapabilities(ctx); err != nil {
-			return nil, err
+			return nil, statusWrap(err)
 		}
 	}
 	if client.casConcurrency < 1 {
@@ -748,25 +758,8 @@ func (r *Retrier) Do(ctx context.Context, f func() error) error {
 // RetryTransient is a default retry policy for transient status codes.
 func RetryTransient() *Retrier {
 	return &Retrier{
-		Backoff: retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
-		ShouldRetry: func(err error) bool {
-			// Retry RPC timeouts. Note that we do *not* retry context cancellations (context.Cancelled);
-			// if the user wants to back out of the call we should let them.
-			if err == context.DeadlineExceeded {
-				return true
-			}
-			s, ok := status.FromError(err)
-			if !ok {
-				return false
-			}
-			switch s.Code() {
-			case codes.Canceled, codes.Unknown, codes.DeadlineExceeded, codes.Aborted,
-				codes.Internal, codes.Unavailable, codes.Unauthenticated, codes.ResourceExhausted:
-				return true
-			default:
-				return false
-			}
-		},
+		Backoff:     retry.ExponentialBackoff(225*time.Millisecond, 2*time.Second, retry.Attempts(6)),
+		ShouldRetry: retry.TransientOnly,
 	}
 }
 
@@ -780,7 +773,7 @@ func (c *Client) GetActionResult(ctx context.Context, req *repb.GetActionResultR
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -795,7 +788,7 @@ func (c *Client) UpdateActionResult(ctx context.Context, req *repb.UpdateActionR
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -826,7 +819,7 @@ func (c *Client) QueryWriteStatus(ctx context.Context, req *bspb.QueryWriteStatu
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -841,7 +834,7 @@ func (c *Client) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlob
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -858,7 +851,7 @@ func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlob
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -875,7 +868,7 @@ func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReq
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -915,7 +908,7 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientCo
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -930,7 +923,7 @@ func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -945,7 +938,7 @@ func (c *Client) ListOperations(ctx context.Context, req *oppb.ListOperationsReq
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -960,7 +953,7 @@ func (c *Client) CancelOperation(ctx context.Context, req *oppb.CancelOperationR
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
 }
@@ -975,7 +968,16 @@ func (c *Client) DeleteOperation(ctx context.Context, req *oppb.DeleteOperationR
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, statusWrap(err)
 	}
 	return res, nil
+}
+
+// gRPC errors are incompatible with simple wraps. See
+// https://github.com/grpc/grpc-go/issues/3115
+func statusWrap(err error) error {
+	if st, ok := status.FromError(err); ok {
+		return status.Errorf(st.Code(), errors.WithStack(err).Error())
+	}
+	return errors.WithStack(err)
 }

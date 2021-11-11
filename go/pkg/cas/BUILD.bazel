@@ -1,0 +1,50 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "cas",
+    srcs = [
+        "client.go",
+        "ioutil.go",
+        "upload.go",
+    ],
+    importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/cas",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/pkg/cache",
+        "//go/pkg/digest",
+        "//go/pkg/retry",
+        "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
+        "@com_github_golang_glog//:go_default_library",
+        "@com_github_golang_protobuf//proto:go_default_library",
+        "@com_github_klauspost_compress//zstd:go_default_library",
+        "@com_github_pborman_uuid//:go_default_library",
+        "@com_github_pkg_errors//:go_default_library",
+        "@go_googleapis//google/bytestream:bytestream_go_proto",
+        "@org_golang_google_api//support/bundler:go_default_library",
+        "@org_golang_google_grpc//:go_default_library",
+        "@org_golang_google_grpc//status:go_default_library",
+        "@org_golang_x_sync//errgroup:go_default_library",
+        "@org_golang_x_sync//semaphore:go_default_library",
+    ],
+)
+
+go_test(
+    name = "cas_test",
+    srcs = [
+        "client_test.go",
+        "upload_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    embed = [":cas"],
+    deps = [
+        "//go/pkg/digest",
+        "//go/pkg/fakes",
+        "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:go_default_library",
+        "@com_github_golang_protobuf//proto:go_default_library",
+        "@com_github_google_go_cmp//cmp:go_default_library",
+        "@com_github_pkg_errors//:go_default_library",
+        "@org_golang_google_grpc//:go_default_library",
+        "@org_golang_google_grpc//codes:go_default_library",
+        "@org_golang_google_grpc//status:go_default_library",
+    ],
+)

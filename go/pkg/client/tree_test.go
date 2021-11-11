@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,11 +133,6 @@ func (c *callCountingMetadataCache) Update(path string, ce *filemetadata.Metadat
 	}
 	c.calls[p]++
 	return c.cache.Update(path, ce)
-}
-
-func (c *callCountingMetadataCache) Reset() {
-	c.t.Helper()
-	c.cache.Reset()
 }
 
 func (c *callCountingMetadataCache) GetCacheHits() uint64 {
@@ -531,6 +527,36 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			treeOpts: &client.TreeSymlinkOpts{
 				Preserved:     true,
+				FollowsTarget: true,
+			},
+		},
+		{
+			desc: "File relative symlink (preserved based on InputSpec)",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "fooSym", isSymlink: true, symlinkTarget: "fooDir/foo"},
+			},
+			spec: &command.InputSpec{
+				// The symlink target will be traversed recursively.
+				Inputs:          []string{"fooSym"},
+				SymlinkBehavior: command.PreserveSymlink,
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{{Name: "fooDir", Digest: fooDirDgPb}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "fooSym", Target: "fooDir/foo"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir/foo": 1,
+				"fooSym":     1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2,
+				InputFiles:       1,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
 				FollowsTarget: true,
 			},
 		},
@@ -1426,7 +1452,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.wd, tc.paths, cache)
+			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.wd, tc.paths, cache, command.UnspecifiedSymlinkBehavior)
 			if err != nil {
 				t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
@@ -1538,7 +1564,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, "", []string{"a/b/fooDir"}, cache)
+			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, "", []string{"a/b/fooDir"}, cache, command.UnspecifiedSymlinkBehavior)
 			if err != nil {
 				t.Fatalf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
@@ -1593,5 +1619,43 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on tree children:\n%s", diff)
 			}
 		})
+	}
+}
+
+func randomBytes(randGen *rand.Rand, n int) []byte {
+	b := make([]byte, n)
+	randGen.Read(b)
+	return b
+}
+
+func BenchmarkComputeMerkleTree(b *testing.B) {
+	e, cleanup := fakes.NewTestEnv(b)
+	defer cleanup()
+
+	randGen := rand.New(rand.NewSource(0))
+	construct(e.ExecRoot, []*inputPath{
+		{path: "a", fileContents: randomBytes(randGen, 2048)},
+		{path: "b", fileContents: randomBytes(randGen, 9999)},
+		{path: "c", fileContents: randomBytes(randGen, 1024)},
+		{path: "d/a", fileContents: randomBytes(randGen, 4444)},
+		{path: "d/b", fileContents: randomBytes(randGen, 7491)},
+		{path: "d/c", emptyDir: true},
+		{path: "d/d/a", fileContents: randomBytes(randGen, 5912)},
+		{path: "d/d/b", fileContents: randomBytes(randGen, 9157)},
+		{path: "d/d/c", isSymlink: true, symlinkTarget: "../../b"},
+		{path: "d/d/d", fileContents: randomBytes(randGen, 5381)},
+	})
+
+	inputSpec := &command.InputSpec{
+		Inputs: []string{"a", "b", "c", "d/a", "d/b", "d/c", "d/d/a", "d/d/b", "d/d/c", "d/d/d"},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fmc := filemetadata.NewSingleFlightCache()
+		_, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(e.ExecRoot, inputSpec, fmc)
+		if err != nil {
+			b.Errorf("Failed to compute merkle tree: %v", err)
+		}
 	}
 }

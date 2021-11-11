@@ -7,6 +7,7 @@ package retry
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	log "github.com/golang/glog"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -21,10 +23,6 @@ const (
 	backoffFactor = 1.3 // backoff increases by this factor on each retry
 	backoffRange  = 0.4 // backoff is randomized downwards by this factor
 )
-
-// ShouldRetry encapsulates the decision of whether an error is retry-able. If an error should not
-// be retried, the function must return false.
-type ShouldRetry func(error) bool
 
 // BackoffPolicy describes how to back off when retrying, and how many times to retry.
 type BackoffPolicy struct {
@@ -57,8 +55,33 @@ type Attempts uint
 // UnlimitedAttempts is used to specify no limit to the number of attempts.
 const UnlimitedAttempts = Attempts(0)
 
+// ShouldRetry encapsulates the decision of whether an error is retry-able. If an error should not
+// be retried, the function must return false.
+type ShouldRetry func(error) bool
+
 // Always always retries, regardless of error.
 func Always(error) bool { return true }
+
+// TransientOnly returns true if the error is transient.
+// It implements ShouldRetry type.
+func TransientOnly(err error) bool {
+	// Retry RPC timeouts. Note that we do *not* retry context cancellations (context.Cancelled);
+	// if the user wants to back out of the call we should let them.
+	if stderrors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	s, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	switch s.Code() {
+	case codes.Canceled, codes.Unknown, codes.DeadlineExceeded, codes.Aborted,
+		codes.Internal, codes.Unavailable, codes.ResourceExhausted:
+		return true
+	default:
+		return false
+	}
+}
 
 // WithPolicy retries f until either it succeeds, or shouldRetry returns false, or the number of
 // retries is capped by the backoff policy. Returns the error returned by the final attempt. It

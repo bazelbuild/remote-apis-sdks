@@ -43,6 +43,7 @@ const (
 	reexecuteAction      OpType = "reexecute_action"
 	checkDeterminism     OpType = "check_determinism"
 	uploadBlob           OpType = "upload_blob"
+	uploadBlobV2         OpType = "upload_blob_v2"
 )
 
 var supportedOps = []OpType{
@@ -121,6 +122,11 @@ func main() {
 
 	case uploadBlob:
 		if err := c.UploadBlob(ctx, getPathFlag()); err != nil {
+			log.Exitf("error uploading blob for digest %v: %v", getDigestFlag(), err)
+		}
+
+	case uploadBlobV2:
+		if err := c.UploadBlobV2(ctx, getPathFlag()); err != nil {
 			log.Exitf("error uploading blob for digest %v: %v", getDigestFlag(), err)
 		}
 

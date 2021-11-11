@@ -1,24 +1,25 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "go_default_library",
+    name = "chunker",
     srcs = ["chunker.go"],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/pkg/reader:go_default_library",
-        "//go/pkg/uploadinfo:go_default_library",
+        "//go/pkg/reader",
+        "//go/pkg/uploadinfo",
         "@com_github_klauspost_compress//zstd:go_default_library",
+        "@com_github_pkg_errors//:go_default_library",
     ],
 )
 
 go_test(
-    name = "go_default_test",
+    name = "chunker_test",
     srcs = ["chunker_test.go"],
-    embed = [":go_default_library"],
+    embed = [":chunker"],
     deps = [
-        "//go/pkg/digest:go_default_library",
-        "//go/pkg/uploadinfo:go_default_library",
+        "//go/pkg/digest",
+        "//go/pkg/uploadinfo",
         "@com_github_google_go_cmp//cmp:go_default_library",
         "@com_github_google_go_cmp//cmp/cmpopts:go_default_library",
     ],
