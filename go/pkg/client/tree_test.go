@@ -369,8 +369,8 @@ func TestComputeMerkleTreeEmptyRoot(t *testing.T) {
 	if len(inputs) != 1 {
 		t.Errorf("ComputeMerkleTree(...) should only include one input:\n%v", inputs)
 	}
-	wantInput := uploadinfo.EntryFromBlob(nil)
-	if diff := cmp.Diff(wantInput, inputs[0], cmpopts.IgnoreFields(uploadinfo.Entry{}, "ueType")); diff != "" {
+	wantInput := uploadinfo.EntryFromBlob([]byte{})
+	if diff := cmp.Diff(wantInput, inputs[0], cmp.AllowUnexported(uploadinfo.Entry{})); diff != "" {
 		t.Errorf("ComputeMerkleTree(...) gave diff on input (-want +got) on blobs:\n%s", diff)
 	}
 	wantStats := &client.TreeStats{InputDirectories: 1}
