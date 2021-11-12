@@ -13,6 +13,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -343,6 +344,40 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 		InputDirectories: 6,
 		TotalInputBytes:  aDirDg.Size + bDirDg.Size + cDirDg.Size,
 	}
+	if diff := cmp.Diff(wantStats, stats); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff on stats (-want +got) on blobs:\n%s", diff)
+	}
+}
+
+func TestComputeMerkleTreeEmptyRoot(t *testing.T) {
+	root, err := ioutil.TempDir("", t.Name())
+	if err != nil {
+		t.Fatalf("failed to make temp dir: %v", err)
+	}
+	defer os.RemoveAll(root)
+	inputSpec := &command.InputSpec{
+		Inputs: []string{"."},
+	}
+	cache := newCallCountingMetadataCache(root, t)
+
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+
+	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, cache)
+	if err != nil {
+		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
+	}
+	if diff := cmp.Diff(digest.Empty, gotRootDg); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff (-want +got) on root:\n%s", diff)
+	}
+	if len(inputs) != 1 {
+		t.Errorf("ComputeMerkleTree(...) should only include one input:\n%v", inputs)
+	}
+	wantInput := uploadinfo.EntryFromBlob([]byte{})
+	if diff := cmp.Diff(wantInput, inputs[0], cmpopts.IgnoreFields(uploadinfo.Entry{}, "ueType")); diff != "" {
+		t.Errorf("ComputeMerkleTree(...) gave diff on input (-want +got) on blobs:\n%s", diff)
+	}
+	wantStats := &client.TreeStats{InputDirectories: 1}
 	if diff := cmp.Diff(wantStats, stats); diff != "" {
 		t.Errorf("ComputeMerkleTree(...) gave diff on stats (-want +got) on blobs:\n%s", diff)
 	}

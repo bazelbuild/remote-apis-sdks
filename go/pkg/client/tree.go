@@ -204,7 +204,9 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 			}
 
 			if len(files) == 0 {
-				fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+				if normPath != "." {
+					fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+				}
 				continue
 			}
 			for _, f := range files {
@@ -243,7 +245,9 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 			return digest.Empty, nil, nil, err
 		}
 		if i.IsEmptyDirectory {
-			fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+			if normPath != "." {
+				fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+			}
 			continue
 		}
 		fs[normPath] = &fileSysNode{
