@@ -350,11 +350,7 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 }
 
 func TestComputeMerkleTreeEmptyRoot(t *testing.T) {
-	root, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(root)
+	root := t.TempDir()
 	inputSpec := &command.InputSpec{
 		Inputs: []string{"."},
 	}
