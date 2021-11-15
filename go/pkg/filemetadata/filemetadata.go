@@ -42,7 +42,7 @@ func (x xattributeAccessor) getXAttr(path string, name string) ([]byte, error) {
 }
 
 var (
-	XattrName string
+	XattrName   string
 	XattrAccess xattributeAccessorInterface
 )
 
