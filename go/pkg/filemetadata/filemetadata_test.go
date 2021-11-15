@@ -27,7 +27,7 @@ func (x xattributeAccessorMock) getXAttr(path string, name string) ([]byte, erro
 }
 
 func TestComputeFilesNoXattr(t *testing.T) {
-	XattrName = ""
+	XattrDigestName = ""
 	tests := []struct {
 		name       string
 		contents   string
@@ -75,7 +75,7 @@ func TestComputeFilesNoXattr(t *testing.T) {
 }
 
 func TestComputeFilesWithXattr(t *testing.T) {
-	XattrName = "google.digest.sha256"
+	XattrDigestName = "google.digest.sha256"
 	XattrAccess = xattributeAccessorMock{}
 	tests := []struct {
 		name       string
@@ -98,7 +98,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			getXAttrMock = func(path string, name string) ([]byte, error) {
+			getXAttrMock = func(_ string, _ string) ([]byte, error) {
 				return []byte(tc.name), nil
 			}
 
@@ -129,7 +129,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 }
 
 func TestComputeDirectory(t *testing.T) {
-	XattrName = ""
+	XattrDigestName = ""
 	tmpDir, err := ioutil.TempDir("", "")
 	defer os.RemoveAll(tmpDir)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestComputeDirectory(t *testing.T) {
 }
 
 func TestComputeSymlinksToFile(t *testing.T) {
-	XattrName = ""
+	XattrDigestName = ""
 	tests := []struct {
 		name       string
 		contents   string
@@ -194,7 +194,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 }
 
 func TestComputeDanglingSymlinks(t *testing.T) {
-	XattrName = ""
+	XattrDigestName = ""
 	// Create a temporary fake target so that os.Symlink() can work.
 	symlinkPath := filepath.Join(os.TempDir(), "dangling")
 	defer os.RemoveAll(symlinkPath)
@@ -215,7 +215,7 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 }
 
 func TestComputeSymlinksToDirectory(t *testing.T) {
-	XattrName = ""
+	XattrDigestName = ""
 	symlinkPath := filepath.Join(os.TempDir(), "dir-symlink")
 	defer os.RemoveAll(symlinkPath)
 	targetPath, err := ioutil.TempDir(os.TempDir(), "")
