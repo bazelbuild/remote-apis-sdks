@@ -114,3 +114,9 @@ def remote_apis_sdks_go_deps():
         importpath = "github.com/mostynb/zstdpool-syncpool",
         tag = "v0.0.7",
     )
+    _maybe(
+        go_repository,
+        name = "com_github_pkg_xattr",
+        importpath = "github.com/pkg/xattr",
+        tag = "v0.4.4",
+    )
