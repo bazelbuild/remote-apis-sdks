@@ -18,18 +18,6 @@ var (
 	ignoreMtime = cmpopts.IgnoreFields(Metadata{}, "MTime")
 )
 
-var getXAttrMock func(path string, name string) ([]byte, error)
-
-type xattributeAccessorMock struct{}
-
-func (x xattributeAccessorMock) getXAttr(path string, name string) ([]byte, error) {
-	return getXAttrMock(path, name)
-}
-
-func (x xattributeAccessorMock) isSupported() bool {
-	return true
-}
-
 func TestComputeFilesNoXattr(t *testing.T) {
 	XattrDigestName = ""
 	tests := []struct {
@@ -256,4 +244,17 @@ func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, cont
 func createSymlinkToTarget(t *testing.T, symlinkPath string, targetPath string) error {
 	t.Helper()
 	return os.Symlink(targetPath, symlinkPath)
+}
+
+// Mocking of the xattr package for testing.
+var getXAttrMock func(path string, name string) ([]byte, error)
+
+type xattributeAccessorMock struct{}
+
+func (x xattributeAccessorMock) getXAttr(path string, name string) ([]byte, error) {
+	return getXAttrMock(path, name)
+}
+
+func (x xattributeAccessorMock) isSupported() bool {
+	return true
 }

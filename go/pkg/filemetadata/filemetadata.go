@@ -7,6 +7,8 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/pkg/xattr"
+
+	log "github.com/golang/glog"
 )
 
 // SymlinkMetadata contains details if the given path is a symlink.
@@ -31,7 +33,7 @@ type FileError struct {
 	Err        error
 }
 
-// External xattr package can be mocked for testing through this interface
+// External xattr package can be mocked for testing through this interface.
 type xattributeAccessorInterface interface {
 	isSupported() bool
 	getXAttr(path string, name string) ([]byte, error)
@@ -49,13 +51,8 @@ func (x xattributeAccessor) getXAttr(path string, name string) ([]byte, error) {
 
 var (
 	XattrDigestName string
-	XattrAccess     xattributeAccessorInterface
+	XattrAccess     xattributeAccessorInterface = xattributeAccessor{}
 )
-
-func init() {
-	XattrDigestName = ""
-	XattrAccess = xattributeAccessor{}
-}
 
 // Error returns the error message.
 func (e *FileError) Error() string {
@@ -114,9 +111,9 @@ func Compute(filename string) *Metadata {
 				Hash: string(xattrValue),
 				Size: file.Size(),
 			}
-			md.Err = nil
 			return md
 		}
+		log.Infof("Unable to get extended attribute %s from %s; using file hash. (%s)", XattrDigestName, filename, err.Error())
 	}
 	md.Digest, md.Err = digest.NewFromFile(filename)
 	return md
