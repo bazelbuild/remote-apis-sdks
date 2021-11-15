@@ -33,10 +33,15 @@ type FileError struct {
 
 // External xattr package can be mocked for testing through this interface
 type xattributeAccessorInterface interface {
+	isSupported() bool
 	getXAttr(path string, name string) ([]byte, error)
 }
 
 type xattributeAccessor struct{}
+
+func (x xattributeAccessor) isSupported() bool {
+	return xattr.XATTR_SUPPORTED
+}
 
 func (x xattributeAccessor) getXAttr(path string, name string) ([]byte, error) {
 	return xattr.Get(path, name)
@@ -102,7 +107,7 @@ func Compute(filename string) *Metadata {
 		return md
 	}
 
-	if len(XattrDigestName) > 0 {
+	if len(XattrDigestName) > 0 && XattrAccess.isSupported() {
 		xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
 		if err == nil {
 			md.Digest = digest.Digest{

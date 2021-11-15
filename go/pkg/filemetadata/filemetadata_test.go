@@ -26,6 +26,10 @@ func (x xattributeAccessorMock) getXAttr(path string, name string) ([]byte, erro
 	return getXAttrMock(path, name)
 }
 
+func (x xattributeAccessorMock) isSupported() bool {
+	return true
+}
+
 func TestComputeFilesNoXattr(t *testing.T) {
 	XattrDigestName = ""
 	tests := []struct {
