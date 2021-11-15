@@ -20,7 +20,7 @@ http_archive(
     ],
 )
 
-load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
+load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
 load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
 
 go_rules_dependencies()
@@ -76,6 +76,12 @@ http_archive(
 )
 
 load("@com_github_bazelbuild_remote_apis//:repository_rules.bzl", "switched_rules_by_language")
+
+go_repository(
+    name = "com_github_pkg_xattr",
+    importpath = "github.com/pkg/xattr",
+    tag = "v0.4.4",
+)
 
 switched_rules_by_language(
     name = "bazel_remote_apis_imports",

@@ -2,10 +2,12 @@
 package filemetadata
 
 import (
+	"errors"
 	"os"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/pkg/xattr"
 )
 
 // SymlinkMetadata contains details if the given path is a symlink.
@@ -29,6 +31,27 @@ type FileError struct {
 	IsNotFound bool
 	Err        error
 }
+
+// External xattr package can be mocked for testing through this interface.
+type xattributeAccessorInterface interface {
+	isSupported() bool
+	getXAttr(path string, name string) ([]byte, error)
+}
+
+type xattributeAccessor struct{}
+
+func (x xattributeAccessor) isSupported() bool {
+	return xattr.XATTR_SUPPORTED
+}
+
+func (x xattributeAccessor) getXAttr(path string, name string) ([]byte, error) {
+	return xattr.Get(path, name)
+}
+
+var (
+	XattrDigestName string
+	XattrAccess     xattributeAccessorInterface = xattributeAccessor{}
+)
 
 // Error returns the error message.
 func (e *FileError) Error() string {
@@ -77,6 +100,23 @@ func Compute(filename string) *Metadata {
 	md.IsExecutable = (mode & 0100) != 0
 	if mode.IsDir() {
 		md.IsDirectory = true
+		return md
+	}
+
+	if len(XattrDigestName) > 0 {
+		if !XattrAccess.isSupported() {
+			md.Err = &FileError{Err: errors.New("x-attributes are not supported by the system")}
+			return md
+		}
+		xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
+		if err != nil {
+			md.Err = &FileError{Err: err}
+			return md
+		}
+		md.Digest = digest.Digest{
+			Hash: string(xattrValue),
+			Size: file.Size(),
+		}
 		return md
 	}
 	md.Digest, md.Err = digest.NewFromFile(filename)
