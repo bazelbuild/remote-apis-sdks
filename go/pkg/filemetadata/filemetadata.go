@@ -2,13 +2,12 @@
 package filemetadata
 
 import (
+	"errors"
 	"os"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/pkg/xattr"
-
-	log "github.com/golang/glog"
 )
 
 // SymlinkMetadata contains details if the given path is a symlink.
@@ -104,16 +103,21 @@ func Compute(filename string) *Metadata {
 		return md
 	}
 
-	if len(XattrDigestName) > 0 && XattrAccess.isSupported() {
-		xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
-		if err == nil {
-			md.Digest = digest.Digest{
-				Hash: string(xattrValue),
-				Size: file.Size(),
-			}
+	if len(XattrDigestName) > 0 {
+		if !XattrAccess.isSupported() {
+			md.Err = &FileError{Err: errors.New("x-attributes are not supported by the system")}
 			return md
 		}
-		log.Infof("Unable to get extended attribute %s from %s; using file hash. (%s)", XattrDigestName, filename, err.Error())
+		xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
+		if err != nil {
+			md.Err = &FileError{Err: err}
+			return md
+		}
+		md.Digest = digest.Digest{
+			Hash: string(xattrValue),
+			Size: file.Size(),
+		}
+		return md
 	}
 	md.Digest, md.Err = digest.NewFromFile(filename)
 	return md

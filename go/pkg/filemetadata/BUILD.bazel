@@ -11,7 +11,6 @@ go_library(
     deps = [
         "//go/pkg/cache",
         "//go/pkg/digest",
-        "@com_github_golang_glog//:go_default_library",
         "@com_github_pkg_xattr//:go_default_library",
     ],
 )
