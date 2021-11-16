@@ -1091,7 +1091,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	treeADigest := fake.Put(treeABlob)
 	ar := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
-			&repb.OutputFile{Path: "foo", Digest: fooDigest.ToProto()}},
+			&repb.OutputFile{Path: "../foo", Digest: fooDigest.ToProto()}},
 		OutputFileSymlinks: []*repb.OutputSymlink{
 			&repb.OutputSymlink{Path: "x/bar", Target: "../dir/a/bar"}},
 		OutputDirectorySymlinks: []*repb.OutputSymlink{
@@ -1105,8 +1105,12 @@ func TestDownloadActionOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to make temp dir: %v", err)
 	}
+	wd := "wd"
+	if err := os.Mkdir(filepath.Join(execRoot, wd), os.ModePerm); err != nil {
+		t.Fatalf("failed to create working directory %v: %v", wd, err)
+	}
 	defer os.RemoveAll(execRoot)
-	_, err = c.DownloadActionOutputs(ctx, ar, execRoot, cache)
+	_, err = c.DownloadActionOutputs(ctx, ar, filepath.Join(execRoot, wd), cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
 	}
@@ -1119,41 +1123,41 @@ func TestDownloadActionOutputs(t *testing.T) {
 		fileDigest       *digest.Digest
 	}{
 		{
-			path:             "dir/e1",
+			path:             "wd/dir/e1",
 			isEmptyDirectory: true,
 		},
 		{
-			path:             "dir/a/e2",
+			path:             "wd/dir/a/e2",
 			isEmptyDirectory: true,
 		},
 		{
-			path:         "dir/a/b/foo",
+			path:         "wd/dir/a/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
 			fileDigest:   &fooDigest,
 		},
 		{
-			path:     "dir/a/bar",
+			path:     "wd/dir/a/bar",
 			contents: []byte("bar"),
 		},
 		{
-			path:         "dir/b/foo",
+			path:         "wd/dir/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
 			fileDigest:   &fooDigest,
 		},
 		{
-			path:             "dir2/e2",
+			path:             "wd/dir2/e2",
 			isEmptyDirectory: true,
 		},
 		{
-			path:         "dir2/b/foo",
+			path:         "wd/dir2/b/foo",
 			isExecutable: true,
 			contents:     []byte("foo"),
 			fileDigest:   &fooDigest,
 		},
 		{
-			path:     "dir2/bar",
+			path:     "wd/dir2/bar",
 			contents: []byte("bar"),
 		},
 		{
@@ -1162,11 +1166,11 @@ func TestDownloadActionOutputs(t *testing.T) {
 			fileDigest: &fooDigest,
 		},
 		{
-			path:          "x/a",
+			path:          "wd/x/a",
 			symlinkTarget: "../dir/a",
 		},
 		{
-			path:          "x/bar",
+			path:          "wd/x/bar",
 			symlinkTarget: "../dir/a/bar",
 		},
 	}

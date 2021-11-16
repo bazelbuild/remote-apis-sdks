@@ -195,6 +195,26 @@ func commandFromREProto(cmdPb *repb.Command) *command.Command {
 // DownloadActionResult downloads the action result of the given action digest
 // if it exists in the remote cache.
 func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPrefix string) error {
+	acDg, err := digest.NewFromString(actionDigest)
+	if err != nil {
+		return err
+	}
+	actionProto := &repb.Action{}
+	if _, err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
+		return err
+	}
+	commandProto := &repb.Command{}
+	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
+	if err != nil {
+		return err
+	}
+	log.Infof("Reading command from action digest..")
+	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
+		return err
+	}
+	// Construct Command object.
+	cmd := commandFromREProto(commandProto)
+
 	resPb, err := c.getActionResult(ctx, actionDigest)
 	if err != nil {
 		return err
@@ -210,7 +230,7 @@ func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPre
 	log.Infof("Downloading action results of %v to %v.", actionDigest, pathPrefix)
 	// We don't really need an in-memory filemetadata cache for debugging operations.
 	noopCache := filemetadata.NewNoopCache()
-	if _, err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, pathPrefix, noopCache); err != nil {
+	if _, err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, filepath.Join(pathPrefix, cmd.WorkingDir), noopCache); err != nil {
 		log.Errorf("Failed downloading action outputs: %v.", err)
 	}
 

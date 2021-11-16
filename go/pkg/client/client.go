@@ -67,6 +67,8 @@ type Client struct {
 	CASConnection *grpc.ClientConn // Can be different from Connection a separate CAS endpoint is provided.
 	// StartupCapabilities denotes whether to load ServerCapabilities on startup.
 	StartupCapabilities StartupCapabilities
+	// LegacyExecRootRelativeOutputs denotes whether outputs are relative to the exec root.
+	LegacyExecRootRelativeOutputs LegacyExecRootRelativeOutputs
 	// ChunkMaxSize is maximum chunk size to use for CAS uploads/downloads.
 	ChunkMaxSize ChunkMaxSize
 	// CompressedBytestreamThreshold is the threshold in bytes for which blobs are read and written
@@ -258,7 +260,7 @@ func (s UnifiedDownloads) Apply(c *Client) {
 	c.UnifiedDownloads = s
 }
 
-// UnifiedUploadBufferSize is to tune when the daemon for UnifiedDownloads flushes the pending requests.
+// UnifiedDownloadBufferSize is to tune when the daemon for UnifiedDownloads flushes the pending requests.
 type UnifiedDownloadBufferSize int
 
 // DefaultUnifiedDownloadBufferSize is the default UnifiedDownloadBufferSize.
@@ -370,6 +372,15 @@ type StartupCapabilities bool
 // Apply sets the StartupCapabilities flag on a client.
 func (s StartupCapabilities) Apply(c *Client) {
 	c.StartupCapabilities = s
+}
+
+// LegacyExecRootRelativeOutputs controls whether the client uses legacy behavior of
+// treating output paths as relative to the exec root instead of the working directory.
+type LegacyExecRootRelativeOutputs bool
+
+// Apply sets the LegacyExecRootRelativeOutputs flag on a client.
+func (l LegacyExecRootRelativeOutputs) Apply(c *Client) {
+	c.LegacyExecRootRelativeOutputs = l
 }
 
 // PerRPCCreds sets per-call options that will be set on all RPCs to the underlying connection.
@@ -640,6 +651,7 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 		RegularMode:                   DefaultRegularMode,
 		useBatchOps:                   true,
 		StartupCapabilities:           true,
+		LegacyExecRootRelativeOutputs: false,
 		casConcurrency:                DefaultCASConcurrency,
 		casUploaders:                  semaphore.NewWeighted(DefaultCASConcurrency),
 		casDownloaders:                semaphore.NewWeighted(DefaultCASConcurrency),

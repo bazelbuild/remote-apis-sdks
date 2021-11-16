@@ -1215,7 +1215,7 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 // DownloadDirectory downloads the entire directory of given digest.
 // It returns the number of logical and real bytes downloaded, which may be different from sum
 // of sizes of the files due to dedupping and compression.
-func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoot string, cache filemetadata.Cache) (map[string]*TreeOutput, *MovedBytesMetadata, error) {
+func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, outDir string, cache filemetadata.Cache) (map[string]*TreeOutput, *MovedBytesMetadata, error) {
 	dir := &repb.Directory{}
 	stats := &MovedBytesMetadata{}
 
@@ -1238,7 +1238,7 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoo
 		return nil, stats, err
 	}
 
-	outStats, err := c.downloadOutputs(ctx, outputs, execRoot, cache)
+	outStats, err := c.downloadOutputs(ctx, outputs, outDir, cache)
 	stats.addFrom(outStats)
 	return outputs, stats, err
 }
@@ -1246,26 +1246,26 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, execRoo
 // DownloadActionOutputs downloads the output files and directories in the given action result. It returns the amount of downloaded bytes.
 // It returns the number of logical and real bytes downloaded, which may be different from sum
 // of sizes of the files due to dedupping and compression.
-func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, execRoot string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
+func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionResult, outDir string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
 	outs, err := c.FlattenActionOutputs(ctx, resPb)
 	if err != nil {
 		return nil, err
 	}
 	// Remove the existing output directories before downloading.
 	for _, dir := range resPb.OutputDirectories {
-		if err := os.RemoveAll(filepath.Join(execRoot, dir.Path)); err != nil {
+		if err := os.RemoveAll(filepath.Join(outDir, dir.Path)); err != nil {
 			return nil, err
 		}
 	}
-	return c.downloadOutputs(ctx, outs, execRoot, cache)
+	return c.downloadOutputs(ctx, outs, outDir, cache)
 }
 
-func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutput, execRoot string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
+func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutput, outDir string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
 	var symlinks, copies []*TreeOutput
 	downloads := make(map[digest.Digest]*TreeOutput)
 	fullStats := &MovedBytesMetadata{}
 	for _, out := range outs {
-		path := filepath.Join(execRoot, out.Path)
+		path := filepath.Join(outDir, out.Path)
 		if out.IsEmptyDirectory {
 			if err := os.MkdirAll(path, c.DirMode); err != nil {
 				return fullStats, err
@@ -1290,7 +1290,7 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 			downloads[out.Digest] = out
 		}
 	}
-	stats, err := c.DownloadFiles(ctx, execRoot, downloads)
+	stats, err := c.DownloadFiles(ctx, outDir, downloads)
 	fullStats.addFrom(stats)
 	if err != nil {
 		return fullStats, err
@@ -1315,27 +1315,27 @@ func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 		if src.IsEmptyDirectory {
 			return fullStats, fmt.Errorf("unexpected empty directory: %s", src.Path)
 		}
-		if err := copyFile(execRoot, execRoot, src.Path, out.Path, perm); err != nil {
+		if err := copyFile(outDir, outDir, src.Path, out.Path, perm); err != nil {
 			return fullStats, err
 		}
 	}
 	for _, out := range symlinks {
-		if err := os.Symlink(out.SymlinkTarget, filepath.Join(execRoot, out.Path)); err != nil {
+		if err := os.Symlink(out.SymlinkTarget, filepath.Join(outDir, out.Path)); err != nil {
 			return fullStats, err
 		}
 	}
 	return fullStats, nil
 }
 
-func copyFile(srcExecRoot, dstExecRoot, from, to string, mode os.FileMode) error {
-	src := filepath.Join(srcExecRoot, from)
+func copyFile(srcOutDir, dstOutDir, from, to string, mode os.FileMode) error {
+	src := filepath.Join(srcOutDir, from)
 	s, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
-	dst := filepath.Join(dstExecRoot, to)
+	dst := filepath.Join(dstOutDir, to)
 	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, mode)
 	if err != nil {
 		return err
@@ -1346,8 +1346,8 @@ func copyFile(srcExecRoot, dstExecRoot, from, to string, mode os.FileMode) error
 }
 
 type downloadRequest struct {
-	digest   digest.Digest
-	execRoot string
+	digest digest.Digest
+	outDir string
 	// TODO(olaola): use channels for cancellations instead of embedding download context.
 	context context.Context
 	output  *TreeOutput
@@ -1448,7 +1448,7 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 			// We only report it to the first client to prevent double accounting.
 			r.wait <- &downloadResponse{
 				stats: stats,
-				err:   ioutil.WriteFile(filepath.Join(r.execRoot, r.output.Path), data, perm),
+				err:   ioutil.WriteFile(filepath.Join(r.outDir, r.output.Path), data, perm),
 			}
 			if i == 0 {
 				// Prevent races by not writing to the original stats.
@@ -1476,7 +1476,7 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	}
 	r := rs[0]
 	rs = rs[1:]
-	path := filepath.Join(r.execRoot, r.output.Path)
+	path := filepath.Join(r.outDir, r.output.Path)
 	LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
 	stats, err := c.ReadBlobToFile(ctx, r.output.Digest, path)
 	if err != nil {
@@ -1493,7 +1493,7 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 		if cp.output.IsExecutable {
 			perm = c.ExecutableMode
 		}
-		if err := copyFile(r.execRoot, cp.execRoot, r.output.Path, cp.output.Path, perm); err != nil {
+		if err := copyFile(r.outDir, cp.outDir, r.output.Path, cp.output.Path, perm); err != nil {
 			return err
 		}
 	}
@@ -1586,7 +1586,7 @@ func (c *Client) download(data []*downloadRequest) {
 // It will be removed when UnifiedDownloads=true is stable.
 // Returns the number of logical and real bytes downloaded, which may be
 // different from sum of sizes of the files due to compression.
-func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) (*MovedBytesMetadata, error) {
+func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs map[digest.Digest]*TreeOutput) (*MovedBytesMetadata, error) {
 	var dgs []digest.Digest
 	// statsMu protects stats across threads.
 	statsMu := sync.Mutex{}
@@ -1647,7 +1647,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 					if out.IsExecutable {
 						perm = c.ExecutableMode
 					}
-					if err := ioutil.WriteFile(filepath.Join(execRoot, out.Path), data, perm); err != nil {
+					if err := ioutil.WriteFile(filepath.Join(outDir, out.Path), data, perm); err != nil {
 						return err
 					}
 					statsMu.Lock()
@@ -1660,7 +1660,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 				}
 			} else {
 				out := outputs[batch[0]]
-				path := filepath.Join(execRoot, out.Path)
+				path := filepath.Join(outDir, out.Path)
 				LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
 				stats, err := c.ReadBlobToFile(ctx, out.Digest, path)
 				if err != nil {
@@ -1688,14 +1688,14 @@ func (c *Client) downloadNonUnified(ctx context.Context, execRoot string, output
 	return fullStats, err
 }
 
-// DownloadFiles downloads the output files under |execRoot|.
+// DownloadFiles downloads the output files under |outDir|.
 // It returns the number of logical and real bytes downloaded, which may be different from sum
 // of sizes of the files due to dedupping and compression.
-func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map[digest.Digest]*TreeOutput) (*MovedBytesMetadata, error) {
+func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[digest.Digest]*TreeOutput) (*MovedBytesMetadata, error) {
 	stats := &MovedBytesMetadata{}
 
 	if !c.UnifiedDownloads {
-		return c.downloadNonUnified(ctx, execRoot, outputs)
+		return c.downloadNonUnified(ctx, outDir, outputs)
 	}
 	count := len(outputs)
 	if count == 0 {
@@ -1708,12 +1708,12 @@ func (c *Client) DownloadFiles(ctx context.Context, execRoot string, outputs map
 	wait := make(chan *downloadResponse, count)
 	for dg, out := range outputs {
 		r := &downloadRequest{
-			digest:   dg,
-			context:  ctx,
-			execRoot: execRoot,
-			output:   out,
-			meta:     meta,
-			wait:     wait,
+			digest:  dg,
+			context: ctx,
+			outDir:  outDir,
+			output:  out,
+			meta:    meta,
+			wait:    wait,
 		}
 		select {
 		case <-ctx.Done():

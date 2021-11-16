@@ -1356,6 +1356,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 	tests := []struct {
 		desc           string
 		input          []*inputPath
+		wd             string
 		paths          []string
 		wantResult     *repb.ActionResult
 		wantBlobs      [][]byte
@@ -1399,6 +1400,27 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantCacheCalls: map[string]int{
 				"bar": 1,
 				"foo": 1,
+			},
+		},
+		{
+			desc: "Two files under working dir",
+			input: []*inputPath{
+				{path: "wd/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "bar", fileContents: barBlob},
+			},
+			paths:     []string{"foo", "../bar"},
+			wd:        "wd",
+			wantBlobs: [][]byte{fooBlob, barBlob},
+			wantResult: &repb.ActionResult{
+				OutputFiles: []*repb.OutputFile{
+					// Note the outputs are not sorted.
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true},
+					&repb.OutputFile{Path: "../bar", Digest: barDgPb},
+				},
+			},
+			wantCacheCalls: map[string]int{
+				"bar":    1,
+				"wd/foo": 1,
 			},
 		},
 		{
@@ -1461,7 +1483,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.paths, cache, command.UnspecifiedSymlinkBehavior)
+			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.wd, tc.paths, cache, command.UnspecifiedSymlinkBehavior)
 			if err != nil {
 				t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}
@@ -1573,7 +1595,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 
-			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, []string{"a/b/fooDir"}, cache, command.UnspecifiedSymlinkBehavior)
+			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, "", []string{"a/b/fooDir"}, cache, command.UnspecifiedSymlinkBehavior)
 			if err != nil {
 				t.Fatalf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
 			}

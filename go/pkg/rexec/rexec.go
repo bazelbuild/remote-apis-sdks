@@ -127,10 +127,13 @@ func (ec *Context) downloadOutErr() *command.Result {
 	return command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
-func (ec *Context) downloadOutputs(execRoot string) (*rc.MovedBytesMetadata, *command.Result) {
+func (ec *Context) downloadOutputs(outDir string) (*rc.MovedBytesMetadata, *command.Result) {
 	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now() }()
-	stats, err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, execRoot, ec.client.FileMetadataCache)
+	if !ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
+		outDir = filepath.Join(outDir, ec.cmd.WorkingDir)
+	}
+	stats, err := ec.client.GrpcClient.DownloadActionOutputs(ec.ctx, ec.resPb, outDir, ec.client.FileMetadataCache)
 	if err != nil {
 		return &rc.MovedBytesMetadata{}, command.NewRemoteErrorResult(err)
 	}
@@ -246,7 +249,11 @@ func (ec *Context) UpdateCachedResult() {
 	ec.Metadata.EventTimes[command.EventUpdateCachedResult] = &command.TimeInterval{From: time.Now()}
 	defer func() { ec.Metadata.EventTimes[command.EventUpdateCachedResult].To = time.Now() }()
 	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
-	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, outPaths, ec.client.FileMetadataCache, ec.cmd.InputSpec.SymlinkBehavior)
+	wd := ""
+	if !ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
+		wd = ec.cmd.WorkingDir
+	}
+	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, wd, outPaths, ec.client.FileMetadataCache, ec.cmd.InputSpec.SymlinkBehavior)
 	if err != nil {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
