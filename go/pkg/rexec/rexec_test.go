@@ -454,7 +454,7 @@ func TestGetOutputDigests(t *testing.T) {
 		ExecRoot:    e.ExecRoot,
 		InputSpec:   &command.InputSpec{Inputs: []string{"foo"}},
 		OutputFiles: []string{"a/b/out", "a/b/c/out"},
-		OutputDirs:  []string{"a/","a/b/", "a/b/c/"},
+		OutputDirs:  []string{"a/", "a/b/", "a/b/c/"},
 	}
 	opt := command.DefaultExecutionOptions()
 	oe := outerr.NewRecordingOutErr()
@@ -477,7 +477,7 @@ func TestGetOutputDigests(t *testing.T) {
 		t.Fatalf("failed to write output file %s: %v", outPath, err)
 	}
 	wantFiledg := map[string]digest.Digest{
-		"a/b/out": digest.NewFromBlob(outBlob),
+		"a/b/out":   digest.NewFromBlob(outBlob),
 		"a/b/c/out": digest.NewFromBlob(outBlob),
 	}
 	wantDirdg := map[string]digest.Digest{
