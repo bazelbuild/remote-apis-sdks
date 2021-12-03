@@ -453,8 +453,8 @@ func TestGetOutputDigests(t *testing.T) {
 		Args:        []string{"tool"},
 		ExecRoot:    e.ExecRoot,
 		InputSpec:   &command.InputSpec{Inputs: []string{"foo"}},
-		OutputFiles: []string{"a/b/out"},
-		OutputDirs:  []string{"a/b/"},
+		OutputFiles: []string{"a/b/out", "a/b/c/out"},
+		OutputDirs:  []string{"a/","a/b/", "a/b/c/"},
 	}
 	opt := command.DefaultExecutionOptions()
 	oe := outerr.NewRecordingOutErr()
@@ -464,7 +464,7 @@ func TestGetOutputDigests(t *testing.T) {
 		t.Fatalf("failed creating execution context: %v", err)
 	}
 	// Simulating local execution.
-	outPath := filepath.Join(e.ExecRoot, "a/b/out")
+	outPath := filepath.Join(e.ExecRoot, "a/b/c/out")
 	if err := os.MkdirAll(filepath.Dir(outPath), os.FileMode(0777)); err != nil {
 		t.Fatalf("failed to create output file parents %s: %v", outPath, err)
 	}
@@ -472,11 +472,24 @@ func TestGetOutputDigests(t *testing.T) {
 	if err := ioutil.WriteFile(outPath, outBlob, 0777); err != nil {
 		t.Fatalf("failed to write output file %s: %v", outPath, err)
 	}
+	outPath = filepath.Join(e.ExecRoot, "a/b/out")
+	if err := ioutil.WriteFile(outPath, outBlob, 0777); err != nil {
+		t.Fatalf("failed to write output file %s: %v", outPath, err)
+	}
 	wantFiledg := map[string]digest.Digest{
 		"a/b/out": digest.NewFromBlob(outBlob),
+		"a/b/c/out": digest.NewFromBlob(outBlob),
 	}
 	wantDirdg := map[string]digest.Digest{
+		"a": digest.Digest{
+			Hash: "e285f1d1f990419371911a8190b67b70e897e8c8e66ee2e21134132f11fd16c2",
+			Size: 316,
+		},
 		"a/b": digest.Digest{
+			Hash: "ad1aa8aa52866d040e940d6a7606f0cbfe4c574b2daa0d2819d78fa87245f9ea",
+			Size: 238,
+		},
+		"a/b/c": digest.Digest{
 			Hash: "1a22d623fd458729b7ffec2e8ba59a1c45fae953cc9ebbaa962c51fab2157a60",
 			Size: 81,
 		},

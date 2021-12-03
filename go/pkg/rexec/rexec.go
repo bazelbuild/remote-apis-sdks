@@ -416,6 +416,9 @@ func (ec *Context) GetOutputFileDigests(useAbsPath bool) (map[string]digest.Dige
 }
 
 // GetOutputDigests returns a map of output files to digests and a map of output directories to digests.
+// This function only returns the digests of output files and output directories.
+// GetOutputFileDigests will return the digest of output files as well as the digest of all the files
+// that exist under the output directories.
 func (ec *Context) GetOutputDigests() (outputFileDigests map[string]digest.Digest, outputDirectoryDigests map[string]digest.Digest, err error) {
 	wd := ""
 	if !ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
