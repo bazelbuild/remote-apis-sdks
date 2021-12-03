@@ -415,6 +415,35 @@ func (ec *Context) GetOutputFileDigests(useAbsPath bool) (map[string]digest.Dige
 	return res, nil
 }
 
+// GetOutputDigests returns a map of output files to digests and a map of output directories to digests.
+// This function only returns the digests of output files and output directories.
+// GetOutputFileDigests will return the digest of output files as well as the digest of all the files
+// that exist under the output directories.
+func (ec *Context) GetOutputDigests() (outputFileDigests map[string]digest.Digest, outputDirectoryDigests map[string]digest.Digest, err error) {
+	wd := ""
+	if !ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
+		wd = ec.cmd.WorkingDir
+	}
+	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
+	_, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, wd, outPaths, ec.client.FileMetadataCache, ec.cmd.InputSpec.SymlinkBehavior)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	filedg := make(map[string]digest.Digest)
+	for _, dir := range resPb.OutputFiles {
+		dg := digest.NewFromProtoUnvalidated(dir.Digest)
+		filedg[dir.Path] = dg
+	}
+
+	dirdg := make(map[string]digest.Digest)
+	for _, dir := range resPb.OutputDirectories {
+		dg := digest.NewFromProtoUnvalidated(dir.TreeDigest)
+		dirdg[dir.Path] = dg
+	}
+	return filedg, dirdg, nil
+}
+
 func timeFromProto(tPb *tspb.Timestamp) time.Time {
 	if tPb == nil {
 		return time.Time{}
