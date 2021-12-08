@@ -419,27 +419,21 @@ func (ec *Context) GetOutputFileDigests(useAbsPath bool) (map[string]digest.Dige
 // This function only returns the digests of output files and output directories.
 // GetOutputFileDigests will return the digest of output files as well as the digest of all the files
 // that exist under the output directories.
+// This function is supposed to be run after a successful cache-hit / remote-execution
+// has been run with the given execution context. If called before the completion of
+// remote-execution, the function returns a nil result.
 func (ec *Context) GetOutputDigests() (outputFileDigests map[string]digest.Digest, outputDirectoryDigests map[string]digest.Digest, err error) {
-	wd := ""
-	if !ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
-		wd = ec.cmd.WorkingDir
+	if ec.resPb == nil {
+		e := fmt.Errorf("the action result was nil")
+		return nil, nil, e
 	}
-	outPaths := append(ec.cmd.OutputFiles, ec.cmd.OutputDirs...)
-	_, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, wd, outPaths, ec.client.FileMetadataCache, ec.cmd.InputSpec.SymlinkBehavior)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	filedg := make(map[string]digest.Digest)
-	for _, dir := range resPb.OutputFiles {
-		dg := digest.NewFromProtoUnvalidated(dir.Digest)
-		filedg[dir.Path] = dg
-	}
-
 	dirdg := make(map[string]digest.Digest)
-	for _, dir := range resPb.OutputDirectories {
-		dg := digest.NewFromProtoUnvalidated(dir.TreeDigest)
-		dirdg[dir.Path] = dg
+	for _, file := range ec.resPb.OutputFiles {
+		filedg[file.Path] = digest.NewFromProtoUnvalidated(file.Digest)
+	}
+	for _, dir := range ec.resPb.OutputDirectories {
+		dirdg[dir.Path] = digest.NewFromProtoUnvalidated(dir.TreeDigest)
 	}
 	return filedg, dirdg, nil
 }
