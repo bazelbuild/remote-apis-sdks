@@ -421,7 +421,7 @@ func (ec *Context) GetOutputFileDigests(useAbsPath bool) (map[string]digest.Dige
 // that exist under the output directories.
 // This function is supposed to be run after a successful cache-hit / remote-execution
 // has been run with the given execution context. If called before the completion of
-// remote-execution, the function returns a nil result.
+// remote-execution, the function returns an error.
 func (ec *Context) GetOutputDigests() (outputFileDigests map[string]digest.Digest, outputDirectoryDigests map[string]digest.Digest, err error) {
 	if ec.resPb == nil {
 		e := fmt.Errorf("the action result was nil")
