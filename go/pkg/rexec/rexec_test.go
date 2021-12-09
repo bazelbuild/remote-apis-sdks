@@ -86,7 +86,7 @@ func TestExecCacheHit(t *testing.T) {
 					// isn't done through bytestream so not checked here.
 					LogicalBytesDownloaded: 12,
 					RealBytesDownloaded:    12,
-					OutputFileDigests:          map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
+					OutputFileDigests:      map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
 					OutputDirectoryDigests: map[string]digest.Digest{},
 				}
 				if diff := cmp.Diff(wantRes, res); diff != "" {
