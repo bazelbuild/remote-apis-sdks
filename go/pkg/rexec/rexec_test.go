@@ -86,7 +86,8 @@ func TestExecCacheHit(t *testing.T) {
 					// isn't done through bytestream so not checked here.
 					LogicalBytesDownloaded: 12,
 					RealBytesDownloaded:    12,
-					OutputDigests:          map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
+					OutputFileDigests:      map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
+					OutputDirectoryDigests: map[string]digest.Digest{},
 				}
 				if diff := cmp.Diff(wantRes, res); diff != "" {
 					t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
@@ -438,71 +439,6 @@ func TestGetOutputFileDigests(t *testing.T) {
 				t.Fatalf("GetOutputFileDigests(%v) returned diff (-want +got):\n%s", tc.useAbsPath, diff)
 			}
 		})
-	}
-}
-
-func TestGetOutputDigests(t *testing.T) {
-	e, cleanup := fakes.NewTestEnv(t)
-	defer cleanup()
-	fooPath := filepath.Join(e.ExecRoot, "foo")
-	fooBlob := []byte("hello")
-	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
-		t.Fatalf("failed to write input file %s", fooBlob)
-	}
-	cmd := &command.Command{
-		Args:        []string{"tool"},
-		ExecRoot:    e.ExecRoot,
-		InputSpec:   &command.InputSpec{Inputs: []string{"foo"}},
-		OutputFiles: []string{"a/b/out", "a/b/c/out"},
-		OutputDirs:  []string{"a/", "a/b/", "a/b/c/"},
-	}
-	opt := command.DefaultExecutionOptions()
-	oe := outerr.NewRecordingOutErr()
-
-	ec, err := e.Client.NewContext(context.Background(), cmd, opt, oe)
-	if err != nil {
-		t.Fatalf("failed creating execution context: %v", err)
-	}
-	// Simulating local execution.
-	outPath := filepath.Join(e.ExecRoot, "a/b/c/out")
-	if err := os.MkdirAll(filepath.Dir(outPath), os.FileMode(0777)); err != nil {
-		t.Fatalf("failed to create output file parents %s: %v", outPath, err)
-	}
-	outBlob := []byte("out!")
-	if err := ioutil.WriteFile(outPath, outBlob, 0777); err != nil {
-		t.Fatalf("failed to write output file %s: %v", outPath, err)
-	}
-	outPath = filepath.Join(e.ExecRoot, "a/b/out")
-	if err := ioutil.WriteFile(outPath, outBlob, 0777); err != nil {
-		t.Fatalf("failed to write output file %s: %v", outPath, err)
-	}
-	wantFiledg := map[string]digest.Digest{
-		"a/b/out":   digest.NewFromBlob(outBlob),
-		"a/b/c/out": digest.NewFromBlob(outBlob),
-	}
-	wantDirdg := map[string]digest.Digest{
-		"a": digest.Digest{
-			Hash: "e285f1d1f990419371911a8190b67b70e897e8c8e66ee2e21134132f11fd16c2",
-			Size: 316,
-		},
-		"a/b": digest.Digest{
-			Hash: "ad1aa8aa52866d040e940d6a7606f0cbfe4c574b2daa0d2819d78fa87245f9ea",
-			Size: 238,
-		},
-		"a/b/c": digest.Digest{
-			Hash: "1a22d623fd458729b7ffec2e8ba59a1c45fae953cc9ebbaa962c51fab2157a60",
-			Size: 81,
-		},
-	}
-	gotFiledg, gotDirdg, err := ec.GetOutputDigests()
-	if err != nil {
-		t.Fatalf("GetOutputDigests() failed: %v", err)
-	}
-	if diff := cmp.Diff(wantFiledg, gotFiledg); diff != "" {
-		t.Fatalf("GetOutputDigests() returned diff (-want +got):\n%s", diff)
-	}
-	if diff := cmp.Diff(wantDirdg, gotDirdg); diff != "" {
-		t.Fatalf("GetOutputDigests() returned diff (-want +got):\n%s", diff)
 	}
 }
 
