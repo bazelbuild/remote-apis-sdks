@@ -488,8 +488,10 @@ type Metadata struct {
 	OutputDirectories int
 	// The overall number of bytes from all the output files (incl. stdout/stderr, but not symlinks).
 	TotalOutputBytes int64
-	// Output digests.
-	OutputDigests map[string]digest.Digest
+	// Output File digests.
+	OutputFileDigests map[string]digest.Digest
+	// Output Directory digests.
+	OutputDirectoryDigests map[string]digest.Digest
 	// Missing digests that are uploaded to CAS.
 	MissingDigests []digest.Digest
 	// LogicalBytesUploaded is the sum of sizes in bytes of the blobs that were uploaded. It should be

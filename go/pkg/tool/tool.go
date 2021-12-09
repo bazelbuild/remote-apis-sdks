@@ -65,12 +65,12 @@ func (c *Client) CheckDeterminism(ctx context.Context, actionDigest, inputRoot s
 			log.Errorf("action does not produce a consistent result, got %v and %v from consecutive executions", res.Err, firstRes.Err)
 			gotErr = true
 		}
-		if len(md.OutputDigests) != len(firstMd.OutputDigests) {
-			log.Errorf("action does not produce a consistent number of outputs, got %v and %v from consecutive executions", len(md.OutputDigests), len(firstMd.OutputDigests))
+		if len(md.OutputFileDigests) != len(firstMd.OutputFileDigests) {
+			log.Errorf("action does not produce a consistent number of outputs, got %v and %v from consecutive executions", len(md.OutputFileDigests), len(firstMd.OutputFileDigests))
 			gotErr = true
 		}
-		for p, d := range md.OutputDigests {
-			firstD, ok := firstMd.OutputDigests[p]
+		for p, d := range md.OutputFileDigests {
+			firstD, ok := firstMd.OutputFileDigests[p]
 			if !ok {
 				log.Errorf("action does not produce %v consistently", p)
 				gotErr = true

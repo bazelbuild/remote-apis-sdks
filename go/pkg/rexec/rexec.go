@@ -98,11 +98,17 @@ func (ec *Context) setOutputMetadata() {
 	}
 	ec.Metadata.OutputFiles = len(ec.resPb.OutputFiles) + len(ec.resPb.OutputFileSymlinks)
 	ec.Metadata.OutputDirectories = len(ec.resPb.OutputDirectories) + len(ec.resPb.OutputDirectorySymlinks)
-	ec.Metadata.OutputDigests = make(map[string]digest.Digest)
+	ec.Metadata.OutputFileDigests = make(map[string]digest.Digest)
+	ec.Metadata.OutputDirectoryDigests = make(map[string]digest.Digest)
 	ec.Metadata.TotalOutputBytes = 0
 	for _, file := range ec.resPb.OutputFiles {
 		dg := digest.NewFromProtoUnvalidated(file.Digest)
-		ec.Metadata.OutputDigests[file.Path] = dg
+		ec.Metadata.OutputFileDigests[file.Path] = dg
+		ec.Metadata.TotalOutputBytes += dg.Size
+	}
+	for _, dir := range ec.resPb.OutputDirectories {
+		dg := digest.NewFromProtoUnvalidated(dir.TreeDigest)
+		ec.Metadata.OutputDirectoryDigests[dir.Path] = dg
 		ec.Metadata.TotalOutputBytes += dg.Size
 	}
 	if ec.resPb.StdoutRaw != nil {
@@ -413,29 +419,6 @@ func (ec *Context) GetOutputFileDigests(useAbsPath bool) (map[string]digest.Dige
 		res[path] = outTree.Digest
 	}
 	return res, nil
-}
-
-// GetOutputDigests returns a map of output files to digests and a map of output directories to digests.
-// This function only returns the digests of output files and output directories.
-// GetOutputFileDigests will return the digest of output files as well as the digest of all the files
-// that exist under the output directories.
-// This function is supposed to be run after a successful cache-hit / remote-execution
-// has been run with the given execution context. If called before the completion of
-// remote-execution, the function returns an error.
-func (ec *Context) GetOutputDigests() (outputFileDigests map[string]digest.Digest, outputDirectoryDigests map[string]digest.Digest, err error) {
-	if ec.resPb == nil {
-		e := fmt.Errorf("the action result was nil")
-		return nil, nil, e
-	}
-	filedg := make(map[string]digest.Digest)
-	dirdg := make(map[string]digest.Digest)
-	for _, file := range ec.resPb.OutputFiles {
-		filedg[file.Path] = digest.NewFromProtoUnvalidated(file.Digest)
-	}
-	for _, dir := range ec.resPb.OutputDirectories {
-		dirdg[dir.Path] = digest.NewFromProtoUnvalidated(dir.TreeDigest)
-	}
-	return filedg, dirdg, nil
 }
 
 func timeFromProto(tPb *tspb.Timestamp) time.Time {
