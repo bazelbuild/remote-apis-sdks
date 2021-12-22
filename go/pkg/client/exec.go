@@ -227,7 +227,7 @@ func (c *Client) ExecuteAndWait(ctx context.Context, req *repb.ExecuteRequest) (
 // The supplied callback function is called for each message received to update the state of
 // the remote action.
 func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRequest, progress func(metadata *repb.ExecuteOperationMetadata)) (op *oppb.Operation, err error) {
-	wait := false    // Should we retry by calling WaitExecution instead of Execute?
+	wait := false // Should we retry by calling WaitExecution instead of Execute?
 	lastOp := &oppb.Operation{}
 	closure := func(ctx context.Context) (e error) {
 		var res regrpc.Execution_ExecuteClient
