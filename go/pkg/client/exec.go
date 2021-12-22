@@ -247,6 +247,7 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 			if e != nil {
 				return e
 			}
+			returnEarly := !wait && c.ForceEarlyWaitCalls && !op.Done
 			wait = !op.Done
 			lastOp = op
 			if progress != nil {
@@ -254,6 +255,9 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 				if err := ptypes.UnmarshalAny(op.Metadata, metadata); err == nil {
 					progress(metadata)
 				}
+			}
+			if returnEarly {
+				return status.Error(codes.Internal, "fake error to for wait call")
 			}
 		}
 		return nil

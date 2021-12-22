@@ -43,6 +43,7 @@ type flakyServer struct {
 	retriableForever bool           // Set to true to make the flaky server return a retriable error forever, rather than eventually a non-retriable error.
 	sleepDelay       time.Duration  // How long to sleep on each RPC.
 	useBSCompression bool           // Whether to use/expect compression on ByteStream calls.
+	executeNotFlakey bool           // Whether calls to Execute should return flakey errors.
 }
 
 func (f *flakyServer) incNumCalls(method string) int {
@@ -171,10 +172,17 @@ func (f *flakyServer) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAdd
 
 func (f *flakyServer) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_ExecuteServer) error {
 	numCalls := f.incNumCalls("Execute")
-	if numCalls < 2 {
+	if !f.executeNotFlakey && numCalls < 2 {
 		return status.Error(codes.Canceled, "transient error!")
 	}
-	stream.Send(&oppb.Operation{Done: false, Name: "dummy"})
+	for {
+		stream.Send(&oppb.Operation{Done: false, Name: "dummy"})
+		// Flakey execution returns a single unfinished operation, then cancels the stream.
+		// Non-flakey execution just returns a stream of unfinished operations.
+		if !f.executeNotFlakey {
+			break
+		}
+	}
 	// After this error, retries should to go the WaitExecution method.
 	return status.Error(codes.Internal, "another transient error!")
 }
@@ -416,6 +424,34 @@ func TestExecuteAndWaitRetries(t *testing.T) {
 	// 2 separate transient Execute errors.
 	if f.fake.numCalls["Execute"] != 2 {
 		t.Errorf("Expected 2 Execute calls, got %v", f.fake.numCalls["Execute"])
+	}
+	// 3 separate transient WaitExecution errors + the final successful call.
+	if f.fake.numCalls["WaitExecution"] != 4 {
+		t.Errorf("Expected 4 WaitExecution calls, got %v", f.fake.numCalls["WaitExecution"])
+	}
+}
+
+func TestExecuteAndWaitEarlyRetries(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	f.fake.executeNotFlakey = true
+	f.client.ForceEarlyWaitCalls = true
+	defer f.shutDown()
+
+	op, err := f.client.ExecuteAndWait(f.ctx, &repb.ExecuteRequest{})
+	if err != nil {
+		t.Fatalf("client.WaitExecution(ctx, {}) = %v", err)
+	}
+	st := client.OperationStatus(op)
+	if st == nil {
+		t.Errorf("client.WaitExecution(ctx, {}) returned no status, expected Aborted")
+	}
+	if st != nil && st.Code() != codes.Aborted {
+		t.Errorf("client.WaitExecution(ctx, {}) returned unexpected status code %s", st.Code())
+	}
+	// 1 separate transient Execute errors.
+	if f.fake.numCalls["Execute"] != 1 {
+		t.Errorf("Expected 1 Execute calls, got %v", f.fake.numCalls["Execute"])
 	}
 	// 3 separate transient WaitExecution errors + the final successful call.
 	if f.fake.numCalls["WaitExecution"] != 4 {
