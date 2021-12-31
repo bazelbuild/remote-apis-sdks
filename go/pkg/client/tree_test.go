@@ -144,6 +144,51 @@ func (c *callCountingMetadataCache) GetCacheMisses() uint64 {
 	return 0
 }
 
+func TestComputeMerkleTreeRemoteWorkingDir(t *testing.T) {
+	callComputeMerkleTree := func(files []string, localWorkingDir, remoteWorkingDir string) digest.Digest {
+		root, err := ioutil.TempDir("", "")
+		if err != nil {
+			t.Fatalf("failed to make temp dir: %v", err)
+		}
+		defer os.RemoveAll(root)
+		inputs := []*inputPath{}
+		for _, input := range files {
+			inputs = append(inputs, &inputPath{path: input, fileContents: []byte(filepath.Base(input)), isExecutable: true})
+		}
+		if err := construct(root, inputs); err != nil {
+			t.Fatalf("failed to construct input dir structure: %v", err)
+		}
+		cache := newCallCountingMetadataCache(root, t)
+		spec := &command.InputSpec{Inputs: files}
+
+		e, cleanup := fakes.NewTestEnv(t)
+		defer cleanup()
+
+		rootDg, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(root, localWorkingDir, remoteWorkingDir, spec, cache)
+		if err != nil {
+			t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
+		}
+		return rootDg
+	}
+	// call ComputeMerkleTree with working dir = "bar" and remote working dir not overriden
+	referenceDg := callComputeMerkleTree([]string{"bar/a", "b", "baz/c"}, "bar", "")
+	tests := []struct {
+		localWorkingDir  string
+		remoteWorkingDir string
+		inputs           []string
+	}{
+		{localWorkingDir: "foo1", remoteWorkingDir: "bar", inputs: []string{"foo1/a", "b", "baz/c"}},
+		{localWorkingDir: "foo2", remoteWorkingDir: "bar", inputs: []string{"foo2/a", "b", "baz/c"}},
+		{localWorkingDir: "bar", remoteWorkingDir: "bar", inputs: []string{"bar/a", "b", "baz/c"}},
+	}
+	for _, tc := range tests {
+		gotDg := callComputeMerkleTree(tc.inputs, tc.localWorkingDir, tc.remoteWorkingDir)
+		if diff := cmp.Diff(referenceDg, gotDg); diff != "" {
+			t.Errorf("ComputeMerkleTree(%v, %v, %v) with overriden remote working dir returned different root digest than expected (-want +got)\n%s", tc.inputs, tc.localWorkingDir, tc.remoteWorkingDir, diff)
+		}
+	}
+}
+
 func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 	fileBlob := []byte("bla")
 	fileDg := digest.NewFromBlob(fileBlob)
@@ -203,7 +248,7 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 
-	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, cache)
+	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, "", "", inputSpec, cache)
 	if err != nil {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
@@ -305,7 +350,7 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 
-	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, cache)
+	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, "", "", inputSpec, cache)
 	if err != nil {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
@@ -359,7 +404,7 @@ func TestComputeMerkleTreeEmptyRoot(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 
-	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, inputSpec, cache)
+	gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, "", "", inputSpec, cache)
 	if err != nil {
 		t.Errorf("ComputeMerkleTree(...) = gave error %v, want success", err)
 	}
@@ -1157,7 +1202,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			defer cleanup()
 			tc.treeOpts.Apply(e.Client.GrpcClient)
 
-			gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, cache)
+			gotRootDg, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(root, "", "", tc.spec, cache)
 			if err != nil {
 				t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
 			}
@@ -1259,7 +1304,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			defer cleanup()
 			tc.treeOpts.Apply(e.Client.GrpcClient)
 
-			if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(root, tc.spec, filemetadata.NewNoopCache()); err == nil {
+			if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(root, "", "", tc.spec, filemetadata.NewNoopCache()); err == nil {
 				t.Errorf("ComputeMerkleTree(%v) succeeded, want error", tc.spec)
 			}
 		})
@@ -1684,7 +1729,7 @@ func BenchmarkComputeMerkleTree(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		fmc := filemetadata.NewSingleFlightCache()
-		_, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(e.ExecRoot, inputSpec, fmc)
+		_, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(e.ExecRoot, "", "", inputSpec, fmc)
 		if err != nil {
 			b.Errorf("Failed to compute merkle tree: %v", err)
 		}

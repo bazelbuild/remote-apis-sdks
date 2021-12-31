@@ -165,7 +165,8 @@ func (ec *Context) computeInputs() error {
 	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s %s> Command digest: %s", cmdID, executionID, cmdDg)
 	log.V(1).Infof("%s %s> Computing input Merkle tree...", cmdID, executionID)
-	root, blobs, stats, err := ec.client.GrpcClient.ComputeMerkleTree(ec.cmd.ExecRoot, ec.cmd.InputSpec, ec.client.FileMetadataCache)
+	execRoot, workingDir, remoteWorkingDir := ec.cmd.ExecRoot, ec.cmd.WorkingDir, ec.cmd.RemoteWorkingDir
+	root, blobs, stats, err := ec.client.GrpcClient.ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir, ec.cmd.InputSpec, ec.client.FileMetadataCache)
 	if err != nil {
 		return err
 	}
