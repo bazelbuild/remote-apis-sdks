@@ -16,6 +16,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	log "github.com/golang/glog"
 )
 
 // treeNode represents a file tree, which is an intermediate representation used to encode a Merkle
@@ -112,6 +113,18 @@ func getRelPath(base, path string) (string, error) {
 	return rel, nil
 }
 
+// overrideWorkingDir changes workingDir component of execRoot relative path
+// from workingDir to remoteWorkingDir
+func overrideWorkingDir(path, workingDir, remoteWorkingDir string) (string, error) {
+	workingDirRelPath, err := filepath.Rel(workingDir, path)
+	if err != nil {
+		return "", fmt.Errorf("Failed to change working dir of %q, err: %v", path, err)
+	}
+	updatedPath := filepath.Join(remoteWorkingDir, workingDirRelPath)
+	log.V(3).Infof("overrideWorkingDir. Path %q updated to %q", path, updatedPath)
+	return updatedPath, nil
+}
+
 // getTargetRelPath returns both the target's path relative to exec root
 // and relative to the symlink's dir, iff the target is under execRoot.
 // Otherwise it returns an error.
@@ -133,7 +146,7 @@ func getTargetRelPath(execRoot, path string, symMeta *filemetadata.SymlinkMetada
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
+func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
 	if opts == nil {
 		opts = DefaultTreeSymlinkOpts()
 	}
@@ -151,6 +164,9 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 		meta := cache.Get(absPath)
 
 		normPath, err := getRelPath(execRoot, absPath)
+		if remoteWorkingDir != "" && remoteWorkingDir != localWorkingDir {
+			normPath, err = overrideWorkingDir(normPath, localWorkingDir, remoteWorkingDir)
+		}
 		if err != nil {
 			return err
 		}
@@ -231,7 +247,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 }
 
 // ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as uploadinfo.Entrys
-func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache filemetadata.Cache) (root digest.Digest, inputs []*uploadinfo.Entry, stats *TreeStats, err error) {
+func (c *Client) ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir string, is *command.InputSpec, cache filemetadata.Cache) (root digest.Digest, inputs []*uploadinfo.Entry, stats *TreeStats, err error) {
 	stats = &TreeStats{}
 	fs := make(map[string]*fileSysNode)
 	for _, i := range is.VirtualInputs {
@@ -257,11 +273,9 @@ func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache
 			},
 		}
 	}
-
-	if err := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); err != nil {
+	if err := loadFiles(execRoot, workingDir, remoteWorkingDir, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); err != nil {
 		return digest.Empty, nil, nil, err
 	}
-
 	ft, err := buildTree(fs)
 	if err != nil {
 		return digest.Empty, nil, nil, err
@@ -518,7 +532,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb)); e != nil {
+		if e := loadFiles(absPath, "", "", nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb)); e != nil {
 			return nil, nil, e
 		}
 		ft, err := buildTree(fs)

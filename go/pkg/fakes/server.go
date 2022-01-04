@@ -171,7 +171,8 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		}
 	}
 
-	root, inputs, _, err := e.Client.GrpcClient.ComputeMerkleTree(cmd.ExecRoot, cmd.InputSpec, e.Client.FileMetadataCache)
+	execRoot, workingDir, remoteWorkingDir := cmd.ExecRoot, cmd.WorkingDir, cmd.RemoteWorkingDir
+	root, inputs, _, err := e.Client.GrpcClient.ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir, cmd.InputSpec, e.Client.FileMetadataCache)
 	if err != nil {
 		e.t.Fatalf("error building input tree in fake setup: %v", err)
 		return digest.Empty, digest.Empty
