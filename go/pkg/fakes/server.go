@@ -316,7 +316,7 @@ func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, ch
 	for _, file := range files {
 		fn := file.Name()
 		fp := filepath.Join(execRoot, path, fn)
-		if file.IsDir(){
+		if file.IsDir() {
 			root, _, err := BuildDir(fp, s, execRoot)
 			if err != nil {
 				return nil, nil, err
@@ -333,7 +333,7 @@ func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, ch
 		}
 	}
 	return res, ch, nil
-} 
+}
 
 // StdOut is to be added as an output of the fake action.
 type StdOut string
