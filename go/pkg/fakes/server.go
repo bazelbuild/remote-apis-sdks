@@ -288,7 +288,7 @@ type OutputDir struct {
 func (d *OutputDir) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	root, ch, err := BuildDir(d.Path, s, execRoot)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to build directory tree: %v", err)
 	}
 	tr := &repb.Tree{
 		Root:     root,
@@ -296,7 +296,7 @@ func (d *OutputDir) Apply(ac *repb.ActionResult, s *Server, execRoot string) err
 	}
 	treeBlob, err := proto.Marshal(tr)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal tree: %v", err)
 	}
 	treeDigest := s.CAS.Put(treeBlob)
 	ac.OutputDirectories = append(ac.OutputDirectories, &repb.OutputDirectory{Path: d.Path, TreeDigest: treeDigest.ToProto()})
@@ -310,7 +310,7 @@ func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, ch
 
 	files, err := ioutil.ReadDir(filepath.Join(execRoot, path))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed read directory: %v", err)
 	}
 
 	for _, file := range files {
@@ -319,14 +319,14 @@ func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, ch
 		if file.IsDir() {
 			root, _, err := BuildDir(fp, s, execRoot)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("failed to build directory tree: %v", err)
 			}
 			res.Directories = append(res.Directories, &repb.DirectoryNode{Name: fn, Digest: digest.TestNewFromMessage(root).ToProto()})
 			ch = append(ch, root)
 		} else {
 			content, err := ioutil.ReadFile(fp)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("failed to read file: %v", err)
 			}
 			dg := s.CAS.Put(content)
 			res.Files = append(res.Files, &repb.FileNode{Name: fn, Digest: dg.ToProto()})
