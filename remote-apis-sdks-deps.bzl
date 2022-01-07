@@ -63,7 +63,6 @@ def remote_apis_sdks_go_deps():
         go_repository,
         name = "org_golang_x_oauth2",
         commit = "bf48bf16ab8d622ce64ec6ce98d2c98f916b6303",
-        #commit = "7af32f14d0a25aec7873e0683e8e48dcead159a8",
         importpath = "golang.org/x/oauth2",
     )
     _maybe(
