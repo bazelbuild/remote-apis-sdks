@@ -132,8 +132,8 @@ func getTargetRelPath(execRoot, path string, symMeta *filemetadata.SymlinkMetada
 	return relExecRoot, relSymlinkDir, err
 }
 
-// getRemotePath returns a remote path by transforming the local input path
-// in the transformed path workingDir component is replaced with remoteWorkingDir
+// getRemotePath generates a remote path for a given local path
+// by replacing workingDir component with remoteWorkingDir
 func getRemotePath(path, workingDir, remoteWorkingDir string) (string, error) {
 	workingDirRelPath, err := filepath.Rel(workingDir, path)
 	if err != nil {
@@ -143,20 +143,20 @@ func getRemotePath(path, workingDir, remoteWorkingDir string) (string, error) {
 	return remotePath, nil
 }
 
-// getNormalizedPaths returns local and remote normalized paths for a given local absolute path
-func getNormalizedPaths(absPath, execRoot, workingDir, remoteWorkingDir string) (string, string, error) {
-	normPath, err := getRelPath(execRoot, absPath)
+// getExecRootRelPaths returns local and remote exec-root-relative paths for a given local absolute path
+func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string) (string, string, error) {
+	relPath, err := getRelPath(execRoot, absPath)
 	if err != nil {
 		return "", "", err
 	}
-	remoteNormPath := normPath
+	remoteRelPath := relPath
 	if remoteWorkingDir != "" && remoteWorkingDir != workingDir {
-		if remoteNormPath, err = getRemotePath(normPath, workingDir, remoteWorkingDir); err != nil {
-			return normPath, "", err
+		if remoteRelPath, err = getRemotePath(relPath, workingDir, remoteWorkingDir); err != nil {
+			return relPath, "", err
 		}
 	}
-	log.V(3).Infof(`getNormalizedPaths(%q, %q, %q, %q)=(%q, %q)`, absPath, execRoot, workingDir, remoteWorkingDir, normPath, remoteNormPath)
-	return normPath, remoteNormPath, nil
+	log.V(3).Infof("getExecRootRelPaths(%q, %q, %q, %q)=(%q, %q)", absPath, execRoot, workingDir, remoteWorkingDir, relPath, remoteRelPath)
+	return relPath, remoteRelPath, nil
 }
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
@@ -174,7 +174,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			return errors.New("empty Input, use \".\" for entire exec root")
 		}
 		absPath := filepath.Join(execRoot, path)
-		normPath, remoteNormPath, err := getNormalizedPaths(absPath, execRoot, localWorkingDir, remoteWorkingDir)
+		normPath, remoteNormPath, err := getExecRootRelPaths(absPath, execRoot, localWorkingDir, remoteWorkingDir)
 		if err != nil {
 			return err
 		}
@@ -263,7 +263,7 @@ func (c *Client) ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir string
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
 		}
 		absPath := filepath.Join(execRoot, i.Path)
-		normPath, remoteNormPath, err := getNormalizedPaths(absPath, execRoot, workingDir, remoteWorkingDir)
+		normPath, remoteNormPath, err := getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir)
 		if err != nil {
 			return digest.Empty, nil, nil, err
 		}

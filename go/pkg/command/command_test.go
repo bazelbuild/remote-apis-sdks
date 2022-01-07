@@ -283,6 +283,17 @@ func TestValidate_Errors(t *testing.T) {
 				ExecRoot:  "a",
 			},
 		},
+		{
+			label: "mismatch between local and remote working dir depth",
+			Command: &Command{
+				Identifiers:      &Identifiers{},
+				Args:             []string{"a"},
+				ExecRoot:         "a",
+				InputSpec:        &InputSpec{},
+				WorkingDir:       "foo",
+				RemoteWorkingDir: "bar/baz",
+			},
+		},
 	}
 	for _, tc := range testcases {
 		if err := tc.Command.Validate(); err == nil {

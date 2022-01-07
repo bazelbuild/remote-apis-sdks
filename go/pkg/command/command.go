@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -228,6 +230,10 @@ func (c *Command) Validate() error {
 	if c.Identifiers == nil {
 		return errors.New("missing command identifiers")
 	}
+	if c.RemoteWorkingDir != "" && levels(c.RemoteWorkingDir) != levels(c.WorkingDir) {
+		return fmt.Errorf("invalid RemoteWorkingDir=%q[%v level(s)], it's expected to have the same depth as WorkingDir=%q[%v level(s)]",
+			c.RemoteWorkingDir, levels(c.RemoteWorkingDir), c.WorkingDir, levels(c.WorkingDir))
+	}
 	// TODO(olaola): make Platform required?
 	return nil
 }
@@ -285,6 +291,10 @@ func (c *Command) FillDefaultFieldValues() {
 	if c.InputSpec == nil {
 		c.InputSpec = &InputSpec{}
 	}
+}
+
+func levels(path string) int {
+	return len(strings.Split(path, string(os.PathSeparator)))
 }
 
 // ExecutionOptions specify how to execute a given Command.
