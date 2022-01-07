@@ -63,6 +63,7 @@ def remote_apis_sdks_go_deps():
         go_repository,
         name = "org_golang_x_oauth2",
         commit = "bf48bf16ab8d622ce64ec6ce98d2c98f916b6303",
+        #commit = "7af32f14d0a25aec7873e0683e8e48dcead159a8",
         importpath = "golang.org/x/oauth2",
     )
     _maybe(
@@ -88,6 +89,13 @@ def remote_apis_sdks_go_deps():
         name = "com_github_bazelbuild_remote_apis",
         importpath = "github.com/bazelbuild/remote-apis",
         commit = "0ecef08215cf8ae2f992d2861a8f91a8ef89acc2",  # 2021-07-19,
+    )
+    _maybe(
+        go_repository,
+        name = "com_google_cloud_go_compute",
+        version = "v0.1.0",
+        sum = "h1:rSUBvAyVwNJ5uQCKNJFMwPtTvJkfN38b6Pvb9zZoqJ8=",
+        importpath = "cloud.google.com/go/compute",
     )
     _maybe(
         go_repository,
