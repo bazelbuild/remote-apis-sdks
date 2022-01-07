@@ -279,6 +279,62 @@ func (f *OutputFile) Apply(ac *repb.ActionResult, s *Server, execRoot string) er
 	return nil
 }
 
+// OutputDir is to be added as an output of the fake action.
+type OutputDir struct {
+	Path string
+}
+
+// Apply puts the file in the fake CAS and the given ActionResult.
+func (d *OutputDir) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+	root, ch, err := BuildDir(d.Path, s, execRoot)
+	if err != nil {
+		return err
+	}
+	tr := &repb.Tree{
+		Root:     root,
+		Children: ch,
+	}
+	treeBlob, err := proto.Marshal(tr)
+	if err != nil {
+		return err
+	}
+	treeDigest := s.CAS.Put(treeBlob)
+	ac.OutputDirectories = append(ac.OutputDirectories, &repb.OutputDirectory{Path: d.Path, TreeDigest: treeDigest.ToProto()})
+	return nil
+}
+
+// Builds the directory tree by recursively iterating through the directory.
+func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, childDir []*repb.Directory, err error) {
+	res := &repb.Directory{}
+	ch := []*repb.Directory{}
+
+	files, err := ioutil.ReadDir(filepath.Join(execRoot, path))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, file := range files {
+		fn := file.Name()
+		fp := filepath.Join(execRoot, path, fn)
+		if file.IsDir(){
+			root, _, err := BuildDir(fp, s, execRoot)
+			if err != nil {
+				return nil, nil, err
+			}
+			res.Directories = append(res.Directories, &repb.DirectoryNode{Name: fn, Digest: digest.TestNewFromMessage(root).ToProto()})
+			ch = append(ch, root)
+		} else {
+			content, err := ioutil.ReadFile(fp)
+			if err != nil {
+				return nil, nil, err
+			}
+			dg := s.CAS.Put(content)
+			res.Files = append(res.Files, &repb.FileNode{Name: fn, Digest: dg.ToProto()})
+		}
+	}
+	return res, ch, nil
+} 
+
 // StdOut is to be added as an output of the fake action.
 type StdOut string
 
