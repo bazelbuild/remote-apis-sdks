@@ -568,15 +568,16 @@ func FromProto(p *cpb.Command) *Command {
 	}
 	is := inputSpecFromProto(p.GetInput())
 	return &Command{
-		Identifiers: ids,
-		ExecRoot:    p.ExecRoot,
-		Args:        p.Args,
-		WorkingDir:  p.WorkingDirectory,
-		InputSpec:   is,
-		OutputFiles: p.GetOutput().GetOutputFiles(),
-		OutputDirs:  p.GetOutput().GetOutputDirectories(),
-		Timeout:     time.Duration(p.ExecutionTimeout) * time.Second,
-		Platform:    p.Platform,
+		Identifiers:      ids,
+		ExecRoot:         p.ExecRoot,
+		Args:             p.Args,
+		WorkingDir:       p.WorkingDirectory,
+		RemoteWorkingDir: p.RemoteWorkingDirectory,
+		InputSpec:        is,
+		OutputFiles:      p.GetOutput().GetOutputFiles(),
+		OutputDirs:       p.GetOutput().GetOutputDirectories(),
+		Timeout:          time.Duration(p.ExecutionTimeout) * time.Second,
+		Platform:         p.Platform,
 	}
 }
 

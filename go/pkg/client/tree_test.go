@@ -145,21 +145,21 @@ func (c *callCountingMetadataCache) GetCacheMisses() uint64 {
 }
 
 func TestComputeMerkleTreeRemoteWorkingDir(t *testing.T) {
-	callComputeMerkleTree := func(files []string, localWorkingDir, remoteWorkingDir string) digest.Digest {
+	callComputeMerkleTree := func(files, inputs []string, virtualInputs []*command.VirtualInput, localWorkingDir, remoteWorkingDir string) (digest.Digest, map[string]int) {
 		root, err := ioutil.TempDir("", "")
 		if err != nil {
 			t.Fatalf("failed to make temp dir: %v", err)
 		}
 		defer os.RemoveAll(root)
-		inputs := []*inputPath{}
-		for _, input := range files {
-			inputs = append(inputs, &inputPath{path: input, fileContents: []byte(filepath.Base(input)), isExecutable: true})
+		inputPaths := []*inputPath{}
+		for _, file := range files {
+			inputPaths = append(inputPaths, &inputPath{path: file, fileContents: []byte(filepath.Base(file)), isExecutable: true})
 		}
-		if err := construct(root, inputs); err != nil {
+		if err := construct(root, inputPaths); err != nil {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
 		cache := newCallCountingMetadataCache(root, t)
-		spec := &command.InputSpec{Inputs: files}
+		spec := &command.InputSpec{Inputs: inputs, VirtualInputs: virtualInputs}
 
 		e, cleanup := fakes.NewTestEnv(t)
 		defer cleanup()
@@ -168,23 +168,45 @@ func TestComputeMerkleTreeRemoteWorkingDir(t *testing.T) {
 		if err != nil {
 			t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
 		}
-		return rootDg
+		return rootDg, cache.calls
 	}
-	// call ComputeMerkleTree with working dir = "bar" and remote working dir not overriden
-	referenceDg := callComputeMerkleTree([]string{"bar/a", "b", "baz/c"}, "bar", "")
+	// call ComputeMerkleTree with working dir = "out/bar" and remote working dir not overriden
+	// inputs contain a file and a non-empty dir in the working directory, and a file and a non-empty dir outside of the working directory
+	referenceDg, _ := callComputeMerkleTree([]string{"out/bar/a", "out/bar/foo/b", "c", "bar/baz/d"},
+		[]string{"out/bar/a", "out/bar/foo", "c", "bar/baz"}, []*command.VirtualInput{{Path: "out/bar/baz", IsEmptyDirectory: true}}, "out/bar", "")
 	tests := []struct {
 		localWorkingDir  string
 		remoteWorkingDir string
+		files            []string
 		inputs           []string
+		virtualInputs    []*command.VirtualInput
+		wantCacheCalls   map[string]int
 	}{
-		{localWorkingDir: "foo1", remoteWorkingDir: "bar", inputs: []string{"foo1/a", "b", "baz/c"}},
-		{localWorkingDir: "foo2", remoteWorkingDir: "bar", inputs: []string{"foo2/a", "b", "baz/c"}},
-		{localWorkingDir: "bar", remoteWorkingDir: "bar", inputs: []string{"bar/a", "b", "baz/c"}},
+		{
+			localWorkingDir:  "out/foo1",
+			remoteWorkingDir: "out/bar",
+			files:            []string{"out/foo1/a", "out/foo1/foo/b", "c", "bar/baz/d"},
+			inputs:           []string{"out/foo1/a", "out/foo1/foo", "c", "bar/baz"},
+			virtualInputs:    []*command.VirtualInput{{Path: "out/foo1/baz", IsEmptyDirectory: true}},
+			// ensures that file metadata cache is queried for local paths (not remote ones)
+			wantCacheCalls: map[string]int{"out/foo1/a": 1, "out/foo1/foo": 1, "out/foo1/foo/b": 1, "c": 1, "bar/baz": 1, "bar/baz/d": 1},
+		},
+		{
+			localWorkingDir:  "out/bar",
+			remoteWorkingDir: "out/bar",
+			files:            []string{"out/bar/a", "out/bar/foo/b", "c", "bar/baz/d"},
+			inputs:           []string{"out/bar/a", "out/bar/foo", "c", "bar/baz"},
+			virtualInputs:    []*command.VirtualInput{{Path: "out/bar/baz", IsEmptyDirectory: true}},
+			wantCacheCalls:   map[string]int{"out/bar/a": 1, "out/bar/foo": 1, "out/bar/foo/b": 1, "c": 1, "bar/baz": 1, "bar/baz/d": 1},
+		},
 	}
 	for _, tc := range tests {
-		gotDg := callComputeMerkleTree(tc.inputs, tc.localWorkingDir, tc.remoteWorkingDir)
+		gotDg, gotCacheCalls := callComputeMerkleTree(tc.files, tc.inputs, tc.virtualInputs, tc.localWorkingDir, tc.remoteWorkingDir)
 		if diff := cmp.Diff(referenceDg, gotDg); diff != "" {
-			t.Errorf("ComputeMerkleTree(%v, %v, %v) with overriden remote working dir returned different root digest than expected (-want +got)\n%s", tc.inputs, tc.localWorkingDir, tc.remoteWorkingDir, diff)
+			t.Errorf("ComputeMerkleTree with workingDir=%q andRemoteWorkingDir=%q returned different root digest than expected (-want +got)\n%s", tc.localWorkingDir, tc.remoteWorkingDir, diff)
+		}
+		if diff := cmp.Diff(tc.wantCacheCalls, gotCacheCalls); diff != "" {
+			t.Errorf("ComputeMerkleTree with workingDir=%q andRemoteWorkingDir=%q made unexpected file metadata cache calls (-want +got)\n%s", tc.localWorkingDir, tc.remoteWorkingDir, diff)
 		}
 	}
 }

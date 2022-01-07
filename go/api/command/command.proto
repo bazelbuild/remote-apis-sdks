@@ -35,8 +35,8 @@ message Command {
   map<string,string> platform = 8;
 
   // The working directory when executing the command on RE server.
-	// It's relative to exec root and, if provided, needs to have the same number of levels
-	// as WorkingDir. If not provided, the remote command is run from the WorkingDir
+  // It's relative to exec root and, if provided, needs to have the same number of levels
+  // as WorkingDir. If not provided, the remote command is run from the WorkingDir
   string remote_working_directory = 9;
 }
 
