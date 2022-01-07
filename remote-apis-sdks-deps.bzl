@@ -91,6 +91,13 @@ def remote_apis_sdks_go_deps():
     )
     _maybe(
         go_repository,
+        name = "com_google_cloud_go_compute",
+        version = "v0.1.0",
+        sum = "h1:rSUBvAyVwNJ5uQCKNJFMwPtTvJkfN38b6Pvb9zZoqJ8=",
+        importpath = "cloud.google.com/go/compute",
+    )
+    _maybe(
+        go_repository,
         name = "com_google_cloud_go",
         commit = "09ad026a62f0561b7f7e276569eda11a6afc9773",
         tag = "v0.65.0",
