@@ -150,10 +150,11 @@ func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string)
 		return "", "", err
 	}
 	remoteRelPath := relPath
-	if remoteWorkingDir != "" && remoteWorkingDir != workingDir {
-		if remoteRelPath, err = getRemotePath(relPath, workingDir, remoteWorkingDir); err != nil {
-			return relPath, "", err
-		}
+	if remoteWorkingDir == "" || remoteWorkingDir == workingDir {
+		return relPath, relPath, nil
+	}
+	if remoteRelPath, err = getRemotePath(relPath, workingDir, remoteWorkingDir); err != nil {
+		return relPath, "", err
 	}
 	log.V(3).Infof("getExecRootRelPaths(%q, %q, %q, %q)=(%q, %q)", absPath, execRoot, workingDir, remoteWorkingDir, relPath, remoteRelPath)
 	return relPath, remoteRelPath, nil
