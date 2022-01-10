@@ -151,7 +151,6 @@ func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string)
 	if remoteWorkingDir == "" || remoteWorkingDir == workingDir {
 		return relPath, relPath, nil
 	}
-	remoteRelPath := relPath
 	if remoteRelPath, err = getRemotePath(relPath, workingDir, remoteWorkingDir); err != nil {
 		return relPath, "", err
 	}
