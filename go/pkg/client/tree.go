@@ -144,9 +144,8 @@ func getRemotePath(path, workingDir, remoteWorkingDir string) (string, error) {
 }
 
 // getExecRootRelPaths returns local and remote exec-root-relative paths for a given local absolute path
-func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string) (string, string, error) {
-	relPath, err := getRelPath(execRoot, absPath)
-	if err != nil {
+func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string) (relPath string, remoteRelPath string, err error) {
+	if relPath, err = getRelPath(execRoot, absPath); err != nil {
 		return "", "", err
 	}
 	if remoteWorkingDir == "" || remoteWorkingDir == workingDir {
