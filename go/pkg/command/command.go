@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -164,6 +166,11 @@ type Command struct {
 	// action is run from the exec root.
 	WorkingDir string
 
+	// RemoteWorkingDir is the working directory when executing the command on RE server.
+	// It's relative to exec root and, if provided, needs to have the same number of levels
+	// as WorkingDir. If not provided, the remote command is run from the WorkingDir
+	RemoteWorkingDir string
+
 	// InputSpec: the command inputs.
 	InputSpec *InputSpec
 
@@ -223,6 +230,10 @@ func (c *Command) Validate() error {
 	if c.Identifiers == nil {
 		return errors.New("missing command identifiers")
 	}
+	if c.RemoteWorkingDir != "" && levels(c.RemoteWorkingDir) != levels(c.WorkingDir) {
+		return fmt.Errorf("invalid RemoteWorkingDir=%q[%v level(s)], it's expected to have the same depth as WorkingDir=%q[%v level(s)]",
+			c.RemoteWorkingDir, levels(c.RemoteWorkingDir), c.WorkingDir, levels(c.WorkingDir))
+	}
 	// TODO(olaola): make Platform required?
 	return nil
 }
@@ -280,6 +291,10 @@ func (c *Command) FillDefaultFieldValues() {
 	if c.InputSpec == nil {
 		c.InputSpec = &InputSpec{}
 	}
+}
+
+func levels(path string) int {
+	return len(strings.Split(path, string(os.PathSeparator)))
 }
 
 // ExecutionOptions specify how to execute a given Command.
@@ -513,9 +528,13 @@ type Metadata struct {
 // `useOutputPathsField` selects what field/s to fill with the paths of outputs,
 // which will depend on the RE API version.
 func (c *Command) ToREProto(useOutputPathsField bool) *repb.Command {
+	workingDir := c.RemoteWorkingDir
+	if workingDir == "" {
+		workingDir = c.WorkingDir
+	}
 	cmdPb := &repb.Command{
 		Arguments:        c.Args,
-		WorkingDirectory: c.WorkingDir,
+		WorkingDirectory: workingDir,
 	}
 
 	// In v2.1 of the RE API the `output_{files, directories}` fields were
@@ -559,15 +578,16 @@ func FromProto(p *cpb.Command) *Command {
 	}
 	is := inputSpecFromProto(p.GetInput())
 	return &Command{
-		Identifiers: ids,
-		ExecRoot:    p.ExecRoot,
-		Args:        p.Args,
-		WorkingDir:  p.WorkingDirectory,
-		InputSpec:   is,
-		OutputFiles: p.GetOutput().GetOutputFiles(),
-		OutputDirs:  p.GetOutput().GetOutputDirectories(),
-		Timeout:     time.Duration(p.ExecutionTimeout) * time.Second,
-		Platform:    p.Platform,
+		Identifiers:      ids,
+		ExecRoot:         p.ExecRoot,
+		Args:             p.Args,
+		WorkingDir:       p.WorkingDirectory,
+		RemoteWorkingDir: p.RemoteWorkingDirectory,
+		InputSpec:        is,
+		OutputFiles:      p.GetOutput().GetOutputFiles(),
+		OutputDirs:       p.GetOutput().GetOutputDirectories(),
+		Timeout:          time.Duration(p.ExecutionTimeout) * time.Second,
+		Platform:         p.Platform,
 	}
 }
 
@@ -719,13 +739,14 @@ func ToProto(cmd *Command) *cpb.Command {
 		return nil
 	}
 	cPb := &cpb.Command{
-		ExecRoot:         cmd.ExecRoot,
-		Input:            inputSpecToProto(cmd.InputSpec),
-		Output:           &cpb.OutputSpec{OutputFiles: cmd.OutputFiles, OutputDirectories: cmd.OutputDirs},
-		Args:             cmd.Args,
-		ExecutionTimeout: int32(cmd.Timeout.Seconds()),
-		WorkingDirectory: cmd.WorkingDir,
-		Platform:         cmd.Platform,
+		ExecRoot:               cmd.ExecRoot,
+		Input:                  inputSpecToProto(cmd.InputSpec),
+		Output:                 &cpb.OutputSpec{OutputFiles: cmd.OutputFiles, OutputDirectories: cmd.OutputDirs},
+		Args:                   cmd.Args,
+		ExecutionTimeout:       int32(cmd.Timeout.Seconds()),
+		WorkingDirectory:       cmd.WorkingDir,
+		RemoteWorkingDirectory: cmd.RemoteWorkingDir,
+		Platform:               cmd.Platform,
 	}
 	if cmd.Identifiers != nil {
 		cPb.Identifiers = &cpb.Identifiers{

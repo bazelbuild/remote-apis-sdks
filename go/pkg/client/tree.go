@@ -16,6 +16,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	log "github.com/golang/glog"
 )
 
 // treeNode represents a file tree, which is an intermediate representation used to encode a Merkle
@@ -131,9 +132,35 @@ func getTargetRelPath(execRoot, path string, symMeta *filemetadata.SymlinkMetada
 	return relExecRoot, relSymlinkDir, err
 }
 
+// getRemotePath generates a remote path for a given local path
+// by replacing workingDir component with remoteWorkingDir
+func getRemotePath(path, workingDir, remoteWorkingDir string) (string, error) {
+	workingDirRelPath, err := filepath.Rel(workingDir, path)
+	if err != nil {
+		return "", fmt.Errorf("getRemotePath failed while trying to get working dir relative path of %q, err: %v", path, err)
+	}
+	remotePath := filepath.Join(remoteWorkingDir, workingDirRelPath)
+	return remotePath, nil
+}
+
+// getExecRootRelPaths returns local and remote exec-root-relative paths for a given local absolute path
+func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string) (relPath string, remoteRelPath string, err error) {
+	if relPath, err = getRelPath(execRoot, absPath); err != nil {
+		return "", "", err
+	}
+	if remoteWorkingDir == "" || remoteWorkingDir == workingDir {
+		return relPath, relPath, nil
+	}
+	if remoteRelPath, err = getRemotePath(relPath, workingDir, remoteWorkingDir); err != nil {
+		return relPath, "", err
+	}
+	log.V(3).Infof("getExecRootRelPaths(%q, %q, %q, %q)=(%q, %q)", absPath, execRoot, workingDir, remoteWorkingDir, relPath, remoteRelPath)
+	return relPath, remoteRelPath, nil
+}
+
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
+func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
 	if opts == nil {
 		opts = DefaultTreeSymlinkOpts()
 	}
@@ -145,16 +172,12 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 		if path == "" {
 			return errors.New("empty Input, use \".\" for entire exec root")
 		}
-
 		absPath := filepath.Join(execRoot, path)
-
-		meta := cache.Get(absPath)
-
-		normPath, err := getRelPath(execRoot, absPath)
+		normPath, remoteNormPath, err := getExecRootRelPaths(absPath, execRoot, localWorkingDir, remoteWorkingDir)
 		if err != nil {
 			return err
 		}
-
+		meta := cache.Get(absPath)
 		switch {
 		// An implication of this is that, if a path is a symlink to a
 		// directory, then the symlink attribute takes precedence.
@@ -172,7 +195,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 				return err
 			}
 
-			fs[normPath] = &fileSysNode{
+			fs[remoteNormPath] = &fileSysNode{
 				// We cannot directly use meta.Symlink.Target, because it could be
 				// an absolute path. Since the remote worker will map the exec root
 				// to a different directory, we must strip away the local exec root.
@@ -205,7 +228,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 
 			if len(files) == 0 {
 				if normPath != "." {
-					fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+					fs[remoteNormPath] = &fileSysNode{emptyDirectoryMarker: true}
 				}
 				continue
 			}
@@ -219,7 +242,7 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 				return meta.Err
 			}
 
-			fs[normPath] = &fileSysNode{
+			fs[remoteNormPath] = &fileSysNode{
 				file: &fileNode{
 					ue:           uploadinfo.EntryFromFile(meta.Digest, absPath),
 					isExecutable: meta.IsExecutable,
@@ -231,37 +254,34 @@ func loadFiles(execRoot string, excl []*command.InputExclusion, filesToProcess [
 }
 
 // ComputeMerkleTree packages an InputSpec into uploadable inputs, returned as uploadinfo.Entrys
-func (c *Client) ComputeMerkleTree(execRoot string, is *command.InputSpec, cache filemetadata.Cache) (root digest.Digest, inputs []*uploadinfo.Entry, stats *TreeStats, err error) {
+func (c *Client) ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir string, is *command.InputSpec, cache filemetadata.Cache) (root digest.Digest, inputs []*uploadinfo.Entry, stats *TreeStats, err error) {
 	stats = &TreeStats{}
 	fs := make(map[string]*fileSysNode)
 	for _, i := range is.VirtualInputs {
 		if i.Path == "" {
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
 		}
-		path := i.Path
-		absPath := filepath.Join(execRoot, path)
-		normPath, err := getRelPath(execRoot, absPath)
+		absPath := filepath.Join(execRoot, i.Path)
+		normPath, remoteNormPath, err := getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir)
 		if err != nil {
 			return digest.Empty, nil, nil, err
 		}
 		if i.IsEmptyDirectory {
 			if normPath != "." {
-				fs[normPath] = &fileSysNode{emptyDirectoryMarker: true}
+				fs[remoteNormPath] = &fileSysNode{emptyDirectoryMarker: true}
 			}
 			continue
 		}
-		fs[normPath] = &fileSysNode{
+		fs[remoteNormPath] = &fileSysNode{
 			file: &fileNode{
 				ue:           uploadinfo.EntryFromBlob(i.Contents),
 				isExecutable: i.IsExecutable,
 			},
 		}
 	}
-
-	if err := loadFiles(execRoot, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); err != nil {
+	if err := loadFiles(execRoot, workingDir, remoteWorkingDir, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); err != nil {
 		return digest.Empty, nil, nil, err
 	}
-
 	ft, err := buildTree(fs)
 	if err != nil {
 		return digest.Empty, nil, nil, err
@@ -518,7 +538,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb)); e != nil {
+		if e := loadFiles(absPath, "", "", nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb)); e != nil {
 			return nil, nil, e
 		}
 		ft, err := buildTree(fs)
