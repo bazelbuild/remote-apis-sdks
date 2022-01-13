@@ -304,6 +304,7 @@ func (d *OutputDir) Apply(ac *repb.ActionResult, s *Server, execRoot string) err
 }
 
 // Builds the directory tree by recursively iterating through the directory.
+// This is similar to tree.go ComputeMerkleTree.
 func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, childDir []*repb.Directory, err error) {
 	res := &repb.Directory{}
 	ch := []*repb.Directory{}
