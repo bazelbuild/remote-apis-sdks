@@ -14,6 +14,7 @@ import (
 	"time"
 
 	log "github.com/golang/glog"
+	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -44,25 +45,15 @@ type Client struct {
 
 // CheckDeterminism executes the action the given number of times and compares
 // output digests, reporting failure if a mismatch is detected.
-func (c *Client) CheckDeterminism(ctx context.Context, actionDigest, inputRoot string, attempts int) error {
+func (c *Client) CheckDeterminism(ctx context.Context, actionDigest, actionRoot string, attempts int) error {
 	oe := outerr.SystemOutErr
-	fmc := filemetadata.NewNoopCache()
-	client := &rexec.Client{
-		FileMetadataCache: fmc,
-		GrpcClient:        c.GrpcClient,
-	}
-	cmd, err := c.prepCommand(ctx, client, actionDigest, inputRoot)
-	if err != nil {
-		return err
-	}
-	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: false, DownloadOutErr: true}
-	firstRes, firstMd := client.Run(ctx, cmd, opt, oe)
+	firstMd, firstRes := c.ExecuteAction(ctx, actionDigest, actionRoot, "", oe)
 	for i := 1; i < attempts; i++ {
 		testOnlyStartDeterminismExec()
-		res, md := client.Run(ctx, cmd, opt, oe)
+		md, res := c.ExecuteAction(ctx, actionDigest, actionRoot, "", oe)
 		gotErr := false
-		if res.IsOk() != firstRes.IsOk() {
-			log.Errorf("action does not produce a consistent result, got %v and %v from consecutive executions", res.Err, firstRes.Err)
+		if (firstRes == nil) != (res == nil) {
+			log.Errorf("action does not produce a consistent result, got %v and %v from consecutive executions", res, firstRes)
 			gotErr = true
 		}
 		if len(md.OutputFileDigests) != len(firstMd.OutputFileDigests) {
@@ -89,36 +80,6 @@ func (c *Client) CheckDeterminism(ctx context.Context, actionDigest, inputRoot s
 	return nil
 }
 
-// ReexecuteAction reexecutes the action remotely, optionally overriding the
-// inputs with the ones provided at the inputRoot path.
-func (c *Client) ReexecuteAction(ctx context.Context, actionDigest, inputRoot string, oe outerr.OutErr) error {
-	fmc := filemetadata.NewNoopCache()
-	client := &rexec.Client{
-		FileMetadataCache: fmc,
-		GrpcClient:        c.GrpcClient,
-	}
-	cmd, err := c.prepCommand(ctx, client, actionDigest, inputRoot)
-	if err != nil {
-		return err
-	}
-	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
-	res, _ := client.Run(ctx, cmd, opt, oe)
-	switch res.Status {
-	case command.NonZeroExitResultStatus:
-		oe.WriteErr([]byte(fmt.Sprintf("Remote action FAILED with exit code %d.\n", res.ExitCode)))
-	case command.TimeoutResultStatus:
-		oe.WriteErr([]byte(fmt.Sprintf("Remote action TIMED OUT after %0f seconds.\n", cmd.Timeout.Seconds())))
-	case command.InterruptedResultStatus:
-		oe.WriteErr([]byte(fmt.Sprintf("Remote execution was interrupted.\n")))
-	case command.RemoteErrorResultStatus:
-		oe.WriteErr([]byte(fmt.Sprintf("Remote execution error: %v.\n", res.Err)))
-	case command.LocalErrorResultStatus:
-		oe.WriteErr([]byte(fmt.Sprintf("Local error: %v.\n", res.Err)))
-	}
-
-	return res.Err
-}
-
 func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDigest, inputRoot string) (*command.Command, error) {
 	acDg, err := digest.NewFromString(actionDigest)
 	if err != nil {
@@ -139,10 +100,6 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
 		return nil, err
 	}
-	_, inputPaths, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
-	if err != nil {
-		return nil, err
-	}
 	if inputRoot == "" {
 		curTime := time.Now().Format(time.RFC3339)
 		inputRoot = filepath.Join(os.TempDir(), acDg.Hash+"_"+curTime)
@@ -155,6 +112,14 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 		if err != nil {
 			return nil, err
 		}
+	}
+	contents, err := ioutil.ReadDir(inputRoot)
+	if err != nil {
+		return nil, err
+	}
+	inputPaths := []string{}
+	for _, f := range contents {
+		inputPaths = append(inputPaths, f.Name())
 	}
 	// Construct Command object.
 	cmd := commandFromREProto(commandProto)
@@ -350,6 +315,155 @@ func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string)
 	log.Infof("Downloading input root %v to %v.", dg, path)
 	_, _, err = c.GrpcClient.DownloadDirectory(ctx, dg, path, filemetadata.NewNoopCache())
 	return err
+}
+
+func (c *Client) writeProto(m proto.Message, baseName string) error {
+	f, err := os.Create(baseName)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	f.WriteString(proto.MarshalTextString(m))
+	return nil
+}
+
+// DownloadAction parses and downloads an action to the given directory.
+// The output directory will have the following:
+//   1. ac.textproto: the action proto file in text format.
+//   2. cmd.textproto: the command proto file in text format.
+//   3. input/: the input tree root directory with all files under it.
+func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath string) error {
+	acDg, err := digest.NewFromString(actionDigest)
+	if err != nil {
+		return err
+	}
+	actionProto := &repb.Action{}
+	log.Infof("Reading action..")
+	if _, err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
+		return err
+	}
+	if err := c.writeProto(actionProto, filepath.Join(outputPath, "ac.textproto")); err != nil {
+		return err
+	}
+
+	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
+	if err != nil {
+		return err
+	}
+	log.Infof("Reading command from action..")
+	commandProto := &repb.Command{}
+	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
+		return err
+	}
+	if err := c.writeProto(commandProto, filepath.Join(outputPath, "cmd.textproto")); err != nil {
+		return err
+	}
+
+	log.Infof("Fetching input tree from input root digest.. %v", actionProto.GetInputRootDigest())
+	rootPath := filepath.Join(outputPath, "input")
+	os.RemoveAll(rootPath)
+	os.Mkdir(rootPath, 0755)
+	rDg, err := digest.NewFromProto(actionProto.GetInputRootDigest())
+	if err != nil {
+		return err
+	}
+	_, _, err = c.GrpcClient.DownloadDirectory(ctx, rDg, rootPath, filemetadata.NewNoopCache())
+	return err
+}
+
+func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, error) {
+	cmdTxt, err := ioutil.ReadFile(filepath.Join(actionRoot, "cmd.textproto"))
+	if err != nil {
+		return "", err
+	}
+	cmdProto := &repb.Command{}
+	if err := proto.UnmarshalText(string(cmdTxt), cmdProto); err != nil {
+		return "", err
+	}
+	cmdPb, err := proto.Marshal(cmdProto)
+	if err != nil {
+		return "", err
+	}
+	ue := uploadinfo.EntryFromBlob(cmdPb)
+	if _, _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
+		return "", err
+	}
+	ac, err := ioutil.ReadFile(filepath.Join(actionRoot, "ac.textproto"))
+	if err != nil {
+		return "", err
+	}
+	actionProto := &repb.Action{}
+	if err := proto.UnmarshalText(string(ac), actionProto); err != nil {
+		return "", err
+	}
+	actionProto.CommandDigest = digest.NewFromBlob(cmdPb).ToProto()
+	acPb, err := proto.Marshal(actionProto)
+	if err != nil {
+		return "", err
+	}
+	ue = uploadinfo.EntryFromBlob(acPb)
+	if _, _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
+		return "", err
+	}
+	return digest.NewFromBlob(acPb).String(), nil
+}
+
+// ExecuteAction executes an action in a cannonical structure remotely.
+// The structure is the same as that produced by DownloadAction.
+// top level >
+//           > ac.textproto (Action text proto)
+//           > cmd.textproto (Command text proto)
+//           > input (Input root)
+//             > inputs...
+func (c *Client) ExecuteAction(ctx context.Context, actionDigest, actionRoot, outDir string, oe outerr.OutErr) (*command.Metadata, error) {
+	fmc := filemetadata.NewNoopCache()
+	client := &rexec.Client{
+		FileMetadataCache: fmc,
+		GrpcClient:        c.GrpcClient,
+	}
+	inputRoot := ""
+	if actionRoot != "" {
+		var err error
+		if actionDigest, err = c.prepProtos(ctx, actionRoot); err != nil {
+			return nil, err
+		}
+		inputRoot = filepath.Join(actionRoot, "input")
+	}
+	cmd, err := c.prepCommand(ctx, client, actionDigest, inputRoot)
+	if err != nil {
+		return nil, err
+	}
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: false, DownloadOutErr: true}
+	ec, err := client.NewContext(ctx, cmd, opt, oe)
+	if err != nil {
+		return nil, err
+	}
+	ec.ExecuteRemotely()
+	fmt.Printf("Action complete\n")
+	fmt.Printf("---------------\n")
+	fmt.Printf("Action digest: %v\n", ec.Metadata.ActionDigest.String())
+	fmt.Printf("Command digest: %v\n", ec.Metadata.CommandDigest.String())
+	fmt.Printf("Number of Input Files: %v\n", ec.Metadata.InputFiles)
+	fmt.Printf("Number of Input Dirs: %v\n", ec.Metadata.InputDirectories)
+	fmt.Printf("Number of Output Files: %v\n", ec.Metadata.OutputFiles)
+	fmt.Printf("Number of Output Directories: %v\n", ec.Metadata.OutputDirectories)
+	switch ec.Result.Status {
+	case command.NonZeroExitResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Remote action FAILED with exit code %d.\n", ec.Result.ExitCode)))
+	case command.TimeoutResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Remote action TIMED OUT after %0f seconds.\n", cmd.Timeout.Seconds())))
+	case command.InterruptedResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Remote execution was interrupted.\n")))
+	case command.RemoteErrorResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Remote execution error: %v.\n", ec.Result.Err)))
+	case command.LocalErrorResultStatus:
+		oe.WriteErr([]byte(fmt.Sprintf("Local error: %v.\n", ec.Result.Err)))
+	}
+	if ec.Result.Err == nil && outDir != "" {
+		ec.DownloadOutputs(outDir)
+		fmt.Printf("Output written to %v\n", outDir)
+	}
+	return ec.Metadata, ec.Result.Err
 }
 
 // ShowAction parses and displays an action with its corresponding command.

@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"io/ioutil"
+	"os"
 	"path"
 	"path/filepath"
 	"testing"
@@ -139,7 +140,7 @@ func TestTool_CheckDeterminism(t *testing.T) {
 	}
 }
 
-func TestTool_ReexecuteAction(t *testing.T) {
+func TestTool_ExecuteAction(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 	cmd := &command.Command{
@@ -161,8 +162,8 @@ func TestTool_ReexecuteAction(t *testing.T) {
 
 	client := &Client{GrpcClient: e.Client.GrpcClient}
 	oe := outerr.NewRecordingOutErr()
-	if err := client.ReexecuteAction(context.Background(), acDg.String(), "", oe); err != nil {
-		t.Errorf("error ReexecuteAction: %v", err)
+	if _, err := client.ExecuteAction(context.Background(), acDg.String(), "", "", oe); err != nil {
+		t.Errorf("error executeAction: %v", err)
 	}
 	if string(oe.Stderr()) != "stderr" {
 		t.Errorf("Incorrect stderr %v, expected \"stderr\"", oe.Stderr())
@@ -182,8 +183,8 @@ func TestTool_ReexecuteAction(t *testing.T) {
 	_, acDg2 := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
 		fakes.StdOut("stdout2"), fakes.StdErr("stderr2"))
 	oe = outerr.NewRecordingOutErr()
-	if err := client.ReexecuteAction(context.Background(), acDg2.String(), tmpDir, oe); err != nil {
-		t.Errorf("error ReexecuteAction: %v", err)
+	if _, err := client.ExecuteAction(context.Background(), acDg2.String(), "", tmpDir, oe); err != nil {
+		t.Errorf("error executeAction: %v", err)
 	}
 
 	fp := filepath.Join(tmpDir, "a/b/out")
@@ -198,6 +199,55 @@ func TestTool_ReexecuteAction(t *testing.T) {
 		t.Errorf("Incorrect stderr %v, expected \"stderr\"", oe.Stderr())
 	}
 	if string(oe.Stdout()) != "stdout2" {
+		t.Errorf("Incorrect stdout %v, expected \"stdout\"", oe.Stdout())
+	}
+}
+
+func TestTool_ExecuteActionFromRoot(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	cmd := &command.Command{
+		Args:        []string{"foo bar baz"},
+		ExecRoot:    e.ExecRoot,
+		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}},
+		OutputFiles: []string{"a/b/out"},
+	}
+	// Create files necessary for the fake
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	out := "output"
+	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: false, DownloadOutErr: true}
+	e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
+		fakes.StdOut("stdout"), fakes.StdErr("stderr"))
+
+	client := &Client{GrpcClient: e.Client.GrpcClient}
+	oe := outerr.NewRecordingOutErr()
+	// Construct the action root
+	os.Mkdir(filepath.Join(e.ExecRoot, "input"), os.ModePerm)
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "input", "i1"), []byte("i1"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "input", "i2"), []byte("i2"), 0644); err != nil {
+		t.Fatalf("failed creating input file: %v", err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "cmd.textproto"), []byte(`arguments: "foo bar baz"
+	output_files: "a/b/out"`), 0644); err != nil {
+		t.Fatalf("failed creating command file: %v", err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "ac.textproto"), []byte(""), 0644); err != nil {
+		t.Fatalf("failed creating command file: %v", err)
+	}
+	if _, err := client.ExecuteAction(context.Background(), "", e.ExecRoot, "", oe); err != nil {
+		t.Errorf("error executeAction: %v", err)
+	}
+	if string(oe.Stderr()) != "stderr" {
+		t.Errorf("Incorrect stderr %v, expected \"stderr\"", string(oe.Stderr()))
+	}
+	if string(oe.Stdout()) != "stdout" {
 		t.Errorf("Incorrect stdout %v, expected \"stdout\"", oe.Stdout())
 	}
 }
