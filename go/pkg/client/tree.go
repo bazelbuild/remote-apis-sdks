@@ -321,12 +321,9 @@ func buildTree(files map[string]*fileSysNode) (*treeNode, error) {
 			if node.dirs == nil {
 				node.dirs = make(map[string]*treeNode)
 			}
-			if node.dirs[base] != nil {
-				// Ignore empty directory if there exists a physical file or
-				// directory in this location.
-				continue
+			if node.dirs[base] == nil {
+				node.dirs[base] = &treeNode{}
 			}
-			node.dirs[base] = &treeNode{}
 			continue
 		}
 		if fn.file != nil {
