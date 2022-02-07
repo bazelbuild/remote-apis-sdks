@@ -322,7 +322,9 @@ func buildTree(files map[string]*fileSysNode) (*treeNode, error) {
 				node.dirs = make(map[string]*treeNode)
 			}
 			if node.dirs[base] != nil {
-				return nil, fmt.Errorf("path %v was tagged as an empty dir but isn't empty", name)
+				// Ignore empty directory if there exists a physical file or
+				// directory in this location.
+				continue
 			}
 			node.dirs[base] = &treeNode{}
 			continue
