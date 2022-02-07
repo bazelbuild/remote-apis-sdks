@@ -28,14 +28,15 @@ var (
 
 	fooDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true}}}
 	barDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}}}
+	vBarDir   = &repb.Directory{Directories: []*repb.DirectoryNode{{Name: "baz", Digest: digest.Empty.ToProto()}}}
 	foobarDir = &repb.Directory{Files: []*repb.FileNode{
 		{Name: "bar", Digest: barDgPb},
 		{Name: "foo", Digest: fooDgPb, IsExecutable: true},
 	}}
 
-	fooDirBlob, barDirBlob, foobarDirBlob = mustMarshal(fooDir), mustMarshal(barDir), mustMarshal(foobarDir)
-	fooDirDg, barDirDg, foobarDirDg       = digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob)
-	fooDirDgPb, barDirDgPb, foobarDirDgPb = fooDirDg.ToProto(), barDirDg.ToProto(), foobarDirDg.ToProto()
+	fooDirBlob, barDirBlob, foobarDirBlob, vBarDirBlob = mustMarshal(fooDir), mustMarshal(barDir), mustMarshal(foobarDir), mustMarshal(vBarDir)
+	fooDirDg, barDirDg, foobarDirDg, vBarDirDg         = digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob), digest.NewFromBlob(vBarDirBlob)
+	fooDirDgPb, barDirDgPb, foobarDirDgPb, vBarDirDgPb = fooDirDg.ToProto(), barDirDg.ToProto(), foobarDirDg.ToProto(), vBarDirDg.ToProto()
 )
 
 func mustMarshal(p proto.Message) []byte {
@@ -1106,6 +1107,98 @@ func TestComputeMerkleTree(t *testing.T) {
 				InputDirectories: 3,
 				InputFiles:       2,
 				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
+			},
+		},
+		{
+			desc: "Virtual inputs as ancestors of physical inputs",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "barDir/bar", fileContents: barBlob},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir", "barDir"},
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "barDir", IsEmptyDirectory: true},
+				},
+			},
+			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
+				{Name: "barDir", Digest: barDirDgPb},
+				{Name: "fooDir", Digest: fooDirDgPb},
+			}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"barDir":     1,
+				"barDir/bar": 1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
+			},
+		},
+		{
+			desc: "Virtual inputs as children of physical inputs",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "bar", fileContents: barBlob},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir", "bar"},
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "bar/baz", IsEmptyDirectory: true},
+				},
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{
+					{Name: "bar", Digest: vBarDirDgPb},
+					{Name: "fooDir", Digest: fooDirDgPb},
+				},
+				Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}},
+			},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, []byte{}},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"bar":        1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 4,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + vBarDirDg.Size,
+			},
+		},
+		{
+			desc: "Virtual inputs as ancestors of virtual inputs",
+			input: []*inputPath{
+				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "bar", fileContents: barBlob},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooDir", "bar"},
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "bar/baz", IsEmptyDirectory: true},
+					&command.VirtualInput{Path: "bar", IsEmptyDirectory: true},
+				},
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{
+					{Name: "bar", Digest: vBarDirDgPb},
+					{Name: "fooDir", Digest: fooDirDgPb},
+				},
+				Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}},
+			},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, []byte{}},
+			wantCacheCalls: map[string]int{
+				"fooDir":     1,
+				"fooDir/foo": 1,
+				"bar":        1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 4,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + vBarDirDg.Size,
 			},
 		},
 		{
