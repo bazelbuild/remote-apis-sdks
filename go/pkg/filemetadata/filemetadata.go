@@ -49,8 +49,10 @@ func (x xattributeAccessor) getXAttr(path string, name string) ([]byte, error) {
 }
 
 var (
+	// XattrDigestName is the xattr name for the object digest.
 	XattrDigestName string
-	XattrAccess     xattributeAccessorInterface = xattributeAccessor{}
+	// XattrAccess is the object to control access of XattrDigestName.
+	XattrAccess xattributeAccessorInterface = xattributeAccessor{}
 )
 
 // Error returns the error message.

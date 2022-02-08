@@ -171,7 +171,7 @@ func TestComputeMerkleTreeRemoteWorkingDir(t *testing.T) {
 		}
 		return rootDg, cache.calls
 	}
-	// call ComputeMerkleTree with working dir = "out/bar" and remote working dir not overriden
+	// call ComputeMerkleTree with working dir = "out/bar" and remote working dir not overridden
 	// inputs contain a file and a non-empty dir in the working directory, and a file and a non-empty dir outside of the working directory
 	referenceDg, _ := callComputeMerkleTree([]string{"out/bar/a", "out/bar/foo/b", "c", "bar/baz/d"},
 		[]string{"out/bar/a", "out/bar/foo", "c", "bar/baz"}, []*command.VirtualInput{{Path: "out/bar/baz", IsEmptyDirectory: true}}, "out/bar", "")
