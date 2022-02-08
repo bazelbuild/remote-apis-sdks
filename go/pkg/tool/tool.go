@@ -408,7 +408,7 @@ func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, err
 	return digest.NewFromBlob(acPb).String(), nil
 }
 
-// ExecuteAction executes an action in a cannonical structure remotely.
+// ExecuteAction executes an action in a canonical structure remotely.
 // The structure is the same as that produced by DownloadAction.
 // top level >
 //           > ac.textproto (Action text proto)
