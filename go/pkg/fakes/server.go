@@ -17,18 +17,17 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/rexec"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	log "github.com/golang/glog"
-	tspb "github.com/golang/protobuf/ptypes/timestamp"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
+	dpb "google.golang.org/protobuf/types/known/durationpb"
+	tspb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Server is a configurable fake in-process RBE server for use in integration tests.
@@ -136,12 +135,7 @@ func timeToProto(t time.Time) *tspb.Timestamp {
 	if t.IsZero() {
 		return nil
 	}
-	ts, err := ptypes.TimestampProto(t)
-	if err != nil {
-		log.Warningf("Unable to convert time to Timestamp: %v", err.Error())
-		return nil
-	}
-	return ts
+	return tspb.New(t)
 }
 
 // Set sets up the fake to return the given result on the given command execution.
@@ -206,7 +200,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		DoNotCache:      opt.DoNotCache,
 	}
 	if cmd.Timeout > 0 {
-		ac.Timeout = ptypes.DurationProto(cmd.Timeout)
+		ac.Timeout = dpb.New(cmd.Timeout)
 	}
 	acDg = digest.TestNewFromMessage(ac)
 

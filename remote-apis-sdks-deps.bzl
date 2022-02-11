@@ -16,9 +16,9 @@ def remote_apis_sdks_go_deps():
     )
     _maybe(
         go_repository,
-        name = "com_github_golang_protobuf",
-        importpath = "github.com/golang/protobuf",
-        tag = "v1.4.2",
+        name = "org_golang_google_protobuf",
+        importpath = "google.golang.org/protobuf",
+        tag = "v1.27.1",
     )
     _maybe(
         go_repository,

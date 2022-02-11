@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
 
 	_ "google.golang.org/genproto/googleapis/rpc/errdetails" // the proto needs to be compiled in for unmarshalling of status details.
 )
@@ -22,7 +23,7 @@ func StatusDetailedError(st *status.Status) *StatusError {
 	for _, d := range st.Details() {
 		s := fmt.Sprintf("%+v", d)
 		if pb, ok := d.(proto.Message); ok {
-			s = proto.MarshalTextString(pb)
+			s = prototext.Format(pb)
 		}
 		details = append(details, s)
 	}

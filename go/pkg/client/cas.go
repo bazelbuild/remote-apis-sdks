@@ -18,7 +18,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/golang/protobuf/proto"
 	"github.com/klauspost/compress/zstd"
 	syncpool "github.com/mostynb/zstdpool-syncpool"
 	"github.com/pborman/uuid"
@@ -26,6 +25,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
@@ -803,7 +804,7 @@ func (c *Client) makeBatches(ctx context.Context, dgs []digest.Digest, optimizeS
 }
 
 func marshalledFieldSize(size int64) int64 {
-	return 1 + int64(proto.SizeVarint(uint64(size))) + size
+	return 1 + int64(protowire.SizeVarint(uint64(size))) + size
 }
 
 func marshalledRequestSize(d digest.Digest) int64 {
@@ -816,7 +817,7 @@ func marshalledRequestSize(d digest.Digest) int64 {
 	// limit for incoming messages.
 	digestSize := marshalledFieldSize(int64(len(d.Hash)))
 	if d.Size > 0 {
-		digestSize += 1 + int64(proto.SizeVarint(uint64(d.Size)))
+		digestSize += 1 + int64(protowire.SizeVarint(uint64(d.Size)))
 	}
 	reqSize := marshalledFieldSize(digestSize)
 	if d.Size > 0 {

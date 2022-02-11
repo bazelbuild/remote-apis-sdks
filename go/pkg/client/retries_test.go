@@ -15,7 +15,6 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/golang/protobuf/ptypes"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/klauspost/compress/zstd"
@@ -25,11 +24,12 @@ import (
 
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	emptypb "github.com/golang/protobuf/ptypes/empty"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	opgrpc "google.golang.org/genproto/googleapis/longrunning"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
+	anypb "google.golang.org/protobuf/types/known/anypb"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 var zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
@@ -191,7 +191,7 @@ func (f *flakyServer) WaitExecution(req *repb.WaitExecutionRequest, stream regrp
 	// Execute (above) will fail twice (and be retried twice) before ExecuteAndWait() switches to
 	// WaitExecution. WaitExecution will fail 4 more times more before succeeding, for a total of 6 retries.
 	execResp := &repb.ExecuteResponse{Status: status.New(codes.Aborted, "transient operation failure!").Proto()}
-	any, e := ptypes.MarshalAny(execResp)
+	any, e := anypb.New(execResp)
 	if e != nil {
 		return e
 	}

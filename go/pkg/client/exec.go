@@ -9,15 +9,15 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	log "github.com/golang/glog"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	gerrors "github.com/pkg/errors"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
+	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
 const (
@@ -128,7 +128,7 @@ func (c *Client) executeJob(ctx context.Context, skipCache bool, acDg *repb.Dige
 		return nil, StatusDetailedError(status.FromProto(r.Error))
 	case *oppb.Operation_Response:
 		res := new(repb.ExecuteResponse)
-		if err := ptypes.UnmarshalAny(r.Response, res); err != nil {
+		if err := r.Response.UnmarshalTo(res); err != nil {
 			return nil, gerrors.WithMessage(err, "extracting ExecuteResponse from execution operation")
 		}
 		if st := status.FromProto(res.Status); st.Code() != codes.OK {
@@ -158,7 +158,7 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	// Only set timeout if it's non-zero, because Timeout needs to be nil for the server to use a
 	// default.
 	if ac.Timeout != 0 {
-		reAc.Timeout = ptypes.DurationProto(ac.Timeout)
+		reAc.Timeout = dpb.New(ac.Timeout)
 	}
 
 	acBlob, err := proto.Marshal(reAc)
@@ -251,7 +251,7 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 			lastOp = op
 			if progress != nil {
 				metadata := &repb.ExecuteOperationMetadata{}
-				if err := ptypes.UnmarshalAny(op.Metadata, metadata); err == nil {
+				if err := op.Metadata.UnmarshalTo(metadata); err == nil {
 					progress(metadata)
 				}
 			}
@@ -285,7 +285,7 @@ func OperationStatus(op *oppb.Operation) *status.Status {
 		return nil
 	}
 	respv2 := &repb.ExecuteResponse{}
-	if err := ptypes.UnmarshalAny(r.Response, respv2); err != nil {
+	if err := r.Response.UnmarshalTo(respv2); err != nil {
 		return nil
 	}
 	if s, ok := status.FromError(status.FromProto(respv2.Status).Err()); ok {

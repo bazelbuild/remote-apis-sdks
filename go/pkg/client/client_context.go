@@ -7,9 +7,9 @@ import (
 	"fmt"
 
 	log "github.com/golang/glog"
-	"github.com/golang/protobuf/proto"
 	"github.com/pborman/uuid"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )

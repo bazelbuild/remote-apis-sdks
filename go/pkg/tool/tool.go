@@ -14,10 +14,10 @@ import (
 	"time"
 
 	log "github.com/golang/glog"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cas"
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
@@ -126,11 +126,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 	cmd.InputSpec.Inputs = inputPaths
 	cmd.ExecRoot = inputRoot
 	if actionProto.Timeout != nil {
-		tm, err := ptypes.Duration(actionProto.Timeout)
-		if err != nil {
-			return nil, err
-		}
-		cmd.Timeout = tm
+		cmd.Timeout = actionProto.Timeout.AsDuration()
 	}
 	return cmd, nil
 }
@@ -323,7 +319,7 @@ func (c *Client) writeProto(m proto.Message, baseName string) error {
 		return err
 	}
 	defer f.Close()
-	f.WriteString(proto.MarshalTextString(m))
+	f.WriteString(prototext.Format(m))
 	return nil
 }
 
@@ -377,7 +373,7 @@ func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, err
 		return "", err
 	}
 	cmdProto := &repb.Command{}
-	if err := proto.UnmarshalText(string(cmdTxt), cmdProto); err != nil {
+	if err := prototext.Unmarshal(cmdTxt, cmdProto); err != nil {
 		return "", err
 	}
 	cmdPb, err := proto.Marshal(cmdProto)
@@ -393,7 +389,7 @@ func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, err
 		return "", err
 	}
 	actionProto := &repb.Action{}
-	if err := proto.UnmarshalText(string(ac), actionProto); err != nil {
+	if err := prototext.Unmarshal(ac, actionProto); err != nil {
 		return "", err
 	}
 	actionProto.CommandDigest = digest.NewFromBlob(cmdPb).ToProto()
@@ -484,10 +480,7 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 	}
 
 	if actionProto.Timeout != nil {
-		timeout, err := ptypes.Duration(actionProto.Timeout)
-		if err != nil {
-			return "", err
-		}
+		timeout := actionProto.Timeout.AsDuration()
 		showActionRes.WriteString(fmt.Sprintf("Timeout: %s\n", timeout.String()))
 	}
 

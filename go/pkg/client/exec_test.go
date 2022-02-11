@@ -4,19 +4,19 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
-	"github.com/golang/protobuf/ptypes"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestOperationStatus(t *testing.T) {
-	respv2, err := ptypes.MarshalAny(&repb.ExecuteResponse{Status: &spb.Status{Code: 2}})
+	respv2, err := anypb.New(&repb.ExecuteResponse{Status: &spb.Status{Code: 2}})
 	if err != nil {
 		t.Fatalf("Unable to marshal V2 proto: %s", err)
 	}
-	respOther, err := ptypes.MarshalAny(&spb.Status{Code: 3})
+	respOther, err := anypb.New(&spb.Status{Code: 3})
 	if err != nil {
 		t.Fatalf("Unable to marshal status proto: %s", err)
 	}

@@ -30,11 +30,11 @@ import (
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
-	emptypb "github.com/golang/protobuf/ptypes/empty"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	opgrpc "google.golang.org/genproto/googleapis/longrunning"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
