@@ -5,7 +5,7 @@ package portpicker
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"math/rand"
 	"net"
@@ -102,7 +102,7 @@ func queryPortServer(addr string) int {
 		log.Printf("portpicker: failed writing request to portserver: %v", err)
 		return -1
 	}
-	buf, err := ioutil.ReadAll(c)
+	buf, err := io.ReadAll(c)
 	if err != nil || len(buf) == 0 {
 		log.Printf("portpicker: failed reading response from portserver: %v", err)
 		return -1

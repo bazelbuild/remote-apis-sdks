@@ -4,7 +4,6 @@ package chunker
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
@@ -137,7 +136,7 @@ func (c *Chunker) FullData() ([]byte, error) {
 		return nil, err
 	}
 	// Cache contents so that the next call to FullData() doesn't result in file read.
-	c.contents, err = ioutil.ReadAll(c.r)
+	c.contents, err = io.ReadAll(c.r)
 	c.r.Close()
 	return c.contents, err
 }

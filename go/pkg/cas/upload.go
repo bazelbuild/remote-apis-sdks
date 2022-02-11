@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -618,7 +617,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 
 	if info.Size() <= u.Config.SmallFileThreshold {
 		// This file is small enough to buffer it entirely.
-		contents, err := ioutil.ReadAll(f)
+		contents, err := io.ReadAll(f)
 		if err != nil {
 			return nil, err
 		}
@@ -832,7 +831,7 @@ func (item *uploadItem) ReadAll() ([]byte, error) {
 		return nil, err
 	}
 	defer r.Close()
-	return ioutil.ReadAll(r)
+	return io.ReadAll(r)
 }
 
 // scheduleCheck schedules a blob presence check on the server. If it fails,

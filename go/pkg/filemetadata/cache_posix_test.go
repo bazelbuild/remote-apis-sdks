@@ -4,7 +4,6 @@
 package filemetadata
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -18,7 +17,7 @@ func TestExecutableCacheLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
-	if err = ioutil.WriteFile(filename, contents, os.ModeTemporary); err != nil {
+	if err = os.WriteFile(filename, contents, os.ModeTemporary); err != nil {
 		t.Fatalf("Failed to write to tmp file for testing digests: %v", err)
 	}
 	got := c.Get(filename)

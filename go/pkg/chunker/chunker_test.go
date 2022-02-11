@@ -2,7 +2,6 @@ package chunker
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -114,15 +113,11 @@ func TestChunkerFromBlob(t *testing.T) {
 }
 
 func TestChunkerFromFile(t *testing.T) {
-	execRoot, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
+	execRoot := t.TempDir()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(execRoot, tc.name)
-			if err := ioutil.WriteFile(path, tc.blob, 0777); err != nil {
+			if err := os.WriteFile(path, tc.blob, 0777); err != nil {
 				t.Fatalf("failed to write temp file: %v", err)
 			}
 			for _, bufSize := range bufferSizes {
@@ -228,15 +223,11 @@ func TestChunkerFromBlob_Reset(t *testing.T) {
 }
 
 func TestChunkerFromFile_Reset(t *testing.T) {
-	execRoot, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
+	execRoot := t.TempDir()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(execRoot, tc.name)
-			if err := ioutil.WriteFile(path, tc.blob, 0777); err != nil {
+			if err := os.WriteFile(path, tc.blob, 0777); err != nil {
 				t.Fatalf("failed to write temp file: %v", err)
 			}
 			for _, bufSize := range bufferSizes {
@@ -312,15 +303,11 @@ func TestChunkerErrors_ErrEOF(t *testing.T) {
 
 func TestChunkerResetOptimization_SmallFile(t *testing.T) {
 	// Files smaller than IOBufferSize are loaded into memory once and not re-read on Reset.
-	execRoot, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
+	execRoot := t.TempDir()
 
 	blob := []byte("123")
 	path := filepath.Join(execRoot, "file")
-	if err := ioutil.WriteFile(path, blob, 0777); err != nil {
+	if err := os.WriteFile(path, blob, 0777); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 	dg := digest.NewFromBlob(blob)
@@ -342,7 +329,7 @@ func TestChunkerResetOptimization_SmallFile(t *testing.T) {
 		t.Errorf("failed to reset: %v", err)
 	}
 	// Change the file contents.
-	if err := ioutil.WriteFile(path, []byte("321"), 0777); err != nil {
+	if err := os.WriteFile(path, []byte("321"), 0777); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 	got, err = c.Next()
@@ -357,15 +344,11 @@ func TestChunkerResetOptimization_SmallFile(t *testing.T) {
 func TestChunkerResetOptimization_FullData(t *testing.T) {
 	// After FullData is called once, the file contents will remain loaded into memory and not
 	// re-read on Reset, even if the file is larger than IOBufferSize.
-	execRoot, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
+	execRoot := t.TempDir()
 
 	blob := []byte("12345678")
 	path := filepath.Join(execRoot, "file")
-	if err := ioutil.WriteFile(path, blob, 0777); err != nil {
+	if err := os.WriteFile(path, blob, 0777); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 	dg := digest.NewFromBlob(blob)
@@ -386,7 +369,7 @@ func TestChunkerResetOptimization_FullData(t *testing.T) {
 		t.Errorf("failed to reset: %v", err)
 	}
 	// Change the file contents.
-	if err := ioutil.WriteFile(path, []byte("987654321"), 0777); err != nil {
+	if err := os.WriteFile(path, []byte("987654321"), 0777); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 	got, err = c.FullData()

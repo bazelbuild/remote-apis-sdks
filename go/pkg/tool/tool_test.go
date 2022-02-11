@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -40,7 +39,7 @@ func TestTool_DownloadActionResult(t *testing.T) {
 		filepath.Join(tmpDir, "stderr"):  "stderr",
 	}
 	for fp, want := range verifyData {
-		c, err := ioutil.ReadFile(fp)
+		c, err := os.ReadFile(fp)
 		if err != nil {
 			t.Fatalf("Unable to read downloaded output file %v: %v", fp, err)
 		}
@@ -115,10 +114,10 @@ func TestTool_CheckDeterminism(t *testing.T) {
 		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}},
 		OutputFiles: []string{"a/b/out"},
 	}
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
 	out := "output"
@@ -149,10 +148,10 @@ func TestTool_ExecuteAction(t *testing.T) {
 		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}},
 		OutputFiles: []string{"a/b/out"},
 	}
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
 	out := "output"
@@ -173,10 +172,10 @@ func TestTool_ExecuteAction(t *testing.T) {
 	}
 	// Now execute again with changed inputs.
 	tmpDir := t.TempDir()
-	if err := ioutil.WriteFile(filepath.Join(tmpDir, "i1"), []byte("i11"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "i1"), []byte("i11"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(tmpDir, "i2"), []byte("i22"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "i2"), []byte("i22"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
 	cmd.ExecRoot = tmpDir
@@ -188,7 +187,7 @@ func TestTool_ExecuteAction(t *testing.T) {
 	}
 
 	fp := filepath.Join(tmpDir, "a/b/out")
-	c, err := ioutil.ReadFile(fp)
+	c, err := os.ReadFile(fp)
 	if err != nil {
 		t.Fatalf("Unable to read downloaded output %v: %v", fp, err)
 	}
@@ -213,10 +212,10 @@ func TestTool_ExecuteActionFromRoot(t *testing.T) {
 		OutputFiles: []string{"a/b/out"},
 	}
 	// Create files necessary for the fake
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "i1"), []byte("i1"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "i2"), []byte("i2"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
 	out := "output"
@@ -228,17 +227,17 @@ func TestTool_ExecuteActionFromRoot(t *testing.T) {
 	oe := outerr.NewRecordingOutErr()
 	// Construct the action root
 	os.Mkdir(filepath.Join(e.ExecRoot, "input"), os.ModePerm)
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "input", "i1"), []byte("i1"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "input", "i1"), []byte("i1"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "input", "i2"), []byte("i2"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "input", "i2"), []byte("i2"), 0644); err != nil {
 		t.Fatalf("failed creating input file: %v", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "cmd.textproto"), []byte(`arguments: "foo bar baz"
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "cmd.textproto"), []byte(`arguments: "foo bar baz"
 	output_files: "a/b/out"`), 0644); err != nil {
 		t.Fatalf("failed creating command file: %v", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(e.ExecRoot, "ac.textproto"), []byte(""), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(e.ExecRoot, "ac.textproto"), []byte(""), 0644); err != nil {
 		t.Fatalf("failed creating command file: %v", err)
 	}
 	if _, err := client.ExecuteAction(context.Background(), "", e.ExecRoot, "", oe); err != nil {
@@ -268,7 +267,7 @@ func TestTool_DownloadBlob(t *testing.T) {
 		t.Fatalf("DownloadBlob(%v) returned diff (-want +got): %v\n\ngot: %v\n\nwant: %v\n", dg.String(), diff, got, want)
 	}
 	// Now download into a specified location.
-	tmpFile, err := ioutil.TempFile(t.TempDir(), "")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("TempFile failed: %v", err)
 	}
@@ -283,7 +282,7 @@ func TestTool_DownloadBlob(t *testing.T) {
 	if got != "" {
 		t.Fatalf("DownloadBlob(%v) returned %v, expected empty: ", dg.String(), got)
 	}
-	c, err := ioutil.ReadFile(fp)
+	c, err := os.ReadFile(fp)
 	if err != nil {
 		t.Fatalf("Unable to read downloaded output file %v: %v", fp, err)
 	}
@@ -299,7 +298,7 @@ func TestTool_UploadBlob(t *testing.T) {
 	cas := e.Server.CAS
 
 	tmpFile := path.Join(t.TempDir(), "blob")
-	if err := ioutil.WriteFile(tmpFile, []byte("Hello, World!"), 0777); err != nil {
+	if err := os.WriteFile(tmpFile, []byte("Hello, World!"), 0777); err != nil {
 		t.Fatalf("Could not create temp blob: %v", err)
 	}
 

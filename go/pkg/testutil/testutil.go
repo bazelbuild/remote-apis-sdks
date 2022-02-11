@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 )
@@ -12,7 +11,7 @@ func CreateFile(t *testing.T, executable bool, contents string) (string, error) 
 	if executable {
 		perm = os.FileMode(0766)
 	}
-	tmpFile, err := ioutil.TempFile(os.TempDir(), "")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "")
 	if err != nil {
 		return "", err
 	}
@@ -23,7 +22,7 @@ func CreateFile(t *testing.T, executable bool, contents string) (string, error) 
 		return "", err
 	}
 	filename := tmpFile.Name()
-	if err = ioutil.WriteFile(filename, []byte(contents), os.ModeTemporary); err != nil {
+	if err = os.WriteFile(filename, []byte(contents), os.ModeTemporary); err != nil {
 		return "", err
 	}
 	return filename, nil

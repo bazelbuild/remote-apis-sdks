@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -113,7 +112,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 			return nil, err
 		}
 	}
-	contents, err := ioutil.ReadDir(inputRoot)
+	contents, err := os.ReadDir(inputRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +213,7 @@ func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPre
 		if err != nil {
 			log.Errorf("Unable to read blob for %v with digest %v.", path, dg)
 		}
-		if err := ioutil.WriteFile(path, bytes, 0644); err != nil {
+		if err := os.WriteFile(path, bytes, 0644); err != nil {
 			log.Errorf("Unable to write output of digest %v to file %v.", dg, path)
 		}
 	}
@@ -229,7 +228,7 @@ func (c *Client) DownloadBlob(ctx context.Context, blobDigest, path string) (str
 	if path == "" {
 		outputToStdout = true
 		// Create a temp file.
-		tmpFile, err := ioutil.TempFile(os.TempDir(), "")
+		tmpFile, err := os.CreateTemp(os.TempDir(), "")
 		if err != nil {
 			return "", err
 		}
@@ -250,7 +249,7 @@ func (c *Client) DownloadBlob(ctx context.Context, blobDigest, path string) (str
 	if !outputToStdout {
 		return "", nil
 	}
-	contents, err := ioutil.ReadFile(path)
+	contents, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -368,7 +367,7 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 }
 
 func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, error) {
-	cmdTxt, err := ioutil.ReadFile(filepath.Join(actionRoot, "cmd.textproto"))
+	cmdTxt, err := os.ReadFile(filepath.Join(actionRoot, "cmd.textproto"))
 	if err != nil {
 		return "", err
 	}
@@ -384,7 +383,7 @@ func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, err
 	if _, _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
 		return "", err
 	}
-	ac, err := ioutil.ReadFile(filepath.Join(actionRoot, "ac.textproto"))
+	ac, err := os.ReadFile(filepath.Join(actionRoot, "ac.textproto"))
 	if err != nil {
 		return "", err
 	}

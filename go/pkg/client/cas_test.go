@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"os"
@@ -1101,15 +1100,11 @@ func TestDownloadActionOutputs(t *testing.T) {
 			&repb.OutputDirectory{Path: "dir2", TreeDigest: treeADigest.ToProto()},
 		},
 	}
-	execRoot, err := ioutil.TempDir("", "DownloadOuts")
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
+	execRoot := t.TempDir()
 	wd := "wd"
 	if err := os.Mkdir(filepath.Join(execRoot, wd), os.ModePerm); err != nil {
 		t.Fatalf("failed to create working directory %v: %v", wd, err)
 	}
-	defer os.RemoveAll(execRoot)
 	_, err = c.DownloadActionOutputs(ctx, ar, filepath.Join(execRoot, wd), cache)
 	if err != nil {
 		t.Errorf("error in DownloadActionOutputs: %s", err)
@@ -1205,7 +1200,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 			if !fi.Mode().IsDir() {
 				t.Errorf("expected %s to be a directory, got %s", path, fi.Mode())
 			}
-			files, err := ioutil.ReadDir(path)
+			files, err := os.ReadDir(path)
 			if err != nil {
 				t.Errorf("expected %s to be a directory, got error reading directory: %v", path, err)
 			}
@@ -1213,7 +1208,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 				t.Errorf("expected %s to be an empty directory, got contents: %v", path, files)
 			}
 		} else {
-			contents, err := ioutil.ReadFile(path)
+			contents, err := os.ReadFile(path)
 			if err != nil {
 				t.Errorf("error reading from %s: %v", path, err)
 			}
@@ -1272,7 +1267,7 @@ func TestDownloadDirectory(t *testing.T) {
 		t.Fatalf("DownloadDirectory() mismatch (-want +got):\n%s", diff)
 	}
 
-	b, err := ioutil.ReadFile(filepath.Join(execRoot, "foo"))
+	b, err := os.ReadFile(filepath.Join(execRoot, "foo"))
 	if err != nil {
 		t.Fatalf("failed to read foo: %s", err)
 	}
@@ -1285,11 +1280,7 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 	ar := &repb.ActionResult{}
 	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "foo", Digest: digest.NewFromBlob([]byte("foo")).ToProto()})
 	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "bar", Digest: digest.NewFromBlob([]byte("bar")).ToProto()})
-	execRoot, err := ioutil.TempDir("", "DownloadOuts")
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
+	execRoot := t.TempDir()
 
 	for _, ub := range []client.UseBatchOps{false, true} {
 		ub := ub
@@ -1406,18 +1397,14 @@ func TestDownloadActionOutputsBatching(t *testing.T) {
 				name := fmt.Sprintf("foo_%s", dg)
 				ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: name, Digest: dg.ToProto()})
 			}
-			execRoot, err := ioutil.TempDir("", "DownloadOuts")
-			if err != nil {
-				t.Fatalf("failed to make temp dir: %v", err)
-			}
-			defer os.RemoveAll(execRoot)
-			_, err = c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
+			execRoot := t.TempDir()
+			_, err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
 			if err != nil {
 				t.Errorf("error in DownloadActionOutputs: %s", err)
 			}
 			for dg, data := range blobs {
 				path := filepath.Join(execRoot, fmt.Sprintf("foo_%s", dg))
-				contents, err := ioutil.ReadFile(path)
+				contents, err := os.ReadFile(path)
 				if err != nil {
 					t.Errorf("error reading from %s: %v", path, err)
 				}
@@ -1491,7 +1478,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 						for _, i := range input {
 							name := filepath.Join(execRoot, fmt.Sprintf("foo_%s", i.digest))
 							for _, path := range []string{name, name + "_copy"} {
-								contents, err := ioutil.ReadFile(path)
+								contents, err := os.ReadFile(path)
 								if err != nil {
 									return fmt.Errorf("error reading from %s: %v", path, err)
 								}
@@ -1574,7 +1561,7 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 			return fmt.Errorf("error in DownloadActionOutputs: %s", err)
 		}
 		for _, path := range []string{name, name + "_copy"} {
-			contents, err := ioutil.ReadFile(filepath.Join(execRoot, path))
+			contents, err := os.ReadFile(filepath.Join(execRoot, path))
 			if err != nil {
 				return fmt.Errorf("error reading from %s: %v", path, err)
 			}
@@ -1619,7 +1606,7 @@ func TestDownloadActionOutputsOneSlowRead(t *testing.T) {
 			for _, i := range input {
 				name := filepath.Join(execRoot, fmt.Sprintf("foo_%s", i.digest))
 				for _, path := range []string{name, name + "_copy"} {
-					contents, err := ioutil.ReadFile(path)
+					contents, err := os.ReadFile(path)
 					if err != nil {
 						return fmt.Errorf("error reading from %s: %v", path, err)
 					}
@@ -1680,12 +1667,7 @@ func TestDownloadFiles(t *testing.T) {
 	fooDigest := fake.Put([]byte("foo"))
 	barDigest := fake.Put([]byte("bar"))
 
-	execRoot, err := ioutil.TempDir("", "DownloadOuts")
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(execRoot)
-
+	execRoot := t.TempDir()
 	stats, err := c.DownloadFiles(ctx, execRoot, map[digest.Digest]*client.TreeOutput{
 		fooDigest: {Digest: fooDigest, Path: "foo", IsExecutable: true},
 		barDigest: {Digest: barDigest, Path: "bar"},
@@ -1700,13 +1682,13 @@ func TestDownloadFiles(t *testing.T) {
 		t.Errorf("c.DownloadFiles: logical (%v) bytes moved different from sum of digests (%v) despite no duplication", stats.LogicalMoved, fooDg.Size+barDigest.Size)
 	}
 
-	if b, err := ioutil.ReadFile(filepath.Join(execRoot, "foo")); err != nil {
+	if b, err := os.ReadFile(filepath.Join(execRoot, "foo")); err != nil {
 		t.Errorf("failed to read file: %v", err)
 	} else if diff := cmp.Diff(b, []byte("foo")); diff != "" {
 		t.Errorf("foo mismatch (-want +got):\n%s", diff)
 	}
 
-	if b, err := ioutil.ReadFile(filepath.Join(execRoot, "bar")); err != nil {
+	if b, err := os.ReadFile(filepath.Join(execRoot, "bar")); err != nil {
 		t.Errorf("failed to read file: %v", err)
 	} else if diff := cmp.Diff(b, []byte("bar")); diff != "" {
 		t.Errorf("foo mismatch (-want +got):\n%s", diff)
@@ -1719,11 +1701,7 @@ func TestDownloadFilesCancel(t *testing.T) {
 		uo := uo
 		t.Run(fmt.Sprintf("UnifiedDownloads:%t", uo), func(t *testing.T) {
 			t.Parallel()
-			execRoot, err := ioutil.TempDir("", strings.ReplaceAll(t.Name(), string(filepath.Separator), "_"))
-			if err != nil {
-				t.Fatalf("failed to make temp dir: %v", err)
-			}
-			defer os.RemoveAll(execRoot)
+			execRoot := t.TempDir()
 			ctx := context.Background()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()

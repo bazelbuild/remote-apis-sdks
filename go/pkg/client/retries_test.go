@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -348,7 +348,7 @@ func TestReadToFileRetries(t *testing.T) {
 					t.Errorf("client.ReadBlobToFile(ctx, digest) = %v - compression on but same real and logical bytes", stats)
 				}
 
-				contents, err := ioutil.ReadFile(path)
+				contents, err := os.ReadFile(path)
 				if err != nil {
 					t.Errorf("error reading from %s: %v", path, err)
 				}

@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -165,7 +165,7 @@ func (s *TokenSource) getSignedJWT(headers map[string]string) (*signaturePayload
 	log.V(1).Infof("HTTP response from signJWT: %+v", resp)
 
 	// Extract the signedJWT from the response body.
-	signatureBody, err := ioutil.ReadAll(resp.Body)
+	signatureBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,7 @@ func (s TokenSource) getToken(headers map[string]string, signature *signaturePay
 
 	log.V(1).Infof("HTTP response: %+v", resp)
 
-	tokenBody, err := ioutil.ReadAll(resp.Body)
+	tokenBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

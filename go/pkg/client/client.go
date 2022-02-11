@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/user"
@@ -501,7 +500,7 @@ func createTLSConfig(params DialParams) (*tls.Config, error) {
 	var certPool *x509.CertPool
 	if params.TLSCACertFile != "" {
 		certPool = x509.NewCertPool()
-		ca, err := ioutil.ReadFile(params.TLSCACertFile)
+		ca, err := os.ReadFile(params.TLSCACertFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %s: %w", params.TLSCACertFile, err)
 		}
