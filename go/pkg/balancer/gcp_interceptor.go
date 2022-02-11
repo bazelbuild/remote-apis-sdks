@@ -2,12 +2,12 @@ package balancer
 
 import (
 	"context"
-	"os"
+	"io/ioutil"
 	"sync"
 
 	pb "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer/proto"
-	"github.com/golang/protobuf/jsonpb"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 const (
@@ -196,11 +196,11 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 
 // ParseAPIConfig parses a json config file into ApiConfig proto message.
 func ParseAPIConfig(path string) (*pb.ApiConfig, error) {
-	jsonFile, err := os.Open(path)
+	jsonFile, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	result := &pb.ApiConfig{}
-	jsonpb.Unmarshal(jsonFile, result)
+	protojson.Unmarshal(jsonFile, result)
 	return result, nil
 }

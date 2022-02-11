@@ -14,11 +14,11 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
-	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )

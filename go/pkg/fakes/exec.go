@@ -8,14 +8,14 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 )
 
 // Exec implements the complete RE execution interface for a single execution, returning a fixed
@@ -98,7 +98,7 @@ func (s *Exec) fakeExecution(dg digest.Digest, skipCacheLookup bool) (*oppb.Oper
 		Status:       st.Proto(),
 		CachedResult: cached,
 	}
-	any, err := ptypes.MarshalAny(execResp)
+	any, err := anypb.New(execResp)
 	if err != nil {
 		return nil, err
 	}

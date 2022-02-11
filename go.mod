@@ -6,7 +6,6 @@ require (
 	cloud.google.com/go v0.65.0 // indirect
 	github.com/bazelbuild/remote-apis v0.0.0-20210718193713-0ecef08215cf
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
-	github.com/golang/protobuf v1.5.2
 	github.com/google/go-cmp v0.5.5
 	github.com/klauspost/compress v1.12.3
 	github.com/mostynb/zstdpool-syncpool v0.0.7
@@ -18,5 +17,5 @@ require (
 	google.golang.org/api v0.30.0
 	google.golang.org/genproto v0.0.0-20210506142907-4a47615972c2
 	google.golang.org/grpc v1.37.0
-	google.golang.org/protobuf v1.26.0
+	google.golang.org/protobuf v1.27.1
 )

@@ -12,13 +12,11 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/golang/protobuf/ptypes"
 	"github.com/pborman/uuid"
 
 	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	log "github.com/golang/glog"
-	tspb "github.com/golang/protobuf/ptypes/timestamp"
+	tspb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // InputType can be specified to narrow down the matching for a given input path.
@@ -795,12 +793,7 @@ func TimeToProto(t time.Time) *tspb.Timestamp {
 	if t.IsZero() {
 		return nil
 	}
-	ts, err := ptypes.TimestampProto(t)
-	if err != nil {
-		log.Warningf("Unable to convert time to Timestamp: %v", err)
-		return nil
-	}
-	return ts
+	return tspb.New(t)
 }
 
 // TimeFromProto converts a valid Timestamp proto into a time.Time.
@@ -808,11 +801,7 @@ func TimeFromProto(tPb *tspb.Timestamp) time.Time {
 	if tPb == nil {
 		return time.Time{}
 	}
-	t, err := ptypes.Timestamp(tPb)
-	if err != nil {
-		log.Errorf("Failed to parse RBE timestamp: %+v - > %v", tPb, err)
-	}
-	return t
+	return tPb.AsTime()
 }
 
 // TimeIntervalToProto serializes the SDK TimeInterval into a proto.

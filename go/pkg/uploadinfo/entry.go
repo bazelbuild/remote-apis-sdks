@@ -4,7 +4,7 @@ package uploadinfo
 
 import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 const (

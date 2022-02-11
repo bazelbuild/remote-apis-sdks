@@ -14,9 +14,9 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"google.golang.org/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )

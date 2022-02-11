@@ -21,12 +21,12 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/golang/protobuf/proto"
 	"github.com/google/go-cmp/cmp"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"

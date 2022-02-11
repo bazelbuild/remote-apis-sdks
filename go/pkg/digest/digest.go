@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )

@@ -16,13 +16,14 @@ import (
 	"time"
 
 	log "github.com/golang/glog"
-	"github.com/golang/protobuf/proto"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/support/bundler"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/cache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -1199,7 +1200,7 @@ func dirNameRelFast(relPath string) string {
 }
 
 func marshalledFieldSize(size int64) int64 {
-	return 1 + int64(proto.SizeVarint(uint64(size))) + size
+	return 1 + int64(protowire.SizeVarint(uint64(size))) + size
 }
 
 func marshalledRequestSize(d *repb.Digest) int64 {
@@ -1212,7 +1213,7 @@ func marshalledRequestSize(d *repb.Digest) int64 {
 	// limit for incoming messages.
 	digestSize := marshalledFieldSize(int64(len(d.Hash)))
 	if d.SizeBytes > 0 {
-		digestSize += 1 + int64(proto.SizeVarint(uint64(d.SizeBytes)))
+		digestSize += 1 + int64(protowire.SizeVarint(uint64(d.SizeBytes)))
 	}
 	reqSize := marshalledFieldSize(digestSize)
 	if d.SizeBytes > 0 {

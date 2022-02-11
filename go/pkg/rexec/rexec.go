@@ -13,15 +13,15 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/prototext"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
-	tspb "github.com/golang/protobuf/ptypes/timestamp"
+	dpb "google.golang.org/protobuf/types/known/durationpb"
+	tspb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Client is a remote execution client.
@@ -156,7 +156,7 @@ func (ec *Context) computeInputs() error {
 	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
 	commandHasOutputPathsField := ec.client.GrpcClient.SupportsCommandOutputPaths()
 	cmdPb := ec.cmd.ToREProto(commandHasOutputPathsField)
-	log.V(2).Infof("%s %s> Command: \n%s\n", cmdID, executionID, proto.MarshalTextString(cmdPb))
+	log.V(2).Infof("%s %s> Command: \n%s\n", cmdID, executionID, prototext.Format(cmdPb))
 	var err error
 	if ec.cmdUe, err = uploadinfo.EntryFromProto(cmdPb); err != nil {
 		return err
@@ -185,7 +185,7 @@ func (ec *Context) computeInputs() error {
 	}
 
 	if ec.cmd.Timeout > 0 {
-		acPb.Timeout = ptypes.DurationProto(ec.cmd.Timeout)
+		acPb.Timeout = dpb.New(ec.cmd.Timeout)
 	}
 	if ec.acUe, err = uploadinfo.EntryFromProto(acPb); err != nil {
 		return err
@@ -336,7 +336,7 @@ func (ec *Context) ExecuteRemotely() {
 		return
 	}
 	resp := &repb.ExecuteResponse{}
-	if err := ptypes.UnmarshalAny(or, resp); err != nil {
+	if err := or.UnmarshalTo(resp); err != nil {
 		ec.Result = command.NewRemoteErrorResult(err)
 		return
 	}
@@ -426,11 +426,7 @@ func timeFromProto(tPb *tspb.Timestamp) time.Time {
 	if tPb == nil {
 		return time.Time{}
 	}
-	t, err := ptypes.Timestamp(tPb)
-	if err != nil {
-		log.Errorf("Failed to parse RBE timestamp: %+v - > %v", tPb, err)
-	}
-	return t
+	return tPb.AsTime()
 }
 
 func setEventTimes(cm *command.Metadata, event string, start, end *tspb.Timestamp) {
