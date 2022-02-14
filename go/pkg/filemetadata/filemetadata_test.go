@@ -2,7 +2,6 @@ package filemetadata
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,11 +121,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 
 func TestComputeDirectory(t *testing.T) {
 	XattrDigestName = ""
-	tmpDir, err := ioutil.TempDir("", "")
-	defer os.RemoveAll(tmpDir)
-	if err != nil {
-		t.Fatalf("Failed to create temp directory")
-	}
+	tmpDir := t.TempDir()
 	got := Compute(tmpDir)
 	if got.Err != nil {
 		t.Errorf("Compute(%v).Err = %v, expected nil", tmpDir, got.Err)
@@ -210,13 +205,8 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 	XattrDigestName = ""
 	symlinkPath := filepath.Join(os.TempDir(), "dir-symlink")
 	defer os.RemoveAll(symlinkPath)
-	targetPath, err := ioutil.TempDir(os.TempDir(), "")
-	if err != nil {
-		t.Fatalf("Failed to create tmp directory: %v", err)
-	}
-	err = createSymlinkToTarget(t, symlinkPath, targetPath)
-
-	if err != nil {
+	targetPath := t.TempDir()
+	if err := createSymlinkToTarget(t, symlinkPath, targetPath); err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
 	}
 

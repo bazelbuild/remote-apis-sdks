@@ -2,7 +2,7 @@ package balancer
 
 import (
 	"context"
-	"io/ioutil"
+	"os"
 	"sync"
 
 	pb "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer/proto"
@@ -196,7 +196,7 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 
 // ParseAPIConfig parses a json config file into ApiConfig proto message.
 func ParseAPIConfig(path string) (*pb.ApiConfig, error) {
-	jsonFile, err := ioutil.ReadFile(path)
+	jsonFile, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

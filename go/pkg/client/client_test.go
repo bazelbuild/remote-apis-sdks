@@ -2,8 +2,8 @@ package client
 
 import (
 	"context"
-	"io/ioutil"
 	"net"
+	"os"
 	"path"
 	"testing"
 
@@ -112,11 +112,11 @@ func TestCreateTLSConfig(t *testing.T) {
 
 		t.Run("OnlyTLSClientAuthCert", func(t *testing.T) {
 			certPath := path.Join(t.TempDir(), "cert.pem")
-			if err := ioutil.WriteFile(certPath, []byte(tlsCert), 0644); err != nil {
+			if err := os.WriteFile(certPath, []byte(tlsCert), 0644); err != nil {
 				t.Fatalf("Could not write '%v': %v", certPath, err)
 			}
 			keyPath := path.Join(t.TempDir(), "key.pem")
-			if err := ioutil.WriteFile(keyPath, []byte(tlsKey), 0644); err != nil {
+			if err := os.WriteFile(keyPath, []byte(tlsKey), 0644); err != nil {
 				t.Fatalf("Could not write '%v': %v", keyPath, err)
 			}
 

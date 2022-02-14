@@ -1,7 +1,6 @@
 package filemetadata
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -21,7 +20,7 @@ func TestSimpleCacheLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
-	if err = ioutil.WriteFile(filename, contents, os.ModeTemporary); err != nil {
+	if err = os.WriteFile(filename, contents, os.ModeTemporary); err != nil {
 		t.Fatalf("Failed to write to tmp file for testing digests: %v", err)
 	}
 	got := c.Get(filename)
@@ -50,7 +49,7 @@ func TestCacheOnceLoadMultiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
-	if err = ioutil.WriteFile(filename, contents, os.ModeTemporary); err != nil {
+	if err = os.WriteFile(filename, contents, os.ModeTemporary); err != nil {
 		t.Fatalf("Failed to write to tmp file for testing digests: %v", err)
 	}
 	want := &Metadata{
@@ -80,7 +79,7 @@ func TestLoadAfterChangeWithoutValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 	}
-	if err = ioutil.WriteFile(filename, contents, os.ModeTemporary); err != nil {
+	if err = os.WriteFile(filename, contents, os.ModeTemporary); err != nil {
 		t.Fatalf("Failed to write to tmp file for testing digests: %v", err)
 	}
 	got := c.Get(filename)
@@ -96,7 +95,7 @@ func TestLoadAfterChangeWithoutValidation(t *testing.T) {
 	}
 
 	change := []byte("change")
-	if err = ioutil.WriteFile(filename, change, os.ModeTemporary); err != nil {
+	if err = os.WriteFile(filename, change, os.ModeTemporary); err != nil {
 		t.Fatalf("Failed to write to tmp file for testing digests: %v", err)
 	}
 	got = c.Get(filename)

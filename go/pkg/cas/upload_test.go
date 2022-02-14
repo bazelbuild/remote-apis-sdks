@@ -2,7 +2,6 @@ package cas
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -851,7 +850,7 @@ func putFile(t *testing.T, path, contents string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
 		t.Fatal(err)
 	}
-	if err := ioutil.WriteFile(path, []byte(contents), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -5,7 +5,6 @@ package rexec_test
 import (
 	"bytes"
 	"context"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,7 +27,7 @@ func TestExecCacheHit(t *testing.T) {
 	defer cleanup()
 	fooPath := filepath.Join(e.ExecRoot, "foo")
 	fooBlob := []byte("hello")
-	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
+	if err := os.WriteFile(fooPath, fooBlob, 0777); err != nil {
 		t.Fatalf("failed to write input file %s", fooBlob)
 	}
 	tests := []struct {
@@ -119,7 +118,7 @@ func TestExecCacheHit(t *testing.T) {
 					}
 				}
 				path := filepath.Join(e.ExecRoot, tc.output)
-				contents, err := ioutil.ReadFile(path)
+				contents, err := os.ReadFile(path)
 				if err != nil {
 					t.Errorf("error reading from %s: %v", path, err)
 				}
@@ -297,7 +296,7 @@ func TestExecRemoteFailureDownloadsPartialResults(t *testing.T) {
 				t.Errorf("Run() gave stderr diff: want \"stderr\", got: %v", oe.Stderr())
 			}
 			path := filepath.Join(e.ExecRoot, "a/b/out")
-			contents, err := ioutil.ReadFile(path)
+			contents, err := os.ReadFile(path)
 			if err != nil {
 				t.Errorf("error reading from %s: %v", path, err)
 			}
@@ -387,7 +386,7 @@ func TestGetOutputFileDigests(t *testing.T) {
 	defer cleanup()
 	fooPath := filepath.Join(e.ExecRoot, "foo")
 	fooBlob := []byte("hello")
-	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
+	if err := os.WriteFile(fooPath, fooBlob, 0777); err != nil {
 		t.Fatalf("failed to write input file %s", fooBlob)
 	}
 	cmd := &command.Command{
@@ -447,7 +446,7 @@ func TestUpdateRemoteCache(t *testing.T) {
 	defer cleanup()
 	fooPath := filepath.Join(e.ExecRoot, "foo")
 	fooBlob := []byte("hello")
-	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
+	if err := os.WriteFile(fooPath, fooBlob, 0777); err != nil {
 		t.Fatalf("failed to write input file %s", fooBlob)
 	}
 	cmd := &command.Command{
@@ -469,7 +468,7 @@ func TestUpdateRemoteCache(t *testing.T) {
 		t.Fatalf("failed to create output file parents %s: %v", outPath, err)
 	}
 	outBlob := []byte("out!")
-	if err := ioutil.WriteFile(outPath, outBlob, 0777); err != nil {
+	if err := os.WriteFile(outPath, outBlob, 0777); err != nil {
 		t.Fatalf("failed to write output file %s: %v", outPath, err)
 	}
 	ec.UpdateCachedResult()
@@ -490,7 +489,7 @@ func TestUpdateRemoteCache(t *testing.T) {
 	if diff := cmp.Diff(&command.Result{Status: command.CacheHitResultStatus}, ec.Result); diff != "" {
 		t.Errorf("GetCachedResult() gave result diff (-want +got):\n%s", diff)
 	}
-	contents, err := ioutil.ReadFile(outPath)
+	contents, err := os.ReadFile(outPath)
 	if err != nil {
 		t.Errorf("error reading from %s: %v", outPath, err)
 	}
@@ -516,7 +515,7 @@ func TestDownloadResults(t *testing.T) {
 	defer cleanup()
 	fooPath := filepath.Join(e.ExecRoot, "foo")
 	fooBlob := []byte("hello")
-	if err := ioutil.WriteFile(fooPath, fooBlob, 0777); err != nil {
+	if err := os.WriteFile(fooPath, fooBlob, 0777); err != nil {
 		t.Fatalf("failed to write input file %s", fooBlob)
 	}
 	cmd := &command.Command{
@@ -560,7 +559,7 @@ func TestDownloadResults(t *testing.T) {
 		t.Errorf("DownloadOutputs() stderr = %v, want 'stderr'", string(oe.Stderr()))
 	}
 	ec.DownloadOutputs(e.ExecRoot)
-	contents, err := ioutil.ReadFile(outPath)
+	contents, err := os.ReadFile(outPath)
 	if err != nil {
 		t.Errorf("error reading from %s: %v", outPath, err)
 	}

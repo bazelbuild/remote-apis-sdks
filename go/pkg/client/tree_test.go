@@ -1,7 +1,6 @@
 package client_test
 
 import (
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -84,7 +83,7 @@ func construct(dir string, ips []*inputPath) error {
 		if ip.isExecutable {
 			perm = os.FileMode(0777)
 		}
-		if err := ioutil.WriteFile(path, ip.fileContents, perm); err != nil {
+		if err := os.WriteFile(path, ip.fileContents, perm); err != nil {
 			return err
 		}
 	}
@@ -147,11 +146,7 @@ func (c *callCountingMetadataCache) GetCacheMisses() uint64 {
 
 func TestComputeMerkleTreeRemoteWorkingDir(t *testing.T) {
 	callComputeMerkleTree := func(files, inputs []string, virtualInputs []*command.VirtualInput, localWorkingDir, remoteWorkingDir string) (digest.Digest, map[string]int) {
-		root, err := ioutil.TempDir("", "")
-		if err != nil {
-			t.Fatalf("failed to make temp dir: %v", err)
-		}
-		defer os.RemoveAll(root)
+		root := t.TempDir()
 		inputPaths := []*inputPath{}
 		for _, file := range files {
 			inputPaths = append(inputPaths, &inputPath{path: file, fileContents: []byte(filepath.Base(file)), isExecutable: true})
@@ -248,11 +243,7 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 		{path: "b/c/empty", emptyDir: true},
 		{path: "b/c/file", fileContents: fileBlob},
 	}
-	root, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(root)
+	root := t.TempDir()
 	if err := construct(root, ips); err != nil {
 		t.Fatalf("failed to construct input dir structure: %v", err)
 	}
@@ -350,11 +341,7 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 	aDirBlob := mustMarshal(aDir)
 	aDirDg := digest.NewFromBlob(aDirBlob)
 
-	root, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
-	defer os.RemoveAll(root)
+	root := t.TempDir()
 	inputSpec := &command.InputSpec{VirtualInputs: []*command.VirtualInput{
 		&command.VirtualInput{Path: "b/c/empty", IsEmptyDirectory: true},
 		&command.VirtualInput{Path: "b/empty", IsEmptyDirectory: true},
@@ -1291,11 +1278,7 @@ func TestComputeMerkleTree(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		root, err := ioutil.TempDir("", tc.desc)
-		if err != nil {
-			t.Fatalf("failed to make temp dir: %v", err)
-		}
-		defer os.RemoveAll(root)
+		root := t.TempDir()
 		if err := construct(root, tc.input); err != nil {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
@@ -1406,11 +1389,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		root, err := ioutil.TempDir("", tc.desc)
-		if err != nil {
-			t.Fatalf("failed to make temp dir: %v", err)
-		}
-		defer os.RemoveAll(root)
+		root := t.TempDir()
 		if err := construct(root, tc.input); err != nil {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
@@ -1623,11 +1602,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		root, err := ioutil.TempDir("", tc.desc)
-		if err != nil {
-			t.Fatalf("failed to make temp dir: %v", err)
-		}
-		defer os.RemoveAll(root)
+		root := t.TempDir()
 		if err := construct(root, tc.input); err != nil {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}
@@ -1735,11 +1710,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		root, err := ioutil.TempDir("", tc.desc)
-		if err != nil {
-			t.Fatalf("failed to make temp dir: %v", err)
-		}
-		defer os.RemoveAll(root)
+		root := t.TempDir()
 		if err := construct(root, tc.input); err != nil {
 			t.Fatalf("failed to construct input dir structure: %v", err)
 		}

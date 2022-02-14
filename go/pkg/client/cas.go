@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -916,7 +915,7 @@ func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
 		if err != nil {
 			// Because WriteTo returned early, the pipe writers still
 			// have to go somewhere or they'll block execution.
-			io.Copy(ioutil.Discard, r)
+			io.Copy(io.Discard, r)
 		}
 		// DecoderWrapper.Close moves the decoder back to the Pool.
 		decoderW.Close()
@@ -1449,7 +1448,7 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 			// We only report it to the first client to prevent double accounting.
 			r.wait <- &downloadResponse{
 				stats: stats,
-				err:   ioutil.WriteFile(filepath.Join(r.outDir, r.output.Path), data, perm),
+				err:   os.WriteFile(filepath.Join(r.outDir, r.output.Path), data, perm),
 			}
 			if i == 0 {
 				// Prevent races by not writing to the original stats.
@@ -1648,7 +1647,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 					if out.IsExecutable {
 						perm = c.ExecutableMode
 					}
-					if err := ioutil.WriteFile(filepath.Join(outDir, out.Path), data, perm); err != nil {
+					if err := os.WriteFile(filepath.Join(outDir, out.Path), data, perm); err != nil {
 						return err
 					}
 					statsMu.Lock()

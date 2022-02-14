@@ -3,11 +3,9 @@ package fakes
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -103,10 +101,7 @@ type TestEnv struct {
 func NewTestEnv(t testing.TB) (*TestEnv, func()) {
 	t.Helper()
 	// Set up temp directory.
-	execRoot, err := ioutil.TempDir("", strings.ReplaceAll(t.Name(), string(filepath.Separator), "_"))
-	if err != nil {
-		t.Fatalf("failed to make temp dir: %v", err)
-	}
+	execRoot := t.TempDir()
 	// Set up the fake.
 	s, err := NewServer(t)
 	if err != nil {
@@ -254,7 +249,7 @@ func (f *InputFile) Apply(ac *repb.ActionResult, s *Server, execRoot string) err
 	if err := os.MkdirAll(filepath.Join(execRoot, filepath.Dir(f.Path)), os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create input dir %v: %v", filepath.Dir(f.Path), err)
 	}
-	err := ioutil.WriteFile(filepath.Join(execRoot, f.Path), nil, 0755)
+	err := os.WriteFile(filepath.Join(execRoot, f.Path), nil, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to setup file %v under temp exec root %v: %v", f.Path, execRoot, err)
 	}
@@ -307,7 +302,7 @@ func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, ch
 	res := &repb.Directory{}
 	ch := []*repb.Directory{}
 
-	files, err := ioutil.ReadDir(filepath.Join(execRoot, path))
+	files, err := os.ReadDir(filepath.Join(execRoot, path))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed read directory: %v", err)
 	}
@@ -323,7 +318,7 @@ func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, ch
 			res.Directories = append(res.Directories, &repb.DirectoryNode{Name: fn, Digest: digest.TestNewFromMessage(root).ToProto()})
 			ch = append(ch, root)
 		} else {
-			content, err := ioutil.ReadFile(fp)
+			content, err := os.ReadFile(fp)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to read file: %v", err)
 			}
