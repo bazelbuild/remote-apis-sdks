@@ -1047,7 +1047,7 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 	})
 }
 
-func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *repb.Digest, compressed, updateCacheStats bool) error {
+func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *repb.Digest, compressed, updateCacheStats bool) (rerr error) {
 	ctx, cancel, withTimeout := withPerCallTimeout(ctx, u.Config.ByteStreamWrite.Timeout)
 	defer cancel()
 
@@ -1055,7 +1055,11 @@ func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *re
 	if err != nil {
 		return err
 	}
-	defer stream.CloseSend()
+	defer func() {
+		if _, err := stream.CloseAndRecv(); rerr == nil && err != io.EOF {
+			rerr = err
+		}
+	}()
 
 	req := &bspb.WriteRequest{}
 	if compressed {
