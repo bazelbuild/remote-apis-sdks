@@ -1020,7 +1020,7 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 		return stats, err
 	}
 	if wt.n != sz {
-		return stats, fmt.Errorf("partial read of digest %s returned %d bytes", wt.dg, sz)
+		return stats, fmt.Errorf("partial read of digest %s returned %d bytes", d, sz)
 	}
 
 	// Incomplete reads only, since we can't reliably calculate hash without the full blob
