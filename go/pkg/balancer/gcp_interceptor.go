@@ -194,6 +194,15 @@ func (cs *gcpClientStream) RecvMsg(m interface{}) error {
 	return cs.ClientStream.RecvMsg(m)
 }
 
+func (cs *gcpClientStream) CloseSend() error {
+	cs.Lock()
+	defer cs.Unlock()
+	if cs.ClientStream != nil {
+		return cs.ClientStream.CloseSend()
+	}
+	return nil
+}
+
 // ParseAPIConfig parses a json config file into ApiConfig proto message.
 func ParseAPIConfig(path string) (*pb.ApiConfig, error) {
 	jsonFile, err := os.ReadFile(path)
