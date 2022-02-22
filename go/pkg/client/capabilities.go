@@ -28,6 +28,23 @@ func (c *Client) CheckCapabilities(ctx context.Context) (err error) {
 	if c.serverCaps.CacheCapabilities != nil {
 		c.MaxBatchSize = MaxBatchSize(c.serverCaps.CacheCapabilities.MaxBatchTotalSizeBytes)
 	}
+
+	if useCompression := c.CompressedBytestreamThreshold >= 0; useCompression {
+		if c.serverCaps.CacheCapabilities.SupportedCompressors == nil {
+			return errors.New("the server does not support compression")
+		}
+
+		foundZstd := false
+		for _, sComp := range c.serverCaps.CacheCapabilities.SupportedCompressors {
+			if sComp == repb.Compressor_ZSTD {
+				foundZstd = true
+				break
+			}
+		}
+		if !foundZstd {
+			return errors.New("zstd is not supported by server, while the SDK only supports ZSTD compression")
+		}
+	}
 	return nil
 }
 
