@@ -72,8 +72,7 @@ type Client struct {
 	ChunkMaxSize ChunkMaxSize
 	// CompressedBytestreamThreshold is the threshold in bytes for which blobs are read and written
 	// compressed. Use 0 for all writes being compressed, and a negative number for all operations being
-	// uncompressed. TODO(rubensf): Make sure this will throw an error if the server doesn't support compression,
-	// pending https://github.com/bazelbuild/remote-apis/pull/168 being submitted.
+	// uncompressed.
 	CompressedBytestreamThreshold CompressedBytestreamThreshold
 	// MaxBatchDigests is maximum amount of digests to batch in batched operations.
 	MaxBatchDigests MaxBatchDigests
