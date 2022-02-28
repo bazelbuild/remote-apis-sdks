@@ -1002,12 +1002,12 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 
 			if err == nil && errC != nil {
 				err = errC
-			} else {
+			} else if errC != nil {
 				log.Errorf("Failed to close writer: %v", errC)
 			}
 			if err == nil && errD != nil {
 				err = errD
-			} else {
+			} else if errD != nil {
 				log.Errorf("Failed to finalize writing blob: %v", errD)
 			}
 		}()
