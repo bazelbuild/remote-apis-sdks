@@ -192,7 +192,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			}
 			targetExecRoot, targetSymDir, err := getTargetRelPath(execRoot, normPath, meta.Symlink)
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "failed to determine the target of symlink %v as a child of %v", normPath, execRoot)
 			}
 
 			fs[remoteNormPath] = &fileSysNode{
