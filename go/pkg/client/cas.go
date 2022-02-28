@@ -1003,8 +1003,8 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 			if err != nil && errC != nil {
 				err = errC
 			}
-			if err != nil && errD != nil {
-				err = fmt.Errorf("Failed to finalize writing downloaded data downstream: %v", err)
+			if errD != nil {
+				err = fmt.Errorf("Failed to finalize writing downloaded data downstream: %v", errD)
 			}
 		}()
 
@@ -1020,7 +1020,7 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 		return stats, err
 	}
 	if wt.n != sz {
-		return stats, fmt.Errorf("partial read of digest %s returned %d bytes", d, sz)
+		return stats, fmt.Errorf("partial read of digest %s returned %d bytes, expected %d bytes", d, wt.n, sz)
 	}
 
 	// Incomplete reads only, since we can't reliably calculate hash without the full blob
