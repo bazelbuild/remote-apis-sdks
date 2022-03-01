@@ -2,7 +2,6 @@ package client
 
 // This module provides functionality for constructing a Merkle tree of uploadable inputs.
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
+	"github.com/pkg/errors"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
@@ -192,7 +192,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			}
 			targetExecRoot, targetSymDir, err := getTargetRelPath(execRoot, normPath, meta.Symlink)
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "failed to determine the target of symlink %q as a child of %q", normPath, execRoot)
 			}
 
 			fs[remoteNormPath] = &fileSysNode{
