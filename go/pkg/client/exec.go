@@ -218,6 +218,12 @@ func buildCommand(ac *Action) *repb.Command {
 //   1) If an error occurs before the first operation is returned, or after the final operation is
 //      returned (i.e. the one with op.Done==true), retry by calling Execute again.
 //   2) Otherwise, retry by calling WaitExecution with the last operation name.
+// In addition, we want the retrier to trigger based on certain operation statuses as well as on
+// explicit errors. (The shouldRetry function knows which statuses.) We do this by mapping statuses,
+// if present, to errors inside the closure and then throwing away such "fake" errors outside the
+// closure (if we ran out of retries or if there was never a retrier enabled). The exception is
+// deadline-exceeded statuses, which we never give to the retrier (and hence will always propagate
+// directly to the caller).
 func (c *Client) ExecuteAndWait(ctx context.Context, req *repb.ExecuteRequest) (op *oppb.Operation, err error) {
 	return c.ExecuteAndWaitProgress(ctx, req, nil)
 }
@@ -227,7 +233,8 @@ func (c *Client) ExecuteAndWait(ctx context.Context, req *repb.ExecuteRequest) (
 // The supplied callback function is called for each message received to update the state of
 // the remote action.
 func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRequest, progress func(metadata *repb.ExecuteOperationMetadata)) (op *oppb.Operation, err error) {
-	wait := false // Should we retry by calling WaitExecution instead of Execute?
+	wait := false    // Should we retry by calling WaitExecution instead of Execute?
+	opError := false // Are we propagating an Operation status as an error for the retrier's benefit?
 	lastOp := &oppb.Operation{}
 	closure := func(ctx context.Context) (e error) {
 		var res regrpc.Execution_ExecuteClient
@@ -256,10 +263,18 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 				}
 			}
 		}
+		st := OperationStatus(lastOp)
+		if st != nil {
+			opError = true
+			if st.Code() == codes.DeadlineExceeded {
+				return nil
+			}
+			return st.Err()
+		}
 		return nil
 	}
 	err = c.Retrier.Do(ctx, func() error { return c.CallWithTimeout(ctx, "Execute", closure) })
-	if err != nil {
+	if err != nil && !opError {
 		if st, ok := status.FromError(err); ok {
 			err = StatusDetailedError(st)
 		}
