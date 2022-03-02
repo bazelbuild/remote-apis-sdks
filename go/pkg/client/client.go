@@ -430,6 +430,13 @@ type DialParams struct {
 	// UseComputeEngine indicates that the default CE credentials should be used.
 	UseComputeEngine bool
 
+	// UseExternalAuthToken indicates whether an externally specified auth token should be used.
+	// If set to true, ExternalPerRPCCreds should also be non-nil.
+	UseExternalAuthToken bool
+
+	// ExternalPerRPCCreds refers to the per RPC credentials that should be used for each RPC.
+	ExternalPerRPCCreds *PerRPCCreds
+
 	// CredFile is the JSON file that contains the credentials for RPCs.
 	CredFile string
 
@@ -543,6 +550,17 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 	if params.NoSecurity {
 		opts = append(opts, grpc.WithInsecure())
 	} else if params.NoAuth {
+		// Set the ServerName and RootCAs fields, if needed.
+		tlsConfig, err := createTLSConfig(params)
+		if err != nil {
+			return nil, fmt.Errorf("could not create TLS config: %v", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	} else if params.UseExternalAuthToken {
+		if params.ExternalPerRPCCreds == nil {
+			return nil, fmt.Errorf("ExternalPerRPCCreds unspecified when using external auth token mechanism")
+		}
+		opts = append(opts, grpc.WithPerRPCCredentials(params.ExternalPerRPCCreds.Creds))
 		// Set the ServerName and RootCAs fields, if needed.
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
