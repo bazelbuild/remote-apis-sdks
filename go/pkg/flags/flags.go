@@ -33,6 +33,8 @@ var (
 	UseGCECredentials = flag.Bool("use_gce_credentials", false, "If true (and --use_application_default_credentials is false), use the default GCE credentials to authenticate with remote execution.")
 	// UseRPCCredentials can be set to false to disable all per-RPC credentials.
 	UseRPCCredentials = flag.Bool("use_rpc_credentials", true, "If false, no per-RPC credentials will be used (disables --credential_file, --use_application_default_credentials, and --use_gce_credentials.")
+	// UseExternalAuthToken specifies whether to use an externally provided auth token, given via PerRPCCreds dial option, should be used.
+	UseExternalAuthToken = flag.Bool("use_external_auth_token", false, "If true, se an externally provided auth token, given via PerRPCCreds when the SDK is initialized.")
 	// Service represents the host (and, if applicable, port) of the remote execution service.
 	Service = flag.String("service", "", "The remote execution service to dial when calling via gRPC, including port, such as 'localhost:8790' or 'remotebuildexecution.googleapis.com:443'")
 	// ServiceNoSecurity can be set to connect to the gRPC service without TLS and without authentication (enables --service_no_auth).
@@ -93,6 +95,14 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 		opts = append(opts, client.RPCTimeouts(timeouts))
 	}
+	var perRPCCreds *client.PerRPCCreds
+	for _, opt := range opts {
+		switch opt.(type) {
+		case *client.PerRPCCreds:
+			perRPCCreds = (opt).(*(client.PerRPCCreds))
+		}
+	}
+
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
 		NoSecurity:            *ServiceNoSecurity,
@@ -101,6 +111,8 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		CredFile:              *CredFile,
 		UseApplicationDefault: *UseApplicationDefaultCreds,
 		UseComputeEngine:      *UseGCECredentials,
+		UseExternalAuthToken:  *UseExternalAuthToken,
+		ExternalPerRPCCreds:   perRPCCreds,
 		TransportCredsOnly:    !*UseRPCCredentials,
 		TLSServerName:         *TLSServerName,
 		TLSCACertFile:         *TLSCACert,
