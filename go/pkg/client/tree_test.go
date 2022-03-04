@@ -253,7 +253,7 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 		bDirDg:       bDirBlob,
 		cDirDg:       cDirBlob,
 		fileDg:       fileBlob,
-		digest.Empty: {},
+		digest.Empty: []byte{},
 	}
 
 	gotBlobs := make(map[digest.Digest][]byte)
@@ -343,15 +343,15 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 
 	root := t.TempDir()
 	inputSpec := &command.InputSpec{VirtualInputs: []*command.VirtualInput{
-		{Path: "b/c/empty", IsEmptyDirectory: true},
-		{Path: "b/empty", IsEmptyDirectory: true},
-		{Path: "empty", IsEmptyDirectory: true},
+		&command.VirtualInput{Path: "b/c/empty", IsEmptyDirectory: true},
+		&command.VirtualInput{Path: "b/empty", IsEmptyDirectory: true},
+		&command.VirtualInput{Path: "empty", IsEmptyDirectory: true},
 	}}
 	wantBlobs := map[digest.Digest][]byte{
 		aDirDg:       aDirBlob,
 		bDirDg:       bDirBlob,
 		cDirDg:       cDirBlob,
-		digest.Empty: {},
+		digest.Empty: []byte{},
 	}
 
 	gotBlobs := make(map[digest.Digest][]byte)
@@ -966,7 +966,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "barDir"},
 				InputExclusions: []*command.InputExclusion{
-					{Regex: `txt$`, Type: command.FileInputType},
+					&command.InputExclusion{Regex: `txt$`, Type: command.FileInputType},
 				},
 			},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
@@ -998,7 +998,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"foo", "fooDir", "barDir"},
 				InputExclusions: []*command.InputExclusion{
-					{Regex: `foo`, Type: command.DirectoryInputType},
+					&command.InputExclusion{Regex: `foo`, Type: command.DirectoryInputType},
 				},
 			},
 			rootDir: &repb.Directory{
@@ -1028,7 +1028,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"foo", "fooDir", "barDir"},
 				InputExclusions: []*command.InputExclusion{
-					{Regex: `foo`, Type: command.UnspecifiedInputType},
+					&command.InputExclusion{Regex: `foo`, Type: command.UnspecifiedInputType},
 				},
 			},
 			rootDir: &repb.Directory{
@@ -1051,8 +1051,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Virtual inputs",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					{Path: "fooDir/foo", Contents: fooBlob, IsExecutable: true},
-					{Path: "barDir/bar", Contents: barBlob},
+					&command.VirtualInput{Path: "fooDir/foo", Contents: fooBlob, IsExecutable: true},
+					&command.VirtualInput{Path: "barDir/bar", Contents: barBlob},
 				},
 			},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
@@ -1075,8 +1075,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "barDir"},
 				VirtualInputs: []*command.VirtualInput{
-					{Path: "fooDir/foo", Contents: barBlob, IsExecutable: true},
-					{Path: "barDir/bar", IsEmptyDirectory: true},
+					&command.VirtualInput{Path: "fooDir/foo", Contents: barBlob, IsExecutable: true},
+					&command.VirtualInput{Path: "barDir/bar", IsEmptyDirectory: true},
 				},
 			},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
@@ -1105,7 +1105,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "barDir"},
 				VirtualInputs: []*command.VirtualInput{
-					{Path: "barDir", IsEmptyDirectory: true},
+					&command.VirtualInput{Path: "barDir", IsEmptyDirectory: true},
 				},
 			},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
@@ -1134,7 +1134,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "bar"},
 				VirtualInputs: []*command.VirtualInput{
-					{Path: "bar/baz", IsEmptyDirectory: true},
+					&command.VirtualInput{Path: "bar/baz", IsEmptyDirectory: true},
 				},
 			},
 			rootDir: &repb.Directory{
@@ -1144,7 +1144,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				},
 				Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}},
 			},
-			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, {}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, []byte{}},
 			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
@@ -1165,8 +1165,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "bar"},
 				VirtualInputs: []*command.VirtualInput{
-					{Path: "bar/baz", IsEmptyDirectory: true},
-					{Path: "bar", IsEmptyDirectory: true},
+					&command.VirtualInput{Path: "bar/baz", IsEmptyDirectory: true},
+					&command.VirtualInput{Path: "bar", IsEmptyDirectory: true},
 				},
 			},
 			rootDir: &repb.Directory{
@@ -1176,7 +1176,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				},
 				Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}},
 			},
-			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, {}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, []byte{}},
 			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
@@ -1192,8 +1192,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Normalizing virtual inputs paths",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					{Path: "//fooDir/../fooDir/foo", Contents: fooBlob, IsExecutable: true},
-					{Path: "barDir///bar", Contents: barBlob},
+					&command.VirtualInput{Path: "//fooDir/../fooDir/foo", Contents: fooBlob, IsExecutable: true},
+					&command.VirtualInput{Path: "barDir///bar", Contents: barBlob},
 				},
 			},
 			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
@@ -1357,7 +1357,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			desc: "empty virtual input",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					{Path: "", Contents: []byte("foo")},
+					&command.VirtualInput{Path: "", Contents: []byte("foo")},
 				},
 			},
 		},
@@ -1462,14 +1462,14 @@ func TestFlattenTreeRepeated(t *testing.T) {
 		t.Errorf("FlattenTree gave error %v", err)
 	}
 	wantOutputs := map[string]*client.TreeOutput{
-		"x/baz":     {Digest: bazDigest},
-		"x/a/b/c":   {IsEmptyDirectory: true, Digest: digest.Empty},
-		"x/a/b/foo": {Digest: fooDigest},
-		"x/a/b/bar": {Digest: barDigest, IsExecutable: true},
-		"x/b/c":     {IsEmptyDirectory: true, Digest: digest.Empty},
-		"x/b/foo":   {Digest: fooDigest},
-		"x/b/bar":   {Digest: barDigest, IsExecutable: true},
-		"x/c":       {IsEmptyDirectory: true, Digest: digest.Empty},
+		"x/baz":     &client.TreeOutput{Digest: bazDigest},
+		"x/a/b/c":   &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
+		"x/a/b/foo": &client.TreeOutput{Digest: fooDigest},
+		"x/a/b/bar": &client.TreeOutput{Digest: barDigest, IsExecutable: true},
+		"x/b/c":     &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
+		"x/b/foo":   &client.TreeOutput{Digest: fooDigest},
+		"x/b/bar":   &client.TreeOutput{Digest: barDigest, IsExecutable: true},
+		"x/c":       &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenTree gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))
@@ -1514,7 +1514,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			paths:     []string{"foo", "bar"},
 			wantBlobs: [][]byte{fooBlob},
 			wantResult: &repb.ActionResult{
-				OutputFiles: []*repb.OutputFile{{Path: "foo", Digest: fooDgPb, IsExecutable: true}},
+				OutputFiles: []*repb.OutputFile{&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true}},
 			},
 			wantCacheCalls: map[string]int{
 				"bar": 1,
@@ -1532,8 +1532,8 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					{Path: "foo", Digest: fooDgPb, IsExecutable: true},
-					{Path: "bar", Digest: barDgPb},
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true},
+					&repb.OutputFile{Path: "bar", Digest: barDgPb},
 				},
 			},
 			wantCacheCalls: map[string]int{
@@ -1553,8 +1553,8 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					{Path: "foo", Digest: fooDgPb, IsExecutable: true},
-					{Path: "../bar", Digest: barDgPb},
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true},
+					&repb.OutputFile{Path: "../bar", Digest: barDgPb},
 				},
 			},
 			wantCacheCalls: map[string]int{
@@ -1572,7 +1572,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantBlobs: [][]byte{barBlob},
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
-					{Path: "dir1/dir2/bar", Digest: barDgPb},
+					&repb.OutputFile{Path: "dir1/dir2/bar", Digest: barDgPb},
 				},
 			},
 			wantCacheCalls: map[string]int{
@@ -1590,8 +1590,8 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					{Path: "foo", Digest: fooDgPb, IsExecutable: true},
-					{Path: "bar", Digest: fooDgPb},
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true},
+					&repb.OutputFile{Path: "bar", Digest: fooDgPb},
 				},
 			},
 			wantCacheCalls: map[string]int{
@@ -1671,7 +1671,6 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 	}
 	dir2Blob := mustMarshal(dir2)
 	dir2Dg := digest.NewFromBlob(dir2Blob)
-
 	tests := []struct {
 		desc  string
 		input []*inputPath
@@ -1752,6 +1751,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			},
 		},
 	}
+
 	for _, tc := range tests {
 		root := t.TempDir()
 		if err := construct(root, tc.input); err != nil {
