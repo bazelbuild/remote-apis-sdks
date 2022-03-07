@@ -21,21 +21,22 @@ import (
 )
 
 var (
-	fooBlob, barBlob = []byte("foo"), []byte("bar")
-	fooDg, barDg     = digest.NewFromBlob(fooBlob), digest.NewFromBlob(barBlob)
-	fooDgPb, barDgPb = fooDg.ToProto(), barDg.ToProto()
+	fooBlob, barBlob, bazBlob = []byte("foo"), []byte("bar"), []byte("baz")
+	fooDg, barDg, bazDg       = digest.NewFromBlob(fooBlob), digest.NewFromBlob(barBlob), digest.NewFromBlob(bazBlob)
+	fooDgPb, barDgPb, bazDgPb = fooDg.ToProto(), barDg.ToProto(), bazDg.ToProto()
 
 	fooDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true}}}
 	barDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}}}
+	bazDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "baz", Digest: bazDgPb}}}
 	vBarDir   = &repb.Directory{Directories: []*repb.DirectoryNode{{Name: "baz", Digest: digest.Empty.ToProto()}}}
 	foobarDir = &repb.Directory{Files: []*repb.FileNode{
 		{Name: "bar", Digest: barDgPb},
 		{Name: "foo", Digest: fooDgPb, IsExecutable: true},
 	}}
 
-	fooDirBlob, barDirBlob, foobarDirBlob, vBarDirBlob = mustMarshal(fooDir), mustMarshal(barDir), mustMarshal(foobarDir), mustMarshal(vBarDir)
-	fooDirDg, barDirDg, foobarDirDg, vBarDirDg         = digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob), digest.NewFromBlob(vBarDirBlob)
-	fooDirDgPb, barDirDgPb, foobarDirDgPb, vBarDirDgPb = fooDirDg.ToProto(), barDirDg.ToProto(), foobarDirDg.ToProto(), vBarDirDg.ToProto()
+	fooDirBlob, barDirBlob, foobarDirBlob, bazDirBlob, vBarDirBlob = mustMarshal(fooDir), mustMarshal(barDir), mustMarshal(foobarDir), mustMarshal(bazDir), mustMarshal(vBarDir)
+	fooDirDg, barDirDg, foobarDirDg, bazDirDg, vBarDirDg           = digest.NewFromBlob(fooDirBlob), digest.NewFromBlob(barDirBlob), digest.NewFromBlob(foobarDirBlob), digest.NewFromBlob(bazDirBlob), digest.NewFromBlob(vBarDirBlob)
+	fooDirDgPb, barDirDgPb, foobarDirDgPb, bazDirDgPb, vBarDirDgPb = fooDirDg.ToProto(), barDirDg.ToProto(), foobarDirDg.ToProto(), bazDirDg.ToProto(), vBarDirDg.ToProto()
 )
 
 func mustMarshal(p proto.Message) []byte {
@@ -1647,30 +1648,42 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 }
 
 func TestComputeOutputsToUploadDirectories(t *testing.T) {
-	// Build a Directory tree dir1/dir2/dir3/dir4/foo to test that ComputeOutputsToUpload will
-	// preserve this order when appending the child nodes.
-	dir4 := &repb.Directory{
-		Directories: []*repb.DirectoryNode{
-			{Name: "dir4", Digest: fooDirDgPb},
-		},
-	}
-	dir4Blob := mustMarshal(dir4)
-	dir4Dg := digest.NewFromBlob(dir4Blob)
-	dir3 := &repb.Directory{
-		Directories: []*repb.DirectoryNode{
-			{Name: "dir3", Digest: dir4Dg.ToProto()},
-		},
-	}
-	dir3Blob := mustMarshal(dir3)
-	dir3Dg := digest.NewFromBlob(dir3Blob)
+	/*
+		We want to test that the directory tree is built consistently and in lexical order according to it's path.
+		Building directory with structure:
 
-	dir2 := &repb.Directory{
+		dirA
+		  -> dirC
+		  -> dirF
+		dirB
+		  -> dirD
+		  -> dirE
+
+		We should get a Tree like
+		{
+			root: <root node>
+			children: [dirA, dirC, dirF, dirB, dirD, dirE]
+		}
+	*/
+
+	dirA := &repb.Directory{
 		Directories: []*repb.DirectoryNode{
-			{Name: "dir2", Digest: dir3Dg.ToProto()},
+			{Name: "dirC", Digest: barDirDgPb},
+			{Name: "dirF", Digest: fooDirDgPb},
 		},
 	}
-	dir2Blob := mustMarshal(dir2)
-	dir2Dg := digest.NewFromBlob(dir2Blob)
+	dirABlob := mustMarshal(dirA)
+	dirADg := digest.NewFromBlob(dirABlob)
+
+	dirB := &repb.Directory{
+		Directories: []*repb.DirectoryNode{
+			{Name: "dirD", Digest: bazDirDgPb},
+			{Name: "dirE", Digest: foobarDirDgPb},
+		},
+	}
+	dirBBlob := mustMarshal(dirB)
+	dirBDg := digest.NewFromBlob(dirBBlob)
+
 	tests := []struct {
 		desc  string
 		input []*inputPath
@@ -1734,20 +1747,31 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 		{
 			desc: "Directory tree preserves natural order",
 			input: []*inputPath{
-				{path: "a/b/fooDir/dir1/dir2/dir3/dir4/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "a/b/fooDir/dirA/dirC/bar", fileContents: barBlob},
+				{path: "a/b/fooDir/dirA/dirF/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "a/b/fooDir/dirB/dirD/baz", fileContents: bazBlob},
+				{path: "a/b/fooDir/dirB/dirE/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "a/b/fooDir/dirB/dirE/bar", fileContents: barBlob},
 			},
-			wantBlobs: [][]byte{fooBlob, fooDirBlob, dir4Blob, dir3Blob, dir2Blob},
+			wantBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob, dirABlob, dirBBlob, bazDirBlob, bazBlob, foobarDirBlob},
 			wantTreeRoot: &repb.Directory{Directories: []*repb.DirectoryNode{
-				{Name: "dir1", Digest: dir2Dg.ToProto()},
+				{Name: "dirA", Digest: dirADg.ToProto()},
+				{Name: "dirB", Digest: dirBDg.ToProto()},
 			}},
-			wantTreeChildren: []*repb.Directory{dir2, dir3, dir4, fooDir},
+			wantTreeChildren: []*repb.Directory{dirA, barDir, fooDir, dirB, bazDir, foobarDir},
 			wantCacheCalls: map[string]int{
-				"a/b/fooDir":                         2,
-				"a/b/fooDir/dir1":                    1,
-				"a/b/fooDir/dir1/dir2":               1,
-				"a/b/fooDir/dir1/dir2/dir3":          1,
-				"a/b/fooDir/dir1/dir2/dir3/dir4":     1,
-				"a/b/fooDir/dir1/dir2/dir3/dir4/foo": 1,
+				"a/b/fooDir":               2,
+				"a/b/fooDir/dirA":          1,
+				"a/b/fooDir/dirA/dirC":     1,
+				"a/b/fooDir/dirA/dirC/bar": 1,
+				"a/b/fooDir/dirA/dirF":     1,
+				"a/b/fooDir/dirA/dirF/foo": 1,
+				"a/b/fooDir/dirB":          1,
+				"a/b/fooDir/dirB/dirD":     1,
+				"a/b/fooDir/dirB/dirD/baz": 1,
+				"a/b/fooDir/dirB/dirE":     1,
+				"a/b/fooDir/dirB/dirE/foo": 1,
+				"a/b/fooDir/dirB/dirE/bar": 1,
 			},
 		},
 	}
