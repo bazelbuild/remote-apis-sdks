@@ -3,7 +3,6 @@ package client
 // This module provides functionality for constructing a Merkle tree of uploadable inputs.
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -472,19 +471,28 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 	return flatFiles, nil
 }
 
-func packageDirectories(t *treeNode) (root *repb.Directory, children map[string]*repb.Directory, files map[digest.Digest]*uploadinfo.Entry, err error) {
+func packageDirectories(t *treeNode) (root *repb.Directory, children map[string]*repb.Directory, files map[digest.Digest]*uploadinfo.Entry, dirOrder []string, err error) {
 	root = &repb.Directory{}
 	children = make(map[string]*repb.Directory)
 	files = make(map[digest.Digest]*uploadinfo.Entry)
+	childDirs := make([]string, 0, len(t.dirs))
 
-	for name, child := range t.dirs {
-		chRoot, chDirs, childFiles, err := packageDirectories(child)
+	for name, _ := range t.dirs {
+		childDirs = append(childDirs, name)
+	}
+	sort.Strings(childDirs)
+
+	for _, name := range childDirs {
+		child := t.dirs[name]
+		dirOrder = append(dirOrder, name)
+		chRoot, chDirs, childFiles, order, err := packageDirectories(child)
+		dirOrder = append(dirOrder, order...)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		ue, err := uploadinfo.EntryFromProto(chRoot)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		dg := ue.Digest
 		root.Directories = append(root.Directories, &repb.DirectoryNode{Name: name, Digest: dg.ToProto()})
@@ -504,7 +512,7 @@ func packageDirectories(t *treeNode) (root *repb.Directory, children map[string]
 		files[dg] = fn.ue
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
-	return root, children, files, nil
+	return root, children, files, dirOrder, nil
 }
 
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
@@ -547,7 +555,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 		}
 
 		treePb := &repb.Tree{}
-		rootDir, childDirs, files, err := packageDirectories(ft)
+		rootDir, childDirs, files, order, err := packageDirectories(ft)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -557,18 +565,8 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 		}
 		outs[ue.Digest] = ue
 		treePb.Root = rootDir
-		err = filepath.Walk(absPath, func(path string, info fs.FileInfo, err error) error {
-			if err != nil {
-				fmt.Printf("Failure accessing path %q: %v\n", path, err)
-				return err
-			}
-			if info.IsDir() && childDirs[info.Name()] != nil {
-				treePb.Children = append(treePb.Children, childDirs[info.Name()])
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, nil, err
+		for _, name := range order {
+			treePb.Children = append(treePb.Children, childDirs[name])
 		}
 		ue, err = uploadinfo.EntryFromProto(treePb)
 		if err != nil {
