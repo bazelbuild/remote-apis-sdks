@@ -471,13 +471,20 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 	return flatFiles, nil
 }
 
-func packageDirectories(t *treeNode) (root *repb.Directory, children map[digest.Digest]*repb.Directory, files map[digest.Digest]*uploadinfo.Entry, err error) {
+func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Digest]*uploadinfo.Entry, treePb *repb.Tree, err error) {
 	root = &repb.Directory{}
-	children = make(map[digest.Digest]*repb.Directory)
 	files = make(map[digest.Digest]*uploadinfo.Entry)
+	childDirs := make([]string, 0, len(t.dirs))
+	treePb = &repb.Tree{}
 
-	for name, child := range t.dirs {
-		chRoot, chDirs, childFiles, err := packageDirectories(child)
+	for name := range t.dirs {
+		childDirs = append(childDirs, name)
+	}
+	sort.Strings(childDirs)
+
+	for _, name := range childDirs {
+		child := t.dirs[name]
+		chRoot, childFiles, chTree, err := packageDirectories(child)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -490,10 +497,8 @@ func packageDirectories(t *treeNode) (root *repb.Directory, children map[digest.
 		for d, b := range childFiles {
 			files[d] = b
 		}
-		children[dg] = chRoot
-		for d, b := range chDirs {
-			children[d] = b
-		}
+		treePb.Children = append(treePb.Children, chRoot)
+		treePb.Children = append(treePb.Children, chTree.Children...)
 	}
 	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
 
@@ -503,7 +508,7 @@ func packageDirectories(t *treeNode) (root *repb.Directory, children map[digest.
 		files[dg] = fn.ue
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
-	return root, children, files, nil
+	return root, files, treePb, nil
 }
 
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
@@ -545,8 +550,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 			return nil, nil, err
 		}
 
-		treePb := &repb.Tree{}
-		rootDir, childDirs, files, err := packageDirectories(ft)
+		rootDir, files, treePb, err := packageDirectories(ft)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -556,9 +560,6 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 		}
 		outs[ue.Digest] = ue
 		treePb.Root = rootDir
-		for _, c := range childDirs {
-			treePb.Children = append(treePb.Children, c)
-		}
 		ue, err = uploadinfo.EntryFromProto(treePb)
 		if err != nil {
 			return nil, nil, err
