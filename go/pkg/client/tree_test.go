@@ -1745,7 +1745,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			},
 		},
 		{
-			desc: "Directory tree preserves natural order",
+			desc: "Directory tree preserves lexicographical order",
 			input: []*inputPath{
 				{path: "a/b/fooDir/dirA/dirC/bar", fileContents: barBlob},
 				{path: "a/b/fooDir/dirA/dirF/foo", fileContents: fooBlob, isExecutable: true},
