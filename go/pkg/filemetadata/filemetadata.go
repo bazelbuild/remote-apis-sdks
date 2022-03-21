@@ -111,15 +111,13 @@ func Compute(filename string) *Metadata {
 			return md
 		}
 		xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
-		if err != nil {
-			md.Err = &FileError{Err: err}
+		if err == nil {
+			md.Digest = digest.Digest{
+				Hash: string(xattrValue),
+				Size: file.Size(),
+			}
 			return md
 		}
-		md.Digest = digest.Digest{
-			Hash: string(xattrValue),
-			Size: file.Size(),
-		}
-		return md
 	}
 	md.Digest, md.Err = digest.NewFromFile(filename)
 	return md
