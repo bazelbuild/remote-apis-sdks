@@ -1221,6 +1221,136 @@ func TestDownloadActionOutputs(t *testing.T) {
 	}
 }
 
+func TestDownloadActionOutputs_TestFileModifiedTimestamp(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+	cache := filemetadata.NewSingleFlightCache()
+
+	fooDigest := fake.Put([]byte("foo"))
+	barDigest := fake.Put([]byte("bar"))
+	emptyDigest := fake.Put([]byte(""))
+
+	// Expected tree structure:
+	// root
+	//     --> a/
+	//         --> b/
+	//             --> foo
+	//             --> empty
+	//         --> bar
+	//         --> empty
+	//     --> b/
+	//         --> foo
+	//         --> empty
+
+	ar := &repb.ActionResult{
+		OutputFiles: []*repb.OutputFile{
+			&repb.OutputFile{Path: "dir/a/b/foo", Digest: fooDigest.ToProto()},
+			&repb.OutputFile{Path: "dir/a/b/empty", Digest: emptyDigest.ToProto()},
+			&repb.OutputFile{Path: "dir/a/bar", Digest: barDigest.ToProto()},
+			&repb.OutputFile{Path: "dir/a/empty", Digest: emptyDigest.ToProto()},
+			&repb.OutputFile{Path: "dir/b/foo", Digest: fooDigest.ToProto()},
+			&repb.OutputFile{Path: "dir/b/empty", Digest: emptyDigest.ToProto()},
+		},
+	}
+	execRoot := t.TempDir()
+	wd := "wd"
+	if err := os.Mkdir(filepath.Join(execRoot, wd), os.ModePerm); err != nil {
+		t.Fatalf("failed to create working directory %v: %v", wd, err)
+	}
+
+	// Pre-create some output files to make sure file modified timestamps get updated post
+	// file download.
+	outputFilesToPrecreate := []string{
+		filepath.Join(execRoot, "wd/dir/a/b/empty"),
+		filepath.Join(execRoot, "wd/dir/a/empty"),
+	}
+	for _, p := range outputFilesToPrecreate {
+		dir := filepath.Dir(p)
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			t.Fatalf("Unable to precreate dirs for file %v: %v", dir, err)
+		}
+		f, err := os.Create(p)
+		f.Close()
+		if err != nil {
+			t.Fatalf("Unable to precreate file %v: %v", p, err)
+		}
+	}
+	wantMinModTime := time.Now().Local()
+	time.Sleep(2 * time.Second) // system mtimes aren't super accurate - https://apenwarr.ca/log/20181113
+
+	_, err := c.DownloadActionOutputs(ctx, ar, filepath.Join(execRoot, wd), cache)
+	if err != nil {
+		t.Errorf("error in DownloadActionOutputs: %s", err)
+	}
+	wantOutputs := []struct {
+		path         string
+		isExecutable bool
+		contents     []byte
+		fileDigest   *digest.Digest
+	}{
+		{
+			path:         "wd/dir/a/b/foo",
+			isExecutable: true,
+			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
+		},
+		{
+			path:     "wd/dir/a/bar",
+			contents: []byte("bar"),
+		},
+		{
+			path:         "wd/dir/b/foo",
+			isExecutable: true,
+			contents:     []byte("foo"),
+			fileDigest:   &fooDigest,
+		},
+		{
+			path:     "wd/dir/a/b/empty",
+			contents: []byte(""),
+		},
+		{
+			path:     "wd/dir/a/empty",
+			contents: []byte(""),
+		},
+		{
+			path:     "wd/dir/b/empty",
+			contents: []byte(""),
+		},
+	}
+	for _, out := range wantOutputs {
+		path := filepath.Join(execRoot, out.path)
+		fi, err := os.Lstat(path)
+		if err != nil {
+			t.Errorf("expected output %s is missing", path)
+		}
+		if fi.ModTime().Before(wantMinModTime) {
+			t.Errorf("File %v has old timestamp, want >= %v, got %v", path, wantMinModTime, fi.ModTime())
+		}
+		if out.fileDigest != nil {
+			fmd := cache.Get(path)
+			if fmd == nil {
+				t.Errorf("cache does not contain metadata for path: %v", path)
+			} else {
+				if diff := cmp.Diff(*out.fileDigest, fmd.Digest); diff != "" {
+					t.Errorf("invalid digeset in cache for path %v, (-want +got): %v", path, diff)
+				}
+			}
+		} else {
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Errorf("error reading from %s: %v", path, err)
+			}
+			if !bytes.Equal(contents, out.contents) {
+				t.Errorf("expected %s to contain %v, got %v", path, out.contents, contents)
+			}
+		}
+	}
+}
+
 func TestDownloadDirectory(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
