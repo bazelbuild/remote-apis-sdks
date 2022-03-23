@@ -1340,7 +1340,7 @@ func copyFile(srcOutDir, dstOutDir, from, to string, mode os.FileMode) error {
 	defer s.Close()
 
 	dst := filepath.Join(dstOutDir, to)
-	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, mode)
+	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
