@@ -41,6 +41,7 @@ func TestComputeFilesNoXattr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			before := time.Now().Truncate(time.Second)
+			time.Sleep(5 * time.Second)
 			filename, err := testutil.CreateFile(t, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)

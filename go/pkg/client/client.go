@@ -43,6 +43,62 @@ const (
 	HomeDirMacro = "${HOME}"
 )
 
+// AuthType indicates the type of authentication being used.
+type AuthType int
+
+const (
+	// Unknown auth type.
+	UnknownAuth AuthType = iota
+
+	// No authentication used to connect to the RBE service.
+	NoAuth
+
+	// External auth token used to connect to the RBE service.
+	ExternalTokenAuth
+
+	// A JSON credentials file used to connect to the RBE service.
+	CredsFileAuth
+
+	// Application default credentials used to connect to the RBE service.
+	ApplicationDefaultCredsAuth
+
+	// GCE machine credentials used to connect to the RBE service.
+	GCECredsAuth
+)
+
+// String returns a human readable form of authentication used to connect to RBE.
+func (a AuthType) String() string {
+	switch a {
+	case NoAuth:
+		return "no authentication"
+	case ExternalTokenAuth:
+		return "external authentication token (gcert?)"
+	case CredsFileAuth:
+		return "credentials file"
+	case ApplicationDefaultCredsAuth:
+		return "application default credentials"
+	case GCECredsAuth:
+		return "gce credentials"
+	}
+	return "unknown authentication type"
+}
+
+// ClientInitError is used to wrap the error returned when initializing a new
+// client to also indicate the type of authentication used.
+type ClientInitError struct {
+	// Err refers to the underlying client initialization error.
+	Err error
+
+	// AuthUsed stores the type of authentication used to connect to RBE.
+	AuthUsed AuthType
+}
+
+// Error returns a string error that includes information about the
+// type of auth used to connect to RBE.
+func (ce *ClientInitError) Error() string {
+	return fmt.Sprintf("%v, authentication type (identity) used=%q", ce.Err.Error(), ce.AuthUsed)
+}
+
 // Client is a client to several services, including remote execution and services used in
 // conjunction with remote execution. A Client must be constructed by calling Dial() or NewClient()
 // rather than attempting to assemble it directly.
@@ -401,18 +457,19 @@ func getImpersonatedRPCCreds(ctx context.Context, actAs string, cred credentials
 	}
 }
 
-func getRPCCreds(ctx context.Context, credFile string, useApplicationDefault bool, useComputeEngine bool) (credentials.PerRPCCredentials, error) {
+func getRPCCreds(ctx context.Context, credFile string, useApplicationDefault bool, useComputeEngine bool) (credentials.PerRPCCredentials, AuthType, error) {
 	if useApplicationDefault {
-		return oauth.NewApplicationDefault(ctx, scopes)
+		c, err := oauth.NewApplicationDefault(ctx, scopes)
+		return c, ApplicationDefaultCredsAuth, err
 	}
 	if useComputeEngine {
-		return oauth.NewComputeEngine(), nil
+		return oauth.NewComputeEngine(), GCECredsAuth, nil
 	}
 	rpcCreds, err := oauth.NewServiceAccountFromFile(credFile, scopes)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't create RPC creds from %s: %v", credFile, err)
+		return nil, CredsFileAuth, fmt.Errorf("couldn't create RPC creds from %s: %v", credFile, err)
 	}
-	return rpcCreds, nil
+	return rpcCreds, CredsFileAuth, nil
 }
 
 // DialParams contains all the parameters that Dial needs.
@@ -537,7 +594,9 @@ func createTLSConfig(params DialParams) (*tls.Config, error) {
 }
 
 // Dial dials a given endpoint and returns the grpc connection that is established.
-func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, error) {
+func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, AuthType, error) {
+	var authUsed AuthType
+
 	var opts []grpc.DialOption
 	opts = append(opts, params.DialOpts...)
 
@@ -548,39 +607,47 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		params.MaxConcurrentStreams = DefaultMaxConcurrentStreams
 	}
 	if params.NoSecurity {
+		authUsed = NoAuth
 		opts = append(opts, grpc.WithInsecure())
 	} else if params.NoAuth {
+		authUsed = NoAuth
 		// Set the ServerName and RootCAs fields, if needed.
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
-			return nil, fmt.Errorf("could not create TLS config: %v", err)
+			return nil, authUsed, fmt.Errorf("could not create TLS config: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else if params.UseExternalAuthToken {
+		authUsed = ExternalTokenAuth
 		if params.ExternalPerRPCCreds == nil {
-			return nil, fmt.Errorf("ExternalPerRPCCreds unspecified when using external auth token mechanism")
+			return nil, authUsed, fmt.Errorf("ExternalPerRPCCreds unspecified when using external auth token mechanism")
 		}
 		opts = append(opts, grpc.WithPerRPCCredentials(params.ExternalPerRPCCreds.Creds))
 		// Set the ServerName and RootCAs fields, if needed.
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
-			return nil, fmt.Errorf("could not create TLS config: %v", err)
+			return nil, authUsed, fmt.Errorf("could not create TLS config: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
 		credFile := params.CredFile
 		if strings.Contains(credFile, HomeDirMacro) {
+			authUsed = CredsFileAuth
 			usr, err := user.Current()
 			if err != nil {
-				return nil, fmt.Errorf("could not fetch home directory because of error determining current user: %v", err)
+				return nil, authUsed, fmt.Errorf("could not fetch home directory because of error determining current user: %v", err)
 			}
 			credFile = strings.Replace(credFile, HomeDirMacro, usr.HomeDir, -1 /* no limit */)
 		}
 
 		if !params.TransportCredsOnly {
-			rpcCreds, err := getRPCCreds(ctx, credFile, params.UseApplicationDefault, params.UseComputeEngine)
+			var (
+				rpcCreds credentials.PerRPCCredentials
+				err      error
+			)
+			rpcCreds, authUsed, err = getRPCCreds(ctx, credFile, params.UseApplicationDefault, params.UseComputeEngine)
 			if err != nil {
-				return nil, fmt.Errorf("couldn't create RPC creds for %s: %v", scopes, err)
+				return nil, authUsed, fmt.Errorf("couldn't create RPC creds for %s: %v", scopes, err)
 			}
 
 			if params.ActAsAccount != "" {
@@ -591,7 +658,7 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		}
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
-			return nil, fmt.Errorf("could not create TLS config: %v", err)
+			return nil, authUsed, fmt.Errorf("could not create TLS config: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
@@ -602,16 +669,16 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 
 	conn, err := grpc.Dial(endpoint, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't dial gRPC %q: %v", endpoint, err)
+		return nil, authUsed, fmt.Errorf("couldn't dial gRPC %q: %v", endpoint, err)
 	}
-	return conn, nil
+	return conn, authUsed, nil
 }
 
 // DialRaw dials a remote execution service and returns the grpc connection that is established.
 // TODO(olaola): remove this overload when all clients use Dial.
-func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, error) {
+func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, AuthType, error) {
 	if params.Service == "" {
-		return nil, fmt.Errorf("service needs to be specified")
+		return nil, UnknownAuth, fmt.Errorf("service needs to be specified")
 	}
 	log.Infof("Connecting to remote execution service %s", params.Service)
 	return Dial(ctx, params.Service, params)
@@ -624,20 +691,24 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		log.Warning("Instance name was not specified.")
 	}
 	if params.Service == "" {
-		return nil, fmt.Errorf("service needs to be specified")
+		return nil, &ClientInitError{Err: fmt.Errorf("service needs to be specified")}
 	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
 	log.Infof("Connecting to remote execution service %s", params.Service)
-	conn, err := Dial(ctx, params.Service, params)
+	conn, authUsed, err := Dial(ctx, params.Service, params)
 	casConn := conn
 	if params.CASService != "" && params.CASService != params.Service {
 		log.Infof("Connecting to CAS service %s", params.Service)
-		casConn, err = Dial(ctx, params.CASService, params)
+		casConn, authUsed, err = Dial(ctx, params.CASService, params)
 	}
 	if err != nil {
-		return nil, statusWrap(err)
+		return nil, &ClientInitError{Err: statusWrap(err), AuthUsed: authUsed}
 	}
-	return NewClientFromConnection(ctx, instanceName, conn, casConn, opts...)
+	client, err := NewClientFromConnection(ctx, instanceName, conn, casConn, opts...)
+	if err != nil {
+		return nil, &ClientInitError{Err: err, AuthUsed: authUsed}
+	}
+	return client, nil
 }
 
 // NewClientFromConnection creates a client from gRPC connections to a remote execution service and a cas service.
@@ -924,7 +995,7 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientCo
 		})
 	})
 	if err != nil {
-		return nil, statusWrap(err)
+		return nil, err
 	}
 	return res, nil
 }
