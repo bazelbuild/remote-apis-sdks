@@ -21,7 +21,7 @@ var (
 	// hexStringRegex doesn't contain the size because that's checked separately.
 	hexStringRegex = regexp.MustCompile("^[a-f0-9]+$")
 
-	// The digest function used.
+	// HashFn is the digest function used.
 	HashFn = crypto.SHA256
 
 	// Empty is the digest of the empty blob.

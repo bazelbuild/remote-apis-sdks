@@ -33,7 +33,7 @@ type ContextMetadata struct {
 	ToolVersion string
 }
 
-// LogContextInfof(ctx, x, ...) is equivalent to log.V(x).Infof(...) except it
+// LogContextInfof is equivalent to log.V(x).Infof(...) except it
 // also logs context metadata, if available.
 func LogContextInfof(ctx context.Context, v log.Level, format string, args ...interface{}) {
 	if log.V(v) {

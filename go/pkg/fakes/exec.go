@@ -110,7 +110,7 @@ func (s *Exec) fakeExecution(dg digest.Digest, skipCacheLookup bool) (*oppb.Oper
 }
 
 // GetCapabilities returns the fake capabilities.
-func (c *Exec) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
+func (s *Exec) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
 	dgFn := digest.GetDigestFunction()
 	res = &repb.ServerCapabilities{
 		ExecutionCapabilities: &repb.ExecutionCapabilities{

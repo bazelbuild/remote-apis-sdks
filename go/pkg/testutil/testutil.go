@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+// CreateFile is used to create a temp file with the given contents and executable permissions.
+// It returns the name of the created file or error if file creation has failed.
 func CreateFile(t *testing.T, executable bool, contents string) (string, error) {
 	t.Helper()
 	perm := os.FileMode(0666)
