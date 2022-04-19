@@ -47,22 +47,24 @@ const (
 type AuthType int
 
 const (
-	// Unknown auth type.
+	// UnknownAuth refers to unknown authentication type.
 	UnknownAuth AuthType = iota
 
-	// No authentication used to connect to the RBE service.
+	// NoAuth refers to no authentication when connecting to the RBE service.
 	NoAuth
 
-	// External auth token used to connect to the RBE service.
+	// ExternalTokenAuth is used to connect to the RBE service.
 	ExternalTokenAuth
 
-	// A JSON credentials file used to connect to the RBE service.
+	// CredsFileAuth refers to a JSON credentials file used to connect to the RBE service.
 	CredsFileAuth
 
-	// Application default credentials used to connect to the RBE service.
+	// ApplicationDefaultCredsAuth refers to Google Application default credentials that is
+	// used to connect to the RBE service.
 	ApplicationDefaultCredsAuth
 
-	// GCE machine credentials used to connect to the RBE service.
+	// GCECredsAuth refers to GCE machine credentials that is
+	// used to connect to the RBE service.
 	GCECredsAuth
 )
 
@@ -83,9 +85,9 @@ func (a AuthType) String() string {
 	return "unknown authentication type"
 }
 
-// ClientInitError is used to wrap the error returned when initializing a new
+// InitError is used to wrap the error returned when initializing a new
 // client to also indicate the type of authentication used.
-type ClientInitError struct {
+type InitError struct {
 	// Err refers to the underlying client initialization error.
 	Err error
 
@@ -95,7 +97,7 @@ type ClientInitError struct {
 
 // Error returns a string error that includes information about the
 // type of auth used to connect to RBE.
-func (ce *ClientInitError) Error() string {
+func (ce *InitError) Error() string {
 	return fmt.Sprintf("%v, authentication type (identity) used=%q", ce.Err.Error(), ce.AuthUsed)
 }
 
@@ -691,7 +693,7 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		log.Warning("Instance name was not specified.")
 	}
 	if params.Service == "" {
-		return nil, &ClientInitError{Err: fmt.Errorf("service needs to be specified")}
+		return nil, &InitError{Err: fmt.Errorf("service needs to be specified")}
 	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
 	log.Infof("Connecting to remote execution service %s", params.Service)
@@ -702,11 +704,11 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		casConn, authUsed, err = Dial(ctx, params.CASService, params)
 	}
 	if err != nil {
-		return nil, &ClientInitError{Err: statusWrap(err), AuthUsed: authUsed}
+		return nil, &InitError{Err: statusWrap(err), AuthUsed: authUsed}
 	}
 	client, err := NewClientFromConnection(ctx, instanceName, conn, casConn, opts...)
 	if err != nil {
-		return nil, &ClientInitError{Err: err, AuthUsed: authUsed}
+		return nil, &InitError{Err: err, AuthUsed: authUsed}
 	}
 	return client, nil
 }
@@ -774,6 +776,7 @@ func (d RPCTimeouts) Apply(c *Client) {
 	c.rpcTimeouts = map[string]time.Duration(d)
 }
 
+// DefaultRPCTimeouts contains the default timeout of various RPC calls to RBE.
 var DefaultRPCTimeouts = map[string]time.Duration{
 	"default":          20 * time.Second,
 	"GetCapabilities":  5 * time.Second,

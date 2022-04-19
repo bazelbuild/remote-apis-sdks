@@ -7,6 +7,7 @@
 gofiles=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$')
 
 ./check-gofmt.sh $gofiles
+./check-golint.sh
 
 ########################################################################
 # Precommit hook to rebuild generated go code. Fails if building or

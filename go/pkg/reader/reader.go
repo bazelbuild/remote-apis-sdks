@@ -13,11 +13,13 @@ import (
 	"github.com/mostynb/zstdpool-syncpool"
 )
 
+// Initializable is an interface containing methods to initialize a ReadSeeker.
 type Initializable interface {
 	IsInitialized() bool
 	Initialize() error
 }
 
+// ReadSeeker is an interface used to capture a file reader with seek functionality.
 type ReadSeeker interface {
 	io.Reader
 	io.Closer
@@ -102,7 +104,7 @@ func (fio *fileSeeker) Initialize() error {
 		return err
 	}
 	if off != fio.seekOffset {
-		return errors.New(fmt.Sprintf("File seeking ended at %d. Expected %d,", off, fio.seekOffset))
+		return fmt.Errorf("File seeking ended at %d. Expected %d,", off, fio.seekOffset)
 	}
 
 	if fio.reader == nil {
