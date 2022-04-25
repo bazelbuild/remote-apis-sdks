@@ -665,7 +665,8 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
 	grpcInt := createGRPCInterceptor(params)
-	opts = append(opts, grpc.WithBalancerName(balancer.Name))
+	opts = append(opts, grpc.WithDisableServiceConfig())
+	opts = append(opts, grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":{}}]}`, balancer.Name)))
 	opts = append(opts, grpc.WithUnaryInterceptor(grpcInt.GCPUnaryClientInterceptor))
 	opts = append(opts, grpc.WithStreamInterceptor(grpcInt.GCPStreamClientInterceptor))
 
