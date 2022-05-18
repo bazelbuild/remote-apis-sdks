@@ -18,7 +18,6 @@ var (
 )
 
 func TestComputeFilesNoXattr(t *testing.T) {
-	XattrDigestName = ""
 	tests := []struct {
 		name       string
 		contents   string
@@ -67,8 +66,7 @@ func TestComputeFilesNoXattr(t *testing.T) {
 }
 
 func TestComputeFilesWithXattr(t *testing.T) {
-	XattrDigestName = "google.digest.sha256"
-	XattrAccess = xattributeAccessorMock{}
+	overwriteXattrGlobals(t, "google.digest.sha256", xattributeAccessorMock{})
 	tests := []struct {
 		name       string
 		contents   string
@@ -121,7 +119,6 @@ func TestComputeFilesWithXattr(t *testing.T) {
 }
 
 func TestComputeDirectory(t *testing.T) {
-	XattrDigestName = ""
 	tmpDir := t.TempDir()
 	got := Compute(tmpDir)
 	if got.Err != nil {
@@ -136,7 +133,6 @@ func TestComputeDirectory(t *testing.T) {
 }
 
 func TestComputeSymlinksToFile(t *testing.T) {
-	XattrDigestName = ""
 	tests := []struct {
 		name       string
 		contents   string
@@ -182,7 +178,6 @@ func TestComputeSymlinksToFile(t *testing.T) {
 }
 
 func TestComputeDanglingSymlinks(t *testing.T) {
-	XattrDigestName = ""
 	// Create a temporary fake target so that os.Symlink() can work.
 	symlinkPath := filepath.Join(os.TempDir(), "dangling")
 	defer os.RemoveAll(symlinkPath)
@@ -203,7 +198,6 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 }
 
 func TestComputeSymlinksToDirectory(t *testing.T) {
-	XattrDigestName = ""
 	symlinkPath := filepath.Join(os.TempDir(), "dir-symlink")
 	defer os.RemoveAll(symlinkPath)
 	targetPath := t.TempDir()
@@ -235,6 +229,18 @@ func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, cont
 func createSymlinkToTarget(t *testing.T, symlinkPath string, targetPath string) error {
 	t.Helper()
 	return os.Symlink(targetPath, symlinkPath)
+}
+
+func overwriteXattrGlobals(t *testing.T, newXattrDigestName string, newXattrAccess xattributeAccessorInterface) {
+	t.Helper()
+	oldXattrDigestName := XattrDigestName
+	oldXattrAccess := XattrAccess
+	XattrDigestName = newXattrDigestName
+	XattrAccess = newXattrAccess
+	t.Cleanup(func() {
+		XattrDigestName = oldXattrDigestName
+		XattrAccess = oldXattrAccess
+	})
 }
 
 // Mocking of the xattr package for testing.
