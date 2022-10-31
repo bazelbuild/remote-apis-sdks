@@ -91,6 +91,13 @@ def remote_apis_sdks_go_deps():
     )
     _maybe(
         go_repository,
+        name = "com_google_cloud_go_compute_metadata",
+        importpath = "cloud.google.com/go/compute/metadata",
+        sum = "h1:efOwf5ymceDhK6PKMnnrTHP4pppY5L22mle96M1yP48=",
+        version = "v0.2.1",
+    )
+    _maybe(
+        go_repository,
         name = "com_google_cloud_go_compute",
         version = "v0.1.0",
         sum = "h1:rSUBvAyVwNJ5uQCKNJFMwPtTvJkfN38b6Pvb9zZoqJ8=",
