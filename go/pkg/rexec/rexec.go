@@ -335,6 +335,7 @@ func (ec *Context) ExecuteRemotely() {
 		ec.Result = command.NewRemoteErrorResult(fmt.Errorf("unexpected operation result type: %v", or))
 		return
 	}
+
 	resp := &repb.ExecuteResponse{}
 	if err := or.UnmarshalTo(resp); err != nil {
 		ec.Result = command.NewRemoteErrorResult(err)
@@ -365,6 +366,7 @@ func (ec *Context) ExecuteRemotely() {
 			ec.Result.Status = command.CacheHitResultStatus
 		}
 	}
+
 	if st.Code() == codes.DeadlineExceeded {
 		ec.Result = command.NewTimeoutResult()
 		return
@@ -397,6 +399,37 @@ func (ec *Context) DownloadOutputs(outputDir string) {
 	if ec.Result.Err == nil {
 		ec.Result.Status = st
 	}
+}
+
+// DownloadSpecifiedOutputs downloads the specified outputs into the specified directory
+// This function is run when the option to preserve unchanged outputs is on
+func (ec *Context) DownloadSpecifiedOutputs(outs map[string]*rc.TreeOutput, outDir string) {
+	st := ec.Result.Status
+	ec.Metadata.EventTimes[command.EventDownloadResults] = &command.TimeInterval{From: time.Now()}
+	outDir = filepath.Join(outDir, ec.cmd.WorkingDir)
+	stats, err := ec.client.GrpcClient.DownloadOutputs(ec.ctx, outs, outDir, ec.client.FileMetadataCache)
+	if err != nil {
+		stats = &rc.MovedBytesMetadata{}
+		ec.Result = command.NewRemoteErrorResult(err)
+	} else {
+		ec.Result = command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
+	}
+	ec.Metadata.EventTimes[command.EventDownloadResults].To = time.Now()
+	ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved
+	ec.Metadata.RealBytesDownloaded += stats.RealMoved
+	if ec.Result.Err == nil {
+		ec.Result.Status = st
+	}
+}
+
+// GetFlattenedOutputs flattens the outputs from the ActionResult of the context and returns
+// a map of output paths relative to the working directory and their corresponding TreeOutput
+func (ec *Context) GetFlattenedOutputs() (map[string]*rc.TreeOutput, error) {
+	out, err := ec.client.GrpcClient.FlattenActionOutputs(ec.ctx, ec.resPb)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to flatten outputs: %v", err)
+	}
+	return out, nil
 }
 
 // GetOutputFileDigests returns a map of output file paths to digests.
