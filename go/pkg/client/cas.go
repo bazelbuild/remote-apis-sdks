@@ -1242,7 +1242,7 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, outDir 
 		return nil, stats, err
 	}
 
-	outStats, err := c.downloadOutputs(ctx, outputs, outDir, cache)
+	outStats, err := c.DownloadOutputs(ctx, outputs, outDir, cache)
 	stats.addFrom(outStats)
 	return outputs, stats, err
 }
@@ -1261,10 +1261,13 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 			return nil, err
 		}
 	}
-	return c.downloadOutputs(ctx, outs, outDir, cache)
+	return c.DownloadOutputs(ctx, outs, outDir, cache)
 }
 
-func (c *Client) downloadOutputs(ctx context.Context, outs map[string]*TreeOutput, outDir string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
+// DownloadOutputs downloads the specified outputs. It returns the amount of downloaded bytes.
+// It returns the number of logical and real bytes downloaded, which may be different from sum
+// of sizes of the files due to dedupping and compression.
+func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutput, outDir string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
 	var symlinks, copies []*TreeOutput
 	downloads := make(map[digest.Digest]*TreeOutput)
 	fullStats := &MovedBytesMetadata{}
