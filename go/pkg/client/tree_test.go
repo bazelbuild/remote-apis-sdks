@@ -16,6 +16,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/testing/protocmp"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -878,6 +879,46 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "Directory relative symlink (materialized from outside exec root)",
+			input: []*inputPath{
+				{path: "../foo", fileContents: fooBlob, isExecutable: true},
+				{path: "fooSym", isSymlink: true, symlinkTarget: "../foo"},
+				{path: "barDir/bar", fileContents: barBlob},
+				{path: "barSym", isSymlink: true, symlinkTarget: "barDir/bar"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"fooSym", "barSym"},
+			},
+			rootDir: &repb.Directory{
+				Directories: []*repb.DirectoryNode{
+					{Name: "barDir", Digest: barDirDgPb},
+				},
+				Files: []*repb.FileNode{
+					{Name: "fooSym", Digest: fooDgPb, IsExecutable: true},
+				},
+				Symlinks: []*repb.SymlinkNode{
+					{Name: "barSym", Target: "barDir/bar"},
+				},
+			},
+			additionalBlobs: [][]byte{fooBlob, barDirBlob, barBlob},
+			wantCacheCalls: map[string]int{
+				"fooSym":     1,
+				"barSym":     1,
+				"barDir/bar": 1,
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2,
+				InputFiles:       2,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + barDirDg.Size + barDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved:                  true,
+				FollowsTarget:              true,
+				MaterializeOutsideExecRoot: true,
+			},
+		},
+		{
 			desc: "De-duplicating files",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
@@ -1323,7 +1364,7 @@ func TestComputeMerkleTree(t *testing.T) {
 					if err := proto.Unmarshal(gotRootBlob, gotRoot); err != nil {
 						t.Errorf("  When unpacking root blob, got error: %s", err)
 					} else {
-						diff := cmp.Diff(tc.rootDir, gotRoot)
+						diff := cmp.Diff(tc.rootDir, gotRoot, protocmp.Transform())
 						t.Errorf("  Diff between unpacked roots (-want +got):\n%s", diff)
 					}
 				} else {
@@ -1385,6 +1426,19 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			},
 			treeOpts: &client.TreeSymlinkOpts{
 				Preserved: true,
+			},
+		},
+		{
+			desc: "Materialization of dangling symlink pointing outside exec root fails",
+			input: []*inputPath{
+				{path: "danglingSym", isSymlink: true, symlinkTarget: "../doesNotExist"},
+			},
+			spec: &command.InputSpec{
+				Inputs: []string{"danglingSym"},
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				MaterializeOutsideExecRoot: true,
+				Preserved:                  true,
 			},
 		},
 	}
