@@ -73,12 +73,6 @@ def remote_apis_sdks_go_deps():
     )
     _maybe(
         go_repository,
-        name = "org_golang_x_sys",
-        importpath = "golang.org/x/sys",
-        commit = "be1d3432aa8f4fd677757447c4c9e7ff9bf25f73",
-    )
-    _maybe(
-        go_repository,
         name = "com_github_pborman_uuid",
         importpath = "github.com/pborman/uuid",
         tag = "v1.2.0",
