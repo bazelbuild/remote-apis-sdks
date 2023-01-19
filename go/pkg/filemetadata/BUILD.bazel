@@ -11,7 +11,7 @@ go_library(
     deps = [
         "//go/pkg/cache",
         "//go/pkg/digest",
-        "@com_github_pkg_xattr//:xattr",
+        "@com_github_pkg_xattr//:go_default_library",
     ],
 )
 
