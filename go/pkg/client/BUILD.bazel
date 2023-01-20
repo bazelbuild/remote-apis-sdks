@@ -6,6 +6,8 @@ go_library(
         "bytestream.go",
         "capabilities.go",
         "cas.go",
+        "cas_download.go",
+        "cas_upload.go",
         "client.go",
         "client_context.go",
         "exec.go",
