@@ -66,6 +66,11 @@ type TreeSymlinkOpts struct {
 	Preserved bool
 	// If true, the symlink target (if not dangling) is followed.
 	FollowsTarget bool
+	// If true, overrides Preserved=true for symlinks that point outside the
+	// exec root, converting them into their targeted files while preserving
+	// symlinks that point to files within the exec root.  Has no effect if
+	// Preserved=false, as all symlinks are materialized.
+	MaterializeOutsideExecRoot bool
 }
 
 // DefaultTreeSymlinkOpts returns a default DefaultTreeSymlinkOpts object.
@@ -178,21 +183,30 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			return err
 		}
 		meta := cache.Get(absPath)
-		switch {
+
 		// An implication of this is that, if a path is a symlink to a
 		// directory, then the symlink attribute takes precedence.
-		case meta.Symlink != nil && meta.Symlink.IsDangling && !opts.Preserved:
+		if meta.Symlink != nil && meta.Symlink.IsDangling && !opts.Preserved {
 			// For now, we do not treat a dangling symlink as an error. In the case
 			// where the symlink is not preserved (i.e. needs to be converted to a
 			// file), we simply ignore this path in the finalized tree.
 			continue
-		case meta.Symlink != nil && opts.Preserved:
+		} else if meta.Symlink != nil && opts.Preserved {
 			if shouldIgnore(absPath, command.SymlinkInputType, excl) {
 				continue
 			}
 			targetExecRoot, targetSymDir, err := getTargetRelPath(execRoot, normPath, meta.Symlink)
 			if err != nil {
-				return errors.Wrapf(err, "failed to determine the target of symlink %q as a child of %q", normPath, execRoot)
+				// The symlink points to a file outside the exec root. This is an
+				// error unless materialization of symlinks pointing outside the
+				// exec root is enabled.
+				if !opts.MaterializeOutsideExecRoot {
+					return errors.Wrapf(err, "failed to determine the target of symlink %q as a child of %q", normPath, execRoot)
+				}
+				if meta.Symlink.IsDangling {
+					return errors.Errorf("failed to materialize dangling symlink %q with target %q", normPath, meta.Symlink.Target)
+				}
+				goto processNonSymlink
 			}
 
 			fs[remoteNormPath] = &fileSysNode{
@@ -208,7 +222,14 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 				// and the iteration loop will get the relative path to execRoot,
 				filesToProcess = append(filesToProcess, targetExecRoot)
 			}
-		case meta.IsDirectory:
+
+			// Done processing this symlink, a subsequent iteration will process
+			// the targeted file if necessary.
+			continue
+		}
+
+	processNonSymlink:
+		if meta.IsDirectory {
 			if shouldIgnore(absPath, command.DirectoryInputType, excl) {
 				continue
 			} else if meta.Err != nil {
@@ -235,7 +256,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			for _, f := range files {
 				filesToProcess = append(filesToProcess, filepath.Join(normPath, f))
 			}
-		default:
+		} else {
 			if shouldIgnore(absPath, command.FileInputType, excl) {
 				continue
 			} else if meta.Err != nil {
