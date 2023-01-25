@@ -168,6 +168,10 @@ type Client struct {
 	casDownloadRequests chan *downloadRequest
 	rpcTimeouts         RPCTimeouts
 	creds               credentials.PerRPCCredentials
+	// ForceEarlyWaitCalls specifies whether ExecuteAndWait should call WaitExecution immedately
+	// after receiving an Operation from Execute. It is primarily useful for testing
+	// WaitExecution.
+	ForceEarlyWaitCalls bool
 }
 
 const (
