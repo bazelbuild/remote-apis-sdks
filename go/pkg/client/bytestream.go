@@ -29,14 +29,6 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 // writeChunked uploads chunked data with a given resource name to the CAS.
 func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker) (int64, error) {
 	var totalBytes int64
-	var resume bool
-	var offset int64
-	var initialOffset int64
-	if c.ResumableWriteOpts != nil {
-		resume = true
-		initialOffset = c.ResumableWriteOpts.LastLogicalOffset
-		offset = initialOffset
-	}
 	closure := func() error {
 		// Retry by starting the stream from the beginning.
 		if err := ch.Reset(); err != nil {
@@ -58,14 +50,70 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			if chunk.Offset == 0 {
 				req.ResourceName = name
 			}
-			if resume {
-				req.WriteOffset = offset
-			} else {
-				req.WriteOffset = chunk.Offset
-			}
 			req.WriteOffset = chunk.Offset
 			req.Data = chunk.Data
-			if (!resume && !ch.HasNext()) || (resume && !ch.HasNext() && c.ResumableWriteOpts.FinishWrite) {
+			if !ch.HasNext() {
+				req.FinishWrite = true
+			}
+			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return err
+			}
+			totalBytes += int64(len(req.Data))
+		}
+		if _, err := stream.CloseAndRecv(); err != nil {
+			return err
+		}
+		return nil
+	}
+	err := c.Retrier.Do(ctx, closure)
+	return totalBytes, err
+}
+
+// WriteBytesWithOffset uploads a byte slice.
+func (c *Client) WriteBytesWithOffset(ctx context.Context, name string, data []byte, opts *ByteStreamWriteOpts) (int64, error) {
+	ue := uploadinfo.EntryFromBlob(data)
+	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
+	if err != nil {
+		return 0, err
+	}
+	return c.writeChunkedWithOffset(ctx, name, ch, opts)
+}
+
+// writeChunkedWithOffset uploads chunked data with a given resource name to the CAS at an arbitrary offset.
+func (c *Client) writeChunkedWithOffset(ctx context.Context, name string, ch *chunker.Chunker, opts *ByteStreamWriteOpts) (int64, error) {
+	var totalBytes int64
+	var offset = opts.LastLogicalOffset
+	var initialOffset = opts.LastLogicalOffset
+
+	closure := func() error {
+		// Retry by starting the stream from the beginning.
+		if err := ch.Reset(); err != nil {
+			return errors.Wrap(err, "failed to Reset")
+		}
+		totalBytes = int64(0)
+
+		stream, err := c.Write(ctx)
+		if err != nil {
+			return err
+		}
+		for ch.HasNext() {
+			req := &bspb.WriteRequest{}
+			chunk, err := ch.Next()
+			if err != nil {
+				return err
+			}
+			if chunk.Offset == 0 {
+				req.ResourceName = name
+			}
+
+			req.WriteOffset = offset
+			req.Data = chunk.Data
+
+			if !ch.HasNext() && opts.FinishWrite {
 				req.FinishWrite = true
 			}
 			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })
@@ -81,12 +129,10 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 		if _, err := stream.CloseAndRecv(); err != nil {
 			return err
 		}
+
 		return nil
 	}
 	err := c.Retrier.Do(ctx, closure)
-	if err == nil && resume {
-		c.ResumableWriteOpts.LastLogicalOffset = offset
-	}
 	return totalBytes, err
 }
 

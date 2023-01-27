@@ -168,7 +168,6 @@ type Client struct {
 	casDownloadRequests chan *downloadRequest
 	rpcTimeouts         RPCTimeouts
 	creds               credentials.PerRPCCredentials
-	ResumableWriteOpts  *ResumableWriteOpts
 }
 
 const (
@@ -475,15 +474,10 @@ func getRPCCreds(ctx context.Context, credFile string, useApplicationDefault boo
 	return rpcCreds, CredsFileAuth, nil
 }
 
-// ResumableWriteOpts sets options required for resumable ByteStream write operations.
-type ResumableWriteOpts struct {
+// ByteStreamWriteOpts sets options required for resumable ByteStream write operations.
+type ByteStreamWriteOpts struct {
 	FinishWrite       bool
 	LastLogicalOffset int64
-}
-
-// Apply sets the ResumableWriteOpts in a client.
-func (r *ResumableWriteOpts) Apply(c *Client) {
-	c.ResumableWriteOpts = r
 }
 
 // DialParams contains all the parameters that Dial needs.
