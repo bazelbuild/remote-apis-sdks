@@ -179,6 +179,7 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 	if err != nil {
 		return 0, err
 	}
+
 	var n int64
 	for {
 		var resp *bspb.ReadResponse
