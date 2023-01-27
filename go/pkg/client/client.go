@@ -168,7 +168,7 @@ type Client struct {
 	casDownloadRequests chan *downloadRequest
 	rpcTimeouts         RPCTimeouts
 	creds               credentials.PerRPCCredentials
-	ResumableWriteOpts	*ResumableWriteOpts
+	ResumableWriteOpts  *ResumableWriteOpts
 }
 
 const (
@@ -475,7 +475,7 @@ func getRPCCreds(ctx context.Context, credFile string, useApplicationDefault boo
 	return rpcCreds, CredsFileAuth, nil
 }
 
-// ResumableWriteOpts sets options required for resumable ByteStream write operations. 
+// ResumableWriteOpts sets options required for resumable ByteStream write operations.
 type ResumableWriteOpts struct {
 	FinishWrite       bool
 	LastLogicalOffset int64
