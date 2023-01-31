@@ -106,6 +106,24 @@ func (c *Client) makeBatches(ctx context.Context, dgs []digest.Digest, optimizeS
 	return batches
 }
 
+func (c *Client) makeQueryBatches(ctx context.Context, digests []digest.Digest) [][]digest.Digest {
+	var batches [][]digest.Digest
+	for len(digests) > 0 {
+		batchSize := int(c.MaxQueryBatchDigests)
+		if len(digests) < int(c.MaxQueryBatchDigests) {
+			batchSize = len(digests)
+		}
+		batch := make([]digest.Digest, 0, batchSize)
+		for i := 0; i < batchSize; i++ {
+			batch = append(batch, digests[i])
+		}
+		digests = digests[batchSize:]
+		LogContextInfof(ctx, log.Level(3), "Created query batch of %d blobs", len(batch))
+		batches = append(batches, batch)
+	}
+	return batches
+}
+
 func getUnifiedLabel(labels map[string]bool) string {
 	var keys []string
 	for k := range labels {

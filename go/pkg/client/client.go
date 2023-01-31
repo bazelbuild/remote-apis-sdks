@@ -132,8 +132,10 @@ type Client struct {
 	// compressed. Use 0 for all writes being compressed, and a negative number for all operations being
 	// uncompressed.
 	CompressedBytestreamThreshold CompressedBytestreamThreshold
-	// MaxBatchDigests is maximum amount of digests to batch in batched operations.
+	// MaxBatchDigests is maximum amount of digests to batch in upload and download operations.
 	MaxBatchDigests MaxBatchDigests
+	// MaxQueryBatchDigests is maximum amount of digests to batch in CAS query operations.
+	MaxQueryBatchDigests MaxQueryBatchDigests
 	// MaxBatchSize is maximum size in bytes of a batch request for batch operations.
 	MaxBatchSize MaxBatchSize
 	// DirMode is mode used to create directories.
@@ -178,6 +180,9 @@ const (
 	// DefaultMaxBatchDigests is a suggested approximate limit based on current RBE implementation.
 	// Above that BatchUpdateBlobs calls start to exceed a typical minute timeout.
 	DefaultMaxBatchDigests = 4000
+
+	// DefaultMaxQueryBatchDigests is a suggested limit for the number of items for in batch for a missing blobs query.
+	DefaultMaxQueryBatchDigests = 10_000
 
 	// DefaultDirMode is mode used to create directories.
 	DefaultDirMode = 0777
@@ -349,12 +354,20 @@ func (o *TreeSymlinkOpts) Apply(c *Client) {
 	c.TreeSymlinkOpts = o
 }
 
-// MaxBatchDigests is maximum amount of digests to batch in batched operations.
+// MaxBatchDigests is maximum amount of digests to batch in upload and download operations.
 type MaxBatchDigests int
 
 // Apply sets the client's maximal batch digests to s.
 func (s MaxBatchDigests) Apply(c *Client) {
 	c.MaxBatchDigests = s
+}
+
+// MaxQueryBatchDigests is maximum amount of digests to batch in query operations.
+type MaxQueryBatchDigests int
+
+// Apply sets the client's maximal batch digests to s.
+func (s MaxQueryBatchDigests) Apply(c *Client) {
+	c.MaxQueryBatchDigests = s
 }
 
 // MaxBatchSize is maximum size in bytes of a batch request for batch operations.
@@ -735,6 +748,7 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 		CompressedBytestreamThreshold: DefaultCompressedBytestreamThreshold,
 		ChunkMaxSize:                  chunker.DefaultChunkSize,
 		MaxBatchDigests:               DefaultMaxBatchDigests,
+		MaxQueryBatchDigests:          DefaultMaxQueryBatchDigests,
 		MaxBatchSize:                  DefaultMaxBatchSize,
 		DirMode:                       DefaultDirMode,
 		ExecutableMode:                DefaultExecutableMode,
