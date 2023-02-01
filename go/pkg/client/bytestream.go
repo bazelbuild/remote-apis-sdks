@@ -86,8 +86,6 @@ func (c *Client) WriteBytesWithOffset(ctx context.Context, name string, data []b
 // writeChunkedWithOffset uploads chunked data with a given resource name to the CAS at an arbitrary offset.
 func (c *Client) writeChunkedWithOffset(ctx context.Context, name string, ch *chunker.Chunker, opts *ByteStreamWriteOpts) (int64, error) {
 	var totalBytes int64
-	var offset = opts.LastLogicalOffset
-	var initialOffset = opts.LastLogicalOffset
 
 	closure := func() error {
 		// Retry by starting the stream from the beginning.
@@ -101,16 +99,11 @@ func (c *Client) writeChunkedWithOffset(ctx context.Context, name string, ch *ch
 			return err
 		}
 		for ch.HasNext() {
-			req := &bspb.WriteRequest{}
+			req := &bspb.WriteRequest{ResourceName: name, WriteOffset: opts.LastLogicalOffset + ch.Offset()}
 			chunk, err := ch.Next()
 			if err != nil {
 				return err
 			}
-			if chunk.Offset == 0 {
-				req.ResourceName = name
-			}
-
-			req.WriteOffset = offset
 			req.Data = chunk.Data
 
 			if !ch.HasNext() && opts.FinishWrite {
@@ -124,7 +117,6 @@ func (c *Client) writeChunkedWithOffset(ctx context.Context, name string, ch *ch
 				return err
 			}
 			totalBytes += int64(len(req.Data))
-			offset = initialOffset + totalBytes
 		}
 		if _, err := stream.CloseAndRecv(); err != nil {
 			return err
