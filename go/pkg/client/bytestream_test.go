@@ -12,7 +12,6 @@ import (
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
-
 var (
 	logStreams map[string]*logStream
 )
@@ -128,7 +127,7 @@ func TestWriteChunkedWithOffset_LogStream(t *testing.T) {
 					t.Fatal("WriteBytesWithOffset() got nil error, want non-nil error")
 				}
 				if !test.wantErr && err != nil {
-					t.Fatal("WriteBytesWithOffset() failed unexpectedly: %v", err)
+					t.Fatalf("WriteBytesWithOffset() failed unexpectedly: %v", err)
 				}
 				opts.LastLogicalOffset += writtenBytes
 				start = end
@@ -139,7 +138,7 @@ func TestWriteChunkedWithOffset_LogStream(t *testing.T) {
 				t.Errorf("WriteBytesWithOffset() = %d, want %d", logStreams[lsID].logicalOffset, test.wantBytes)
 			}
 			if !test.wantErr && logStreams[lsID].finalized == false {
-				t.Errorf("WriteBytesWithOffset() didn't correctly finalize logstream")
+				t.Error("WriteBytesWithOffset() didn't correctly finalize logstream")
 			}
 		})
 	}
@@ -217,4 +216,3 @@ func (b *Bytestream) Write(stream bsgrpc.ByteStream_WriteServer) error {
 
 	return nil
 }
-
