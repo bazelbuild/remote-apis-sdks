@@ -52,8 +52,7 @@ func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error)
 	}
 	var c *Chunker
 	if ue.IsBlob() {
-		contents := make([]byte, len(ue.Contents))
-		copy(contents, ue.Contents)
+		contents := ue.Blob()
 		if compressed {
 			contents = fullCompressor.EncodeAll(contents, nil)
 		}
@@ -61,7 +60,7 @@ func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error)
 			contents: contents,
 		}
 	} else if ue.IsFile() {
-		r := reader.NewFileReadSeeker(ue.Path, IOBufferSize)
+		r := reader.NewFileReadSeeker(ue.Path(), IOBufferSize)
 		if compressed {
 			var err error
 			r, err = reader.NewCompressedSeeker(r)
@@ -77,7 +76,7 @@ func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error)
 			chunkSize = IOBufferSize
 		}
 	} else {
-		return nil, errors.New("invalid Entry")
+		return nil, errors.New(fmt.Sprintf("entry is not a blob or a file, but %q", ue.Kind()))
 	}
 
 	c.chunkSize = chunkSize
@@ -87,11 +86,11 @@ func New(ue *uploadinfo.Entry, compressed bool, chunkSize int) (*Chunker, error)
 
 // String returns an identifiable representation of the Chunker.
 func (c *Chunker) String() string {
-	size := fmt.Sprintf("<%d bytes>", c.ue.Digest.Size)
+	size := fmt.Sprintf("<%d bytes>", c.ue.Digest().Size)
 	if !c.ue.IsFile() {
 		return size
 	}
-	return fmt.Sprintf("%s: %s", size, c.ue.Path)
+	return fmt.Sprintf("%s: %s", size, c.ue.Path())
 }
 
 // Offset returns the current Chunker offset.
@@ -110,7 +109,7 @@ func (c *Chunker) ChunkSize() int {
 func (c *Chunker) Reset() error {
 	if c.r != nil {
 		if err := c.r.SeekOffset(0); err != nil {
-			return errors.Wrapf(err, "failed to call SeekOffset(0) for %s", c.ue.Path)
+			return errors.Wrapf(err, "failed to call SeekOffset(0) for %s", c.ue.Path())
 		}
 	}
 	c.offset = 0
@@ -160,7 +159,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 	if !c.HasNext() {
 		return nil, ErrEOF
 	}
-	if c.ue.Digest.Size == 0 {
+	if c.ue.Digest().Size == 0 {
 		c.reachedEOF = true
 		return &Chunk{}, nil
 	}

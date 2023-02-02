@@ -614,7 +614,7 @@ func TestUploadCancel(t *testing.T) {
 				t.Error(err)
 			}
 			// Verify that nothing was written.
-			if fake.BlobWrites(ue.Digest) != 0 {
+			if fake.BlobWrites(ue.Digest()) != 0 {
 				t.Errorf("Blob was written, expected cancellation.")
 			}
 			close(wait)
@@ -828,7 +828,7 @@ func TestUpload(t *testing.T) {
 			}
 
 			for i, ue := range input {
-				dg := ue.Digest
+				dg := ue.Digest()
 				blob := tc.input[i]
 				if present[dg] {
 					if fake.BlobWrites(dg) > 0 {

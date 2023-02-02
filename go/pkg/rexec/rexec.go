@@ -161,7 +161,7 @@ func (ec *Context) computeInputs() error {
 	if ec.cmdUe, err = uploadinfo.EntryFromProto(cmdPb); err != nil {
 		return err
 	}
-	cmdDg := ec.cmdUe.Digest
+	cmdDg := ec.cmdUe.Digest()
 	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s %s> Command digest: %s", cmdID, executionID, cmdDg)
 	log.V(1).Infof("%s %s> Computing input Merkle tree...", cmdID, executionID)
@@ -190,7 +190,7 @@ func (ec *Context) computeInputs() error {
 	if ec.acUe, err = uploadinfo.EntryFromProto(acPb); err != nil {
 		return err
 	}
-	acDg := ec.acUe.Digest
+	acDg := ec.acUe.Digest()
 	log.V(1).Infof("%s %s> Action digest: %s", cmdID, executionID, acDg)
 	ec.inputBlobs = append(ec.inputBlobs, ec.cmdUe)
 	ec.inputBlobs = append(ec.inputBlobs, ec.acUe)

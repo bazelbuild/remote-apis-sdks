@@ -8,37 +8,76 @@ import (
 )
 
 const (
-	ueBlob = iota
-	uePath
+	kindBlob = iota
+	kindFile
 )
 
-// Entry should remain immutable upon creation.
-// Should be created using constructor. Only Contents or Path must be set.
-// In case of a malformed entry, Contents takes precedence over Path.
+// Entry describes an immutable upload entry.
 type Entry struct {
-	Digest   digest.Digest
-	Contents []byte
-	Path     string
+	digest digest.Digest
+	blob   []byte
+	path   string
 
-	ueType int
+	// The code now depends on this internal property to distinguish the entry type.
+	// A kindBlob entry can have a nil blob field and a kindFile entry can have an empty file path.
+	kind int
 }
 
-// IsBlob returns whether this Entry is for a blob in memory.
-func (ue *Entry) IsBlob() bool {
-	return ue.ueType == ueBlob
+// Kind is a debugging helper function that returns a string representation
+// of the entry's kind.
+func (e *Entry) Kind() string {
+	switch e.kind {
+	case kindBlob:
+		return "blob"
+	case kindFile:
+		return "file"
+	default:
+		return "unknown"
+	}
 }
 
-// IsFile returns whether this Entry is for a file in disk.
-func (ue *Entry) IsFile() bool {
-	return ue.ueType == uePath
+// IsBlob returns true iff the entry was created from in-memory bytes.
+func (e *Entry) IsBlob() bool {
+	return e.kind == kindBlob
+}
+
+// IsFile returns true iff the entry was created from a file path.
+func (e *Entry) IsFile() bool {
+	return e.kind == kindFile
+}
+
+// Digest returns a copy of the digest of this Entry.
+func (e *Entry) Digest() digest.Digest {
+	return e.digest
+}
+
+// Blob returns a copy of the bytes of this Entry.
+// This method cannot be used to infer the type of this entry.
+// A byte slice is always returned (never returns nil).
+func (e *Entry) Blob() []byte {
+	bytes := make([]byte, len(e.blob))
+	copy(bytes, e.blob)
+	return bytes
+}
+
+// BlobLen is a convenient method to avoid the copy cost of Blob().
+// This method cannot be used to infer the type of this entry.
+func (e *Entry) BlobLen() int {
+	return len(e.blob)
+}
+
+// Path returns the file path of this Entry.
+// If !e.IsFile(), return an empty string.
+func (e *Entry) Path() string {
+	return e.path
 }
 
 // EntryFromBlob creates an Entry from an in memory blob.
 func EntryFromBlob(blob []byte) *Entry {
 	return &Entry{
-		Contents: blob,
-		Digest:   digest.NewFromBlob(blob),
-		ueType:   ueBlob,
+		blob:   blob,
+		digest: digest.NewFromBlob(blob),
+		kind:   kindBlob,
 	}
 }
 
@@ -54,8 +93,8 @@ func EntryFromProto(msg proto.Message) (*Entry, error) {
 // EntryFromFile creates an entry from a file in disk.
 func EntryFromFile(dg digest.Digest, path string) *Entry {
 	return &Entry{
-		Digest: dg,
-		Path:   path,
-		ueType: uePath,
+		digest: dg,
+		path:   path,
+		kind:   kindFile,
 	}
 }

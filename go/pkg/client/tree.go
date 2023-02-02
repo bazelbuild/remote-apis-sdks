@@ -379,7 +379,7 @@ func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[d
 	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
 
 	for name, fn := range t.files {
-		dg := fn.ue.Digest
+		dg := fn.ue.Digest()
 		dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.isExecutable})
 		blobs[dg] = fn.ue
 		stats.InputFiles++
@@ -397,7 +397,7 @@ func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[d
 	if err != nil {
 		return digest.Empty, nil, err
 	}
-	dg := ue.Digest
+	dg := ue.Digest()
 	blobs[dg] = ue
 	stats.TotalInputBytes += dg.Size
 	stats.InputDirectories++
@@ -513,7 +513,7 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		dg := ue.Digest
+		dg := ue.Digest()
 		root.Directories = append(root.Directories, &repb.DirectoryNode{Name: name, Digest: dg.ToProto()})
 		for d, b := range childFiles {
 			files[d] = b
@@ -524,7 +524,7 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
 
 	for name, fn := range t.files {
-		dg := fn.ue.Digest
+		dg := fn.ue.Digest()
 		root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.isExecutable})
 		files[dg] = fn.ue
 	}
@@ -579,23 +579,23 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 		if err != nil {
 			return nil, nil, err
 		}
-		outs[ue.Digest] = ue
+		outs[ue.Digest()] = ue
 		treePb.Root = rootDir
 		ue, err = uploadinfo.EntryFromProto(treePb)
 		if err != nil {
 			return nil, nil, err
 		}
-		outs[ue.Digest] = ue
+		outs[ue.Digest()] = ue
 		for _, ue := range files {
-			outs[ue.Digest] = ue
+			outs[ue.Digest()] = ue
 		}
-		resPb.OutputDirectories = append(resPb.OutputDirectories, &repb.OutputDirectory{Path: normPath, TreeDigest: ue.Digest.ToProto()})
+		resPb.OutputDirectories = append(resPb.OutputDirectories, &repb.OutputDirectory{Path: normPath, TreeDigest: ue.Digest().ToProto()})
 		// Upload the child directories individually as well
 		ueRoot, _ := uploadinfo.EntryFromProto(treePb.Root)
-		outs[ueRoot.Digest] = ueRoot
+		outs[ueRoot.Digest()] = ueRoot
 		for _, child := range treePb.Children {
 			ueChild, _ := uploadinfo.EntryFromProto(child)
-			outs[ueChild.Digest] = ueChild
+			outs[ueChild.Digest()] = ueChild
 		}
 	}
 	return outs, resPb, nil

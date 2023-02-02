@@ -96,7 +96,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 // WriteBlob (over)writes a blob to the CAS regardless if it already exists.
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
 	ue := uploadinfo.EntryFromBlob(blob)
-	dg := ue.Digest
+	dg := ue.Digest()
 	if dg.IsEmpty() {
 		LogContextInfof(ctx, log.Level(2), "Skipping upload of empty blob %s", dg)
 		return dg, nil
@@ -249,9 +249,9 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 	var missing []digest.Digest
 	var reqs []*uploadRequest
 	for _, ue := range entries {
-		if ue.Digest.IsEmpty() {
+		if ue.Digest().IsEmpty() {
 			uploads--
-			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty entry %s", ue.Digest)
+			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty entry %s", ue.Digest())
 			continue
 		}
 		req := &uploadRequest{
@@ -321,7 +321,7 @@ func (c *Client) uploadProcessor() {
 				}
 			}
 			buffer = newBuffer
-			st, ok := c.casUploads[req.ue.Digest]
+			st, ok := c.casUploads[req.ue.Digest()]
 			if ok {
 				st.mu.Lock()
 				var remainingClients []chan<- *uploadResponse
@@ -332,11 +332,11 @@ func (c *Client) uploadProcessor() {
 				}
 				st.clients = remainingClients
 				if len(st.clients) == 0 {
-					log.V(3).Infof("Cancelling Write %v", req.ue.Digest)
+					log.V(3).Infof("Cancelling Write %v", req.ue.Digest())
 					if st.cancel != nil {
 						st.cancel()
 					}
-					delete(c.casUploads, req.ue.Digest)
+					delete(c.casUploads, req.ue.Digest())
 				}
 				st.mu.Unlock()
 			}
@@ -356,7 +356,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 	var metas []*ContextMetadata
 	log.V(2).Infof("Upload is processing %d requests", len(reqs))
 	for _, req := range reqs {
-		dg := req.ue.Digest
+		dg := req.ue.Digest()
 		st, ok := c.casUploads[dg]
 		if ok {
 			st.mu.Lock()
@@ -457,7 +457,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				cCtx, cancel := context.WithCancel(ctx)
 				st.cancel = cancel
 				st.mu.Unlock()
-				dg := st.ue.Digest
+				dg := st.ue.Digest()
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
 				ch, err := chunker.New(st.ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 				if err != nil {
@@ -491,7 +491,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 	var dgs []digest.Digest
 	ueList := make(map[digest.Digest]*uploadinfo.Entry)
 	for _, ue := range data {
-		dg := ue.Digest
+		dg := ue.Digest()
 		if dg.IsEmpty() {
 			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty blob %s", dg)
 			continue
@@ -547,7 +547,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 					}
 
 					if dg.Size != int64(len(data)) {
-						return errors.Errorf("blob size changed while uploading, given:%d now:%d for %s", dg.Size, int64(len(data)), ue.Path)
+						return errors.Errorf("blob size changed while uploading, given:%d now:%d for %s", dg.Size, int64(len(data)), ue.Path())
 					}
 
 					bchMap[dg] = data
@@ -559,14 +559,14 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 			} else {
 				LogContextInfof(ctx, log.Level(3), "Uploading single blob with digest %s", batch[0])
 				ue := ueList[batch[0]]
-				dg := ue.Digest
+				dg := ue.Digest()
 				ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
 				if err != nil {
 					return err
 				}
 				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch, false, 0)
 				if err != nil {
-					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
+					return fmt.Errorf("failed to upload %s: %w", ue.Path(), err)
 				}
 				atomic.AddInt64(&totalBytesTransferred, written)
 			}
@@ -603,7 +603,7 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 	st.err = err
 	for _, cl := range st.clients {
 		cl <- &uploadResponse{
-			digest:     st.ue.Digest,
+			digest:     st.ue.Digest(),
 			bytesMoved: bytesMoved,
 			missing:    missing,
 			err:        err,
