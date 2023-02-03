@@ -13,7 +13,8 @@ import (
 )
 
 var (
-	logStreams map[string]*logStream
+	logStreams    map[string]*logStream
+	logStreamData = []byte("Hello World! This is large data to send.")
 )
 
 type logStream struct {
@@ -28,60 +29,62 @@ func TestWriteChunkedWithOffset_LogStream(t *testing.T) {
 		ls          *logStream
 		data        []byte
 		numIterate  int
-		offset      int64
 		notFound    bool
+		opts        []ByteStreamWriteOption
 		wantBytes   int64
 		wantErr     bool
 	}{
 		{
 			description: "valid data with offset 0",
 			ls:          &logStream{logStreamID: "logstream1", logicalOffset: 0},
-			data:        []byte("Hello World! This is large data to send."),
+			data:        logStreamData,
+			opts:        []ByteStreamWriteOption{ByteStreamOptOffset(0), ByteSteramOptFinishWrite(false)},
 			numIterate:  3,
-			offset:      0,
+			wantBytes:   int64(len(logStreamData)),
 			wantErr:     false,
 		},
 		{
 			description: "valid data with non-zero offset",
 			ls:          &logStream{logStreamID: "logstream2", logicalOffset: 4},
-			data:        []byte("Hello World! This is large data to send."),
+			data:        logStreamData,
+			opts:        []ByteStreamWriteOption{ByteStreamOptOffset(4), ByteSteramOptFinishWrite(false)},
 			numIterate:  3,
-			offset:      4,
+			wantBytes:   int64(len(logStreamData)),
 			wantErr:     false,
 		},
 		{
 			description: "one big chunk",
 			ls:          &logStream{logStreamID: "logstream3", logicalOffset: 0},
-			data:        []byte("Hello World! This is large data to send."),
+			data:        logStreamData,
+			opts:        []ByteStreamWriteOption{ByteStreamOptOffset(0), ByteSteramOptFinishWrite(false)},
 			numIterate:  1,
-			offset:      0,
+			wantBytes:   int64(len(logStreamData)),
 			wantErr:     false,
 		},
 		{
 			description: "empty data",
 			ls:          &logStream{logStreamID: "logstream4", logicalOffset: 0},
 			data:        []byte{},
-
-			numIterate: 1,
-			offset:     0,
-			wantBytes:  0,
-			wantErr:    false,
+			opts:        []ByteStreamWriteOption{ByteStreamOptOffset(0), ByteSteramOptFinishWrite(false)},
+			numIterate:  1,
+			wantBytes:   0,
+			wantErr:     false,
 		},
 		{
 			description: "invalid write to finalized logstream",
 			ls:          &logStream{logStreamID: "logstream5", logicalOffset: 5, finalized: true},
-			data:        []byte("Hello World! This is large data to send."),
+			data:        logStreamData,
+			opts:        []ByteStreamWriteOption{ByteStreamOptOffset(0), ByteSteramOptFinishWrite(false)},
 			numIterate:  1,
-			offset:      5,
 			wantBytes:   0,
 			wantErr:     true,
 		},
 		{
 			description: "not found",
 			ls:          &logStream{logStreamID: "notFound", logicalOffset: 0},
-			data:        []byte("Hello World! This is large data to send."),
+			data:        logStreamData,
+			opts:        []ByteStreamWriteOption{ByteStreamOptOffset(0), ByteSteramOptFinishWrite(false)},
 			numIterate:  1,
-			offset:      0,
 			notFound:    true,
 			wantBytes:   0,
 			wantErr:     true,
@@ -89,10 +92,18 @@ func TestWriteChunkedWithOffset_LogStream(t *testing.T) {
 		{
 			description: "invlid offset",
 			ls:          &logStream{logStreamID: "logstream6", logicalOffset: 8},
-			data:        []byte("Hello World! This is large data to send."),
+			data:        logStreamData,
+			opts:        []ByteStreamWriteOption{ByteStreamOptOffset(5), ByteSteramOptFinishWrite(false)},
 			numIterate:  1,
-			offset:      5,
-			notFound:    false,
+			wantBytes:   0,
+			wantErr:     true,
+		},
+		{
+			description: "invalid option",
+			ls:          &logStream{logStreamID: "logstream7", logicalOffset: 0},
+			data:        logStreamData,
+			opts:        []ByteStreamWriteOption{ByteStreamOptOffset(4)},
+			numIterate:  1,
 			wantBytes:   0,
 			wantErr:     true,
 		},
@@ -104,11 +115,9 @@ func TestWriteChunkedWithOffset_LogStream(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
 			size := len(test.data)/test.numIterate + 1
-			start := int(test.offset)
+			start := int(test.opts[0].(ByteStreamOptOffset))
 			end := size
-			test.wantBytes = int64(len(test.data))
 			lsID := test.ls.logStreamID
-			opts := &ByteStreamWriteOpts{LastLogicalOffset: test.offset}
 			if !test.notFound {
 				logStreams[lsID] = test.ls
 			}
@@ -118,10 +127,12 @@ func TestWriteChunkedWithOffset_LogStream(t *testing.T) {
 				if end > len(test.data) {
 					end = len(test.data)
 				}
-				if i == test.numIterate-1 {
-					opts.FinishWrite = true
+
+				if len(test.opts) == 2 && i == test.numIterate-1 {
+					test.opts[1] = ByteSteramOptFinishWrite(true)
 				}
-				writtenBytes, err := b.client.WriteBytesWithOffset(b.ctx, lsID, test.data[start:end], opts)
+
+				writtenBytes, err := b.client.WriteBytesWithOffset(b.ctx, lsID, test.data[start:end], test.opts...)
 
 				if test.wantErr && err == nil {
 					t.Fatal("WriteBytesWithOffset() got nil error, want non-nil error")
@@ -129,7 +140,7 @@ func TestWriteChunkedWithOffset_LogStream(t *testing.T) {
 				if !test.wantErr && err != nil {
 					t.Fatalf("WriteBytesWithOffset() failed unexpectedly: %v", err)
 				}
-				opts.LastLogicalOffset += writtenBytes
+				test.opts[0] = test.opts[0].(ByteStreamOptOffset) + ByteStreamOptOffset(writtenBytes)
 				start = end
 				end += size
 			}

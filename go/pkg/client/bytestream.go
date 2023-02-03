@@ -15,6 +15,28 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 )
 
+// ByteStreamWriteOption sets options required for resumable upload.
+type ByteStreamWriteOption interface {
+	Apply(*ByteStreamWriteOpts)
+}
+
+// ByteSteramOptFinishWrite is a boolean flag to set FinishWrite
+// in ByteStream.WriteRequest.
+type ByteSteramOptFinishWrite bool
+
+// Apply sets ByteSteramOptFinishWrite in ByteStreamWriteOpts.
+func (o ByteSteramOptFinishWrite) Apply(opts *ByteStreamWriteOpts) {
+	opts.FinishWrite = bool(o)
+}
+
+// ByteStreamOptOffset is offset for resumable upload.
+type ByteStreamOptOffset int64
+
+// Apply sets ByteStreamOptOffset in ByteStreamWriteOpts.
+func (o ByteStreamOptOffset) Apply(opts *ByteStreamWriteOpts) {
+	opts.LastLogicalOffset = int64(o)
+}
+
 // WriteBytes uploads a byte slice.
 func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
 	ue := uploadinfo.EntryFromBlob(data)
@@ -26,67 +48,30 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 	return err
 }
 
-// writeChunked uploads chunked data with a given resource name to the CAS.
-func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker) (int64, error) {
-	var totalBytes int64
-	closure := func() error {
-		// Retry by starting the stream from the beginning.
-		if err := ch.Reset(); err != nil {
-			return errors.Wrap(err, "failed to Reset")
-		}
-		totalBytes = int64(0)
-		// TODO(olaola): implement resumable uploads.
-
-		stream, err := c.Write(ctx)
-		if err != nil {
-			return err
-		}
-		for ch.HasNext() {
-			req := &bspb.WriteRequest{}
-			chunk, err := ch.Next()
-			if err != nil {
-				return err
-			}
-			if chunk.Offset == 0 {
-				req.ResourceName = name
-			}
-			req.WriteOffset = chunk.Offset
-			req.Data = chunk.Data
-			if !ch.HasNext() {
-				req.FinishWrite = true
-			}
-			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return err
-			}
-			totalBytes += int64(len(req.Data))
-		}
-		if _, err := stream.CloseAndRecv(); err != nil {
-			return err
-		}
-		return nil
-	}
-	err := c.Retrier.Do(ctx, closure)
-	return totalBytes, err
-}
-
-// WriteBytesWithOffset uploads a byte slice.
-func (c *Client) WriteBytesWithOffset(ctx context.Context, name string, data []byte, opts *ByteStreamWriteOpts) (int64, error) {
+// WriteBytesWithOffset uploads a byte slice with a given resource name to the CAS
+// at an arbitrary offset.
+func (c *Client) WriteBytesWithOffset(ctx context.Context, name string, data []byte, opts ...ByteStreamWriteOption) (int64, error) {
 	ue := uploadinfo.EntryFromBlob(data)
 	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
 		return 0, err
 	}
-	return c.writeChunkedWithOffset(ctx, name, ch, opts)
+	return c.writeChunked(ctx, name, ch, opts...)
 }
 
-// writeChunkedWithOffset uploads chunked data with a given resource name to the CAS at an arbitrary offset.
-func (c *Client) writeChunkedWithOffset(ctx context.Context, name string, ch *chunker.Chunker, opts *ByteStreamWriteOpts) (int64, error) {
-	var totalBytes int64
+// writeChunked uploads chunked data with a given resource name to the CAS.
+func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker, rawOpts ...ByteStreamWriteOption) (int64, error) {
+	if len(rawOpts) == 1 {
+		return 0, errors.Errorf("Missing an arugment")
+	}
+	opts := &ByteStreamWriteOpts{}
+	var resume bool
+	for _, o := range rawOpts {
+		resume = true
+		o.Apply(opts)
+	}
 
+	var totalBytes int64
 	closure := func() error {
 		// Retry by starting the stream from the beginning.
 		if err := ch.Reset(); err != nil {
@@ -99,14 +84,20 @@ func (c *Client) writeChunkedWithOffset(ctx context.Context, name string, ch *ch
 			return err
 		}
 		for ch.HasNext() {
-			req := &bspb.WriteRequest{ResourceName: name, WriteOffset: opts.LastLogicalOffset + ch.Offset()}
+			req := &bspb.WriteRequest{ResourceName: name}
 			chunk, err := ch.Next()
 			if err != nil {
 				return err
 			}
+			req.WriteOffset = chunk.Offset
+			// If LastLogicaloffset is provided as an option, we want uploading bytes
+			// at the last logcial offset + the chunk offset which is relative to Chunker passed in.
+			if resume {
+				req.WriteOffset += opts.LastLogicalOffset
+			}
 			req.Data = chunk.Data
 
-			if !ch.HasNext() && opts.FinishWrite {
+			if (!resume && !ch.HasNext()) || (resume && !ch.HasNext() && opts.FinishWrite) {
 				req.FinishWrite = true
 			}
 			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })
@@ -121,7 +112,6 @@ func (c *Client) writeChunkedWithOffset(ctx context.Context, name string, ch *ch
 		if _, err := stream.CloseAndRecv(); err != nil {
 			return err
 		}
-
 		return nil
 	}
 	err := c.Retrier.Do(ctx, closure)
