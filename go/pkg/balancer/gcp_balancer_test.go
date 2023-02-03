@@ -85,3 +85,7 @@ func (fakeSubConn) Connect() {
 	// Sleep to simulate connecting to an actual server.
 	time.Sleep(100 * time.Millisecond)
 }
+
+func (fakeSubConn) GetOrBuildProducer(grpcbalancer.ProducerBuilder) (grpcbalancer.Producer, func()) {
+	return nil, nil
+}
