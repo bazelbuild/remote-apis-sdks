@@ -23,7 +23,7 @@ type logStream struct {
 	finalized     bool
 }
 
-func TestWriteChunkedWithOffset_LogStream(t *testing.T) {
+func TestWriteBytesWithOffset_LogStream(t *testing.T) {
 	tests := []struct {
 		description string
 		ls          *logStream
