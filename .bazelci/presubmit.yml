@@ -8,7 +8,7 @@ tasks:
     shell_commands:
       - "echo --- Downloading and extracting Go 1.19.5 to $GO_HOME"
       - "mkdir $GO_HOME"
-      - "curl https://golang.org/dl/go1.19.5.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
+      - "curl https://mirror.bazel.build/golang.org/dl/go1.19.5.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
       - "echo +++ Check go format"
       - "./check-gofmt.sh `find go -name '*.go'`"
       - "./check-golint.sh"
@@ -28,7 +28,7 @@ tasks:
     shell_commands:
       - "echo --- Downloading and extracting Go 1.19.5 to $GO_HOME"
       - "mkdir $GO_HOME"
-      - "curl https://golang.org/dl/g1.19.5.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
+      - "curl https://mirror.bazel.build/golang.org/dl/g1.19.5.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
       - "echo +++ Running go build"
       - "go build ./..."
       - "echo +++ Running go test"
