@@ -285,6 +285,36 @@ func TestWriteRetries(t *testing.T) {
 	}
 }
 
+func TestWriteRetriesWithOptions(t *testing.T) {
+	opts := [][]client.ByteStreamWriteOption{
+		{client.ByteSteramOptFinishWrite(true), client.ByteStreamOptOffset(0)},
+		{client.ByteSteramOptFinishWrite(false), client.ByteStreamOptOffset(0)},
+		{client.ByteSteramOptFinishWrite(true)},
+		{client.ByteSteramOptFinishWrite(false)},
+		{client.ByteStreamOptOffset(0)},
+		{},
+	}
+
+	for _, opt := range opts {
+		opt := opt
+		t.Run(fmt.Sprintf("write options=%v", opt), func(t *testing.T) {
+			t.Parallel()
+			f := setup(t)
+			defer f.shutDown()
+
+			name := "fake"
+			data := []byte("byte")
+			writtenBytes, err := f.client.WriteBytesWithOptions(f.ctx, name, data, opt...)
+			if err != nil {
+				t.Errorf("client.WriteBytesWithOptions(ctx, name, bytes, %v) gave error %s, wanted nil", opt, err)
+			}
+			if len(data) != int(writtenBytes) {
+				t.Errorf("client.WriteBytesWithOptions(ctx, name, bytes, %v) got %d bytes, want %d", opt, writtenBytes, len(data))
+			}
+		})
+	}
+}
+
 func TestReadRetries(t *testing.T) {
 	t.Parallel()
 	for _, sleep := range []bool{false, true} {

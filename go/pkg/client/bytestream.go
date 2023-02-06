@@ -48,26 +48,25 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 	return err
 }
 
-// WriteBytesWithOffset uploads a byte slice with a given resource name to the CAS
-// at an arbitrary offset.
-func (c *Client) WriteBytesWithOffset(ctx context.Context, name string, data []byte, opts ...ByteStreamWriteOption) (int64, error) {
+// WriteBytesWithOptions uploads a byte slice with a given resource name to the CAS
+// at an arbitrary offset but retries still resend from the specified offset.
+func (c *Client) WriteBytesWithOptions(ctx context.Context, name string, data []byte, opts ...ByteStreamWriteOption) (int64, error) {
 	ue := uploadinfo.EntryFromBlob(data)
 	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
 		return 0, err
 	}
-	return c.writeChunked(ctx, name, ch, opts...)
+	writtenBytes, err := c.writeChunked(ctx, name, ch, opts...)
+	if err != nil {
+		return 0, err
+	}
+	return writtenBytes, nil
 }
 
 // writeChunked uploads chunked data with a given resource name to the CAS.
 func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker, rawOpts ...ByteStreamWriteOption) (int64, error) {
-	if len(rawOpts) == 1 {
-		return 0, errors.Errorf("Missing an arugment")
-	}
-	opts := &ByteStreamWriteOpts{}
-	var resume bool
+	opts := &ByteStreamWriteOpts{FinishWrite: true}
 	for _, o := range rawOpts {
-		resume = true
 		o.Apply(opts)
 	}
 
@@ -78,6 +77,8 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			return errors.Wrap(err, "failed to Reset")
 		}
 		totalBytes = int64(0)
+		// TODO(olaola): implement resumable uploads. ByteStreamWriteOption passed in allows to
+		// upload to an arbitrary offset, but retries still resend from the specified offset.
 
 		stream, err := c.Write(ctx)
 		if err != nil {
@@ -89,15 +90,10 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			if err != nil {
 				return err
 			}
-			req.WriteOffset = chunk.Offset
-			// If LastLogicaloffset is provided as an option, we want uploading bytes
-			// at the last logcial offset + the chunk offset which is relative to Chunker passed in.
-			if resume {
-				req.WriteOffset += opts.LastLogicalOffset
-			}
+			req.WriteOffset = chunk.Offset + opts.LastLogicalOffset
 			req.Data = chunk.Data
 
-			if (!resume && !ch.HasNext()) || (resume && !ch.HasNext() && opts.FinishWrite) {
+			if !ch.HasNext() && opts.FinishWrite {
 				req.FinishWrite = true
 			}
 			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })
