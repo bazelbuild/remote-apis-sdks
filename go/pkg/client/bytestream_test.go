@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	logStreams    map[string]*logStream
 	logStreamData = []byte("Hello World! This is large data to send.")
 )
 
@@ -75,7 +74,7 @@ func TestWriteBytesWithOffsetSuccess_LogStream(t *testing.T) {
 			start = int(test.opts[0].(ByteStreamOptOffset))
 			end := size
 			lsID := test.ls.logStreamID
-			logStreams[lsID] = test.ls
+			b.fake.logStreams[lsID] = test.ls
 			ChunkMaxSize(size).Apply(b.client)
 
 			for i := 0; i < test.numIterate; i++ {
@@ -95,10 +94,10 @@ func TestWriteBytesWithOffsetSuccess_LogStream(t *testing.T) {
 				end += size
 			}
 
-			if logStreams[lsID].logicalOffset != test.wantBytes {
-				t.Errorf("WriteBytesWithOffset() = %d, want %d", logStreams[lsID].logicalOffset, test.wantBytes)
+			if b.fake.logStreams[lsID].logicalOffset != test.wantBytes {
+				t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, test.wantBytes)
 			}
-			if logStreams[lsID].finalized == false {
+			if b.fake.logStreams[lsID].finalized == false {
 				t.Error("WriteBytesWithOffset() didn't correctly finalize logstream")
 			}
 		})
@@ -156,7 +155,7 @@ func TestWriteBytesWithOffsetErrors_LogStream(t *testing.T) {
 		t.Run(test.description, func(t *testing.T) {
 			lsID := test.ls.logStreamID
 			if !test.notFound {
-				logStreams[lsID] = test.ls
+				b.fake.logStreams[lsID] = test.ls
 			}
 			data := []byte("Hello World!")
 			ChunkMaxSize(len(data)).Apply(b.client)
@@ -171,14 +170,14 @@ func TestWriteBytesWithOffsetErrors_LogStream(t *testing.T) {
 	}
 }
 
-func TestWirteBytesWithOptions_FinishWrite(t *testing.T) {
+func TestWirteBytesWithOptions_LogStream_FinishWrite(t *testing.T) {
 	b := setup(t)
 	defer b.shutDown()
 	dataSize := len(logStreamData)
 	for i, flag := range []ByteStreamWriteOption{ByteSteramOptFinishWrite(true), ByteSteramOptFinishWrite(false)} {
 		t.Run(fmt.Sprintf("ByteSteramOptFinishWrite=%t", flag), func(t *testing.T) {
 			lsID := fmt.Sprintf("logstream%d", i+1)
-			logStreams[lsID] = &logStream{logStreamID: lsID, logicalOffset: 0}
+			b.fake.logStreams[lsID] = &logStream{logStreamID: lsID, logicalOffset: 0}
 			ChunkMaxSize(dataSize).Apply(b.client)
 
 			_, err := b.client.WriteBytesWithOptions(b.ctx, lsID, logStreamData, flag)
@@ -186,35 +185,35 @@ func TestWirteBytesWithOptions_FinishWrite(t *testing.T) {
 				t.Errorf("WriteBytesWithOffset() failed unexpectedly: %v", err)
 			}
 
-			if logStreams[lsID].logicalOffset != int64(dataSize) {
-				t.Errorf("WriteBytesWithOffset() = %d, want %d", logStreams[lsID].logicalOffset, int64(dataSize))
+			if b.fake.logStreams[lsID].logicalOffset != int64(dataSize) {
+				t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, int64(dataSize))
 			}
-			if logStreams[lsID].finalized != bool(flag.(ByteSteramOptFinishWrite)) {
-				t.Errorf("WriteBytesWithOffset() got %t, want %t state", logStreams[lsID].finalized, bool(flag.(ByteSteramOptFinishWrite)))
+			if b.fake.logStreams[lsID].finalized != bool(flag.(ByteSteramOptFinishWrite)) {
+				t.Errorf("WriteBytesWithOffset() got %t, want %t state", b.fake.logStreams[lsID].finalized, bool(flag.(ByteSteramOptFinishWrite)))
 			}
 		})
 
 	}
 }
 
-func TestWirteBytesWithOptions_Offset(t *testing.T) {
+func TestWirteBytesWithOptions_LogStream_Offset(t *testing.T) {
 	b := setup(t)
 	defer b.shutDown()
 	dataSize := len(logStreamData)
 	for _, offset := range []ByteStreamWriteOption{ByteStreamOptOffset(0), ByteStreamOptOffset(6)} {
 		t.Run(fmt.Sprintf("ByteSteramOptFinishWrite=%t", offset), func(t *testing.T) {
 			lsID := fmt.Sprintf("logstream%d", offset)
-			logStreams[lsID] = &logStream{logStreamID: lsID, logicalOffset: int64(offset.(ByteStreamOptOffset))}
+			b.fake.logStreams[lsID] = &logStream{logStreamID: lsID, logicalOffset: int64(offset.(ByteStreamOptOffset))}
 			ChunkMaxSize(dataSize).Apply(b.client)
 
 			_, err := b.client.WriteBytesWithOptions(b.ctx, lsID, logStreamData[int(offset.(ByteStreamOptOffset)):], offset)
 			if err != nil {
 				t.Errorf("WriteBytesWithOffset() failed unexpectedly: %v", err)
 			}
-			if logStreams[lsID].logicalOffset != int64(dataSize) {
-				t.Errorf("WriteBytesWithOffset() = %d, want %d", logStreams[lsID].logicalOffset, int64(dataSize))
+			if b.fake.logStreams[lsID].logicalOffset != int64(dataSize) {
+				t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, int64(dataSize))
 			}
-			if logStreams[lsID].finalized != true {
+			if b.fake.logStreams[lsID].finalized != true {
 				t.Error("WriteBytesWithOffset() didn't correctly finalize logstream")
 			}
 		})
@@ -222,6 +221,7 @@ func TestWirteBytesWithOptions_Offset(t *testing.T) {
 }
 
 type Bytestream struct {
+	logStreams map[string]*logStream
 }
 
 type Server struct {
@@ -251,7 +251,7 @@ func setup(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
-	logStreams = make(map[string]*logStream, 10)
+	s.fake.logStreams = make(map[string]*logStream, 10)
 	return s
 }
 
@@ -277,7 +277,7 @@ func (b *Bytestream) Write(stream bsgrpc.ByteStream_WriteServer) error {
 		return err
 	}
 
-	ls, ok := logStreams[req.GetResourceName()]
+	ls, ok := b.logStreams[req.GetResourceName()]
 	if !ok {
 		return fmt.Errorf("unable to find LogStream")
 	}
