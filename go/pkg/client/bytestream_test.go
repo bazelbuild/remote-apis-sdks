@@ -88,7 +88,7 @@ func TestWriteBytesWithOffsetSuccess_LogStream(t *testing.T) {
 
 				writtenBytes, err := b.client.WriteBytesWithOptions(b.ctx, lsID, test.data[start:end], test.opts...)
 				if err != nil {
-					t.Fatalf("WriteBytesWithOffset() failed unexpectedly: %v", err)
+					t.Errorf("WriteBytesWithOffset() failed unexpectedly: %v", err)
 				}
 				test.opts[0] = test.opts[0].(ByteStreamOptOffset) + ByteStreamOptOffset(writtenBytes)
 				start = end
@@ -162,7 +162,7 @@ func TestWriteBytesWithOffsetErrors_LogStream(t *testing.T) {
 			ChunkMaxSize(len(data)).Apply(b.client)
 			writtenBytes, err := b.client.WriteBytesWithOptions(b.ctx, lsID, data, test.opts...)
 			if err == nil {
-				t.Errorf("WriteBytesWithOffset() got nil error, want non-nil error")
+				t.Error("WriteBytesWithOffset() got nil error, want non-nil error")
 			}
 			if writtenBytes != 0 {
 				t.Errorf("WriteBytesWithOffset() got %d byte(s), want 0 byte", writtenBytes)
@@ -183,14 +183,14 @@ func TestWirteBytesWithOptions_FinishWrite(t *testing.T) {
 
 			_, err := b.client.WriteBytesWithOptions(b.ctx, lsID, logStreamData, flag)
 			if err != nil {
-				t.Fatalf("WriteBytesWithOffset() failed unexpectedly: %v", err)
+				t.Errorf("WriteBytesWithOffset() failed unexpectedly: %v", err)
 			}
 
 			if logStreams[lsID].logicalOffset != int64(dataSize) {
 				t.Errorf("WriteBytesWithOffset() = %d, want %d", logStreams[lsID].logicalOffset, int64(dataSize))
 			}
 			if logStreams[lsID].finalized != bool(flag.(ByteSteramOptFinishWrite)) {
-				t.Errorf("WriteBytesWithOffset() didn't correctly finalize logstream")
+				t.Errorf("WriteBytesWithOffset() got %t, want %t state", logStreams[lsID].finalized, bool(flag.(ByteSteramOptFinishWrite)))
 			}
 		})
 
@@ -209,13 +209,13 @@ func TestWirteBytesWithOptions_Offset(t *testing.T) {
 
 			_, err := b.client.WriteBytesWithOptions(b.ctx, lsID, logStreamData[int(offset.(ByteStreamOptOffset)):], offset)
 			if err != nil {
-				t.Fatalf("WriteBytesWithOffset() failed unexpectedly: %v", err)
+				t.Errorf("WriteBytesWithOffset() failed unexpectedly: %v", err)
 			}
 			if logStreams[lsID].logicalOffset != int64(dataSize) {
 				t.Errorf("WriteBytesWithOffset() = %d, want %d", logStreams[lsID].logicalOffset, int64(dataSize))
 			}
 			if logStreams[lsID].finalized != true {
-				t.Errorf("WriteBytesWithOffset() didn't correctly finalize logstream")
+				t.Error("WriteBytesWithOffset() didn't correctly finalize logstream")
 			}
 		})
 	}
