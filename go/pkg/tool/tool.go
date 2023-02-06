@@ -324,9 +324,9 @@ func (c *Client) writeProto(m proto.Message, baseName string) error {
 
 // DownloadAction parses and downloads an action to the given directory.
 // The output directory will have the following:
-//   1. ac.textproto: the action proto file in text format.
-//   2. cmd.textproto: the command proto file in text format.
-//   3. input/: the input tree root directory with all files under it.
+//  1. ac.textproto: the action proto file in text format.
+//  2. cmd.textproto: the command proto file in text format.
+//  3. input/: the input tree root directory with all files under it.
 func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath string) error {
 	acDg, err := digest.NewFromString(actionDigest)
 	if err != nil {
@@ -406,10 +406,11 @@ func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, err
 // ExecuteAction executes an action in a canonical structure remotely.
 // The structure is the same as that produced by DownloadAction.
 // top level >
-//           > ac.textproto (Action text proto)
-//           > cmd.textproto (Command text proto)
-//           > input (Input root)
-//             > inputs...
+//
+//	> ac.textproto (Action text proto)
+//	> cmd.textproto (Command text proto)
+//	> input (Input root)
+//	  > inputs...
 func (c *Client) ExecuteAction(ctx context.Context, actionDigest, actionRoot, outDir string, oe outerr.OutErr) (*command.Metadata, error) {
 	fmc := filemetadata.NewNoopCache()
 	client := &rexec.Client{

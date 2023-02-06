@@ -8,14 +8,15 @@
 // 4. Re-execute remote action (with optional inputs override).
 //
 // Example (download an action result from remote action cache):
-// bazelisk run //go/cmd/remotetool -- \
-//  --operation=download_action_result \
-// 	--instance=$INSTANCE \
-// 	--service remotebuildexecution.googleapis.com:443 \
-// 	--alsologtostderr --v 1 \
-// 	--credential_file $CRED_FILE \
-// 	--digest=52a54724e6b3dff3bc44ef5dceb3aab5892f2fc7e37fce5aa6e16a7a266fbed6/147 \
-// 	--path=`pwd`/tmp
+//
+//	bazelisk run //go/cmd/remotetool -- \
+//	 --operation=download_action_result \
+//		--instance=$INSTANCE \
+//		--service remotebuildexecution.googleapis.com:443 \
+//		--alsologtostderr --v 1 \
+//		--credential_file $CRED_FILE \
+//		--digest=52a54724e6b3dff3bc44ef5dceb3aab5892f2fc7e37fce5aa6e16a7a266fbed6/147 \
+//		--path=`pwd`/tmp
 package main
 
 import (

@@ -202,8 +202,8 @@ func PickUnusedPort() (port int, err error) {
 // TB is the minimal viable interface that captures testing.TB.  It accepts
 // implementations of
 //
-//   *testing.B
-//   *testing.T
+//	*testing.B
+//	*testing.T
 //
 // This interface is introduced for the sole reason that portpicker is not a
 // testonly library, and we want to avoid having non-testing code suddenly
@@ -223,15 +223,15 @@ type TB interface {
 // PickUnusedPortTB is a package testing-aware variant of PickUnusedPort that
 // treats provisioning errors as fatal and handles port releasing for the user.
 //
-//   func TestSmoke(t *testing.T) {
-//     backend := startTestBackendOnPort(portpicker.PickUnusedPortTB(t))
+//	func TestSmoke(t *testing.T) {
+//	  backend := startTestBackendOnPort(portpicker.PickUnusedPortTB(t))
 //
-//     // test backend
-//   }
+//	  // test backend
+//	}
 //
 // The returned port should NOT be manually returned with RecycleUnusedPort.
 //
-// Caution
+// # Caution
 //
 // Port release failures do not result in test failures but leave error message
 // in test logs. Investigate logs to ensure that your servers under test (SUT)
