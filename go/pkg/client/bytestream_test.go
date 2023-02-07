@@ -91,7 +91,7 @@ func TestWriteBytesWithOffsetSuccess_LogStream(t *testing.T) {
 					t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, end)
 				}
 				// LogStream shouldn't be finalized when we set ByteStreamOptFinishWrite false.
-				if i != test.dataPartsLen-1 && b.fake.logStreams[lsID].finalized == true {
+				if i != test.dataPartsLen-1 && b.fake.logStreams[lsID].finalized {
 					t.Error("WriteBytesWithOffset() incorrectly finalized LogStream")
 				}
 
@@ -103,7 +103,7 @@ func TestWriteBytesWithOffsetSuccess_LogStream(t *testing.T) {
 			if b.fake.logStreams[lsID].logicalOffset != test.wantBytesLen {
 				t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, test.wantBytesLen)
 			}
-			if b.fake.logStreams[lsID].finalized == false {
+			if !b.fake.logStreams[lsID].finalized {
 				t.Error("WriteBytesWithOffset() didn't correctly finalize LogStream")
 			}
 		})
