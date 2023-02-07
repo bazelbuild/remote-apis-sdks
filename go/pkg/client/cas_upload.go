@@ -20,28 +20,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// MissingBlobs queries the CAS to determine if it has the listed blobs. It returns a list of the
-// missing blobs.
-func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest.Digest, error) {
-	var batches [][]digest.Digest
+// MissingBlobs queries the CAS to determine if it has the specified blobs.
+// Returns a slice of missing blobs.
+func (c *Client) MissingBlobs(ctx context.Context, digests []digest.Digest) ([]digest.Digest, error) {
 	var missing []digest.Digest
 	var resultMutex sync.Mutex
-	const maxQueryLimit = 10000
-	for len(ds) > 0 {
-		batchSize := maxQueryLimit
-		if len(ds) < maxQueryLimit {
-			batchSize = len(ds)
-		}
-		var batch []digest.Digest
-		for i := 0; i < batchSize; i++ {
-			batch = append(batch, ds[i])
-		}
-		ds = ds[batchSize:]
-		LogContextInfof(ctx, log.Level(3), "Created query batch of %d blobs", len(batch))
-		batches = append(batches, batch)
-	}
-	LogContextInfof(ctx, log.Level(3), "%d query batches created", len(batches))
-
+	batches := c.makeQueryBatches(ctx, digests)
 	eg, eCtx := errgroup.WithContext(ctx)
 	for i, batch := range batches {
 		i, batch := i, batch // https://golang.org/doc/faq#closures_and_goroutines
@@ -82,71 +66,20 @@ func (c *Client) MissingBlobs(ctx context.Context, ds []digest.Digest) ([]digest
 	return missing, err
 }
 
-// UploadIfMissing stores a number of uploadable items.
-// It first queries the CAS to see which items are missing and only uploads those that are.
-// Returns a slice of the missing digests and the sum of total bytes moved - may be different
-// from logical bytes moved (ie sum of digest sizes) due to compression.
-func (c *Client) UploadIfMissing(ctx context.Context, data ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
+// UploadIfMissing writes the missing blobs from those specified to the CAS.
+//
+// The blobs are first matched against existing ones and only the missing blobs are written.
+// Returns a slice of missing digests that were written and the sum of total bytes moved, which
+// may be different from logical bytes moved (i.e. sum of digest sizes) due to compression.
+func (c *Client) UploadIfMissing(ctx context.Context, entries ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
 	if !c.UnifiedUploads {
-		return c.uploadNonUnified(ctx, data...)
+		return c.uploadNonUnified(ctx, entries...)
 	}
-	uploads := len(data)
-	LogContextInfof(ctx, log.Level(2), "Request to upload %d blobs", uploads)
-
-	if uploads == 0 {
-		return nil, 0, nil
-	}
-	meta, err := GetContextMetadata(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	wait := make(chan *uploadResponse, uploads)
-	var missing []digest.Digest
-	var reqs []*uploadRequest
-	for _, ue := range data {
-		if ue.Digest.IsEmpty() {
-			uploads--
-			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty entry %s", ue.Digest)
-			continue
-		}
-		req := &uploadRequest{
-			ue:   ue,
-			meta: meta,
-			wait: wait,
-		}
-		reqs = append(reqs, req)
-		select {
-		case <-ctx.Done():
-			LogContextInfof(ctx, log.Level(2), "Upload canceled")
-			c.cancelPendingRequests(reqs)
-			return nil, 0, ctx.Err()
-		case c.casUploadRequests <- req:
-			continue
-		}
-	}
-	totalBytesMoved := int64(0)
-	for uploads > 0 {
-		select {
-		case <-ctx.Done():
-			c.cancelPendingRequests(reqs)
-			return nil, 0, ctx.Err()
-		case resp := <-wait:
-			if resp.err != nil {
-				return nil, 0, resp.err
-			}
-			if resp.missing {
-				missing = append(missing, resp.digest)
-			}
-			totalBytesMoved += resp.bytesMoved
-			uploads--
-		}
-	}
-	return missing, totalBytesMoved, nil
+	return c.uploadUnified(ctx, entries...)
 }
 
-// WriteBlobs stores a large number of blobs from a digest-to-blob map. It's intended for use on the
-// result of PackageTree. Unlike with the single-item functions, it first queries the CAS to
-// see which blobs are missing and only uploads those that are.
+// WriteBlobs is a proxy method for UploadIfMissing that facilitates specifing a map of
+// digest-to-blob. It's intended for use with PackageTree.
 // TODO(olaola): rethink the API of this layer:
 // * Do we want to allow []byte uploads, or require the user to construct Chunkers?
 // * How to consistently distinguish in the API between should we use GetMissing or not?
@@ -160,7 +93,7 @@ func (c *Client) WriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte)
 	return err
 }
 
-// WriteBlob uploads a blob to the CAS.
+// WriteBlob (over)writes a blob to the CAS regardless if it already exists.
 func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, error) {
 	ue := uploadinfo.EntryFromBlob(blob)
 	dg := ue.Digest
@@ -176,7 +109,7 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 	return dg, err
 }
 
-// WriteProto marshals and writes a proto.
+// WriteProto is a proxy method for WriteBlob that allows specifying a proto to write.
 func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Digest, error) {
 	bytes, err := proto.Marshal(msg)
 	if err != nil {
@@ -185,10 +118,11 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 	return c.WriteBlob(ctx, bytes)
 }
 
-// BatchWriteBlobs uploads a number of blobs to the CAS. They must collectively be below the
-// maximum total size for a batch upload, which is about 4 MB (see MaxBatchSize). Digests must be
-// computed in advance by the caller. In case multiple errors occur during the blob upload, the
-// last error will be returned.
+// BatchWriteBlobs (over)writes specified blobs to the CAS, regardless if they already exist.
+//
+// The collective size must be below the maximum total size for a batch upload, which
+// is about 4 MB (see MaxBatchSize).
+// In case multiple errors occur during the blob upload, the last error is returned.
 func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]byte) error {
 	var reqs []*repb.BatchUpdateBlobsRequest_Request
 	var sz int64
@@ -298,6 +232,61 @@ type uploadState struct {
 	mu      sync.Mutex
 	clients []chan<- *uploadResponse
 	cancel  func()
+}
+
+func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
+	uploads := len(entries)
+	LogContextInfof(ctx, log.Level(2), "Request to upload %d blobs", uploads)
+
+	if uploads == 0 {
+		return nil, 0, nil
+	}
+	meta, err := GetContextMetadata(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	wait := make(chan *uploadResponse, uploads)
+	var missing []digest.Digest
+	var reqs []*uploadRequest
+	for _, ue := range entries {
+		if ue.Digest.IsEmpty() {
+			uploads--
+			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty entry %s", ue.Digest)
+			continue
+		}
+		req := &uploadRequest{
+			ue:   ue,
+			meta: meta,
+			wait: wait,
+		}
+		reqs = append(reqs, req)
+		select {
+		case <-ctx.Done():
+			LogContextInfof(ctx, log.Level(2), "Upload canceled")
+			c.cancelPendingRequests(reqs)
+			return nil, 0, fmt.Errorf("context cancelled: %w", ctx.Err())
+		case c.casUploadRequests <- req:
+			continue
+		}
+	}
+	totalBytesMoved := int64(0)
+	for uploads > 0 {
+		select {
+		case <-ctx.Done():
+			c.cancelPendingRequests(reqs)
+			return nil, 0, fmt.Errorf("context cancelled: %w", ctx.Err())
+		case resp := <-wait:
+			if resp.err != nil {
+				return nil, 0, resp.err
+			}
+			if resp.missing {
+				missing = append(missing, resp.digest)
+			}
+			totalBytesMoved += resp.bytesMoved
+			uploads--
+		}
+	}
+	return missing, totalBytesMoved, nil
 }
 
 func (c *Client) uploadProcessor() {
