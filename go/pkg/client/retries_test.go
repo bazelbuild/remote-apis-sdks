@@ -312,22 +312,22 @@ func TestWriteRetriesWithOptions(t *testing.T) {
 	}{
 		{
 			description:   "true and offset 0",
-			opts:          []client.ByteStreamWriteOption{client.ByteSteramOptFinishWrite(true), client.ByteStreamOptOffset(0)},
+			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptFinishWrite(true), client.ByteStreamOptOffset(0)},
 			initialOffset: 0,
 		},
 		{
 			description:   "false and offset 0",
-			opts:          []client.ByteStreamWriteOption{client.ByteSteramOptFinishWrite(false), client.ByteStreamOptOffset(0)},
+			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptFinishWrite(false), client.ByteStreamOptOffset(0)},
 			initialOffset: 0,
 		},
 		{
 			description:   "true",
-			opts:          []client.ByteStreamWriteOption{client.ByteSteramOptFinishWrite(true)},
+			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptFinishWrite(true)},
 			initialOffset: 0,
 		},
 		{
 			description:   "false",
-			opts:          []client.ByteStreamWriteOption{client.ByteSteramOptFinishWrite(false)},
+			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptFinishWrite(false)},
 			initialOffset: 0,
 		},
 		{

@@ -20,12 +20,12 @@ type ByteStreamWriteOption interface {
 	Apply(*ByteStreamWriteOpts)
 }
 
-// ByteSteramOptFinishWrite is a boolean flag to set FinishWrite
+// ByteStreamOptFinishWrite is a boolean flag to set FinishWrite
 // in ByteStream.WriteRequest.
-type ByteSteramOptFinishWrite bool
+type ByteStreamOptFinishWrite bool
 
-// Apply sets ByteSteramOptFinishWrite in ByteStreamWriteOpts.
-func (o ByteSteramOptFinishWrite) Apply(opts *ByteStreamWriteOpts) {
+// Apply sets ByteStreamOptFinishWrite in ByteStreamWriteOpts.
+func (o ByteStreamOptFinishWrite) Apply(opts *ByteStreamWriteOpts) {
 	opts.FinishWrite = bool(o)
 }
 
