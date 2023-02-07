@@ -71,7 +71,7 @@ func TestWriteBytesWithOffsetSuccess_LogStream(t *testing.T) {
 			start := int(test.opts[0].(ByteStreamOptOffset))
 			end := size
 			lsID := test.description
-			test.ls.logStreamID = test.description
+			test.ls.logStreamID = lsID
 			b.fake.logStreams[lsID] = test.ls
 			ChunkMaxSize(size).Apply(b.client)
 
@@ -88,12 +88,11 @@ func TestWriteBytesWithOffsetSuccess_LogStream(t *testing.T) {
 					t.Errorf("WriteBytesWithOffset() failed unexpectedly: %v", err)
 				}
 				if b.fake.logStreams[lsID].logicalOffset != int64(end) {
-					t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, end+1)
+					t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, end)
 				}
-
 				// LogStream shouldn't be finalized when we set ByteSteramOptFinishWrite false.
 				if i != test.dataPartsLen-1 && b.fake.logStreams[lsID].finalized == true {
-					t.Error("WriteBytesWithOffset() didn't correctly finalize logstream")
+					t.Error("WriteBytesWithOffset() incorrectly finalized LogStream")
 				}
 
 				test.opts[0] = test.opts[0].(ByteStreamOptOffset) + ByteStreamOptOffset(writtenBytes)
@@ -105,7 +104,7 @@ func TestWriteBytesWithOffsetSuccess_LogStream(t *testing.T) {
 				t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, test.wantBytesLen)
 			}
 			if b.fake.logStreams[lsID].finalized == false {
-				t.Error("WriteBytesWithOffset() didn't correctly finalize logstream")
+				t.Error("WriteBytesWithOffset() didn't correctly finalize LogStream")
 			}
 		})
 	}
@@ -156,7 +155,7 @@ func TestWriteBytesWithOffsetErrors_LogStream(t *testing.T) {
 		t.Run(test.description, func(t *testing.T) {
 			lsID := test.description
 			if test.ls != nil {
-				test.ls.logStreamID = test.description
+				test.ls.logStreamID = lsID
 				b.fake.logStreams[lsID] = test.ls
 			}
 			data := []byte("Hello World!")
@@ -216,7 +215,7 @@ func TestWirteBytesWithOptions_LogStream_Offset(t *testing.T) {
 				t.Errorf("WriteBytesWithOffset() = %d, want %d", b.fake.logStreams[lsID].logicalOffset, int64(dataSize))
 			}
 			if !b.fake.logStreams[lsID].finalized {
-				t.Error("WriteBytesWithOffset() didn't correctly finalize logstream")
+				t.Error("WriteBytesWithOffset() didn't correctly finalize LogStream")
 			}
 		})
 	}

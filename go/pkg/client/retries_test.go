@@ -347,17 +347,17 @@ func TestWriteRetriesWithOptions(t *testing.T) {
 			f := setup(t)
 			defer f.shutDown()
 			name := test.description
-			data := []byte("byte")
+			data := []byte("Hello World!")
 			if test.initialOffset > 0 {
 				f.fake.setInitialOffset(name, test.initialOffset)
 			}
 
-			writtenBytes, err := f.client.WriteBytesWithOptions(f.ctx, name, data, test.opts...)
+			writtenBytes, err := f.client.WriteBytesWithOptions(f.ctx, name, data[test.initialOffset:], test.opts...)
 			if err != nil {
 				t.Errorf("client.WriteBytesWithOptions(ctx, name, %s, %v) gave error %s, want nil", string(data), test.opts, err)
 			}
-			if len(data) != int(writtenBytes) {
-				t.Errorf("client.WriteBytesWithOptions(ctx, name, %s, %v) gave %d byte(s), want %d", string(data), test.opts, writtenBytes, len(data))
+			if int64(len(data))-test.initialOffset != writtenBytes {
+				t.Errorf("client.WriteBytesWithOptions(ctx, name, %s, %v) gave %d byte(s), want %d", string(data), test.opts, writtenBytes, int64(len(data))-test.initialOffset)
 			}
 		})
 	}
