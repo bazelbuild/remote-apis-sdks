@@ -38,11 +38,13 @@ type flakyServer struct {
 	// TODO(jsharpe): This is a hack to work around WaitOperation not existing in some versions of
 	// the long running operations API that we need to support.
 	opgrpc.OperationsServer
-	mu               sync.RWMutex   // protects numCalls.
-	numCalls         map[string]int // A counter of calls the server encountered thus far, by method.
-	retriableForever bool           // Set to true to make the flaky server return a retriable error forever, rather than eventually a non-retriable error.
-	sleepDelay       time.Duration  // How long to sleep on each RPC.
-	useBSCompression bool           // Whether to use/expect compression on ByteStream calls.
+	mu               sync.RWMutex     // Protects numCalls.
+	numCalls         map[string]int   // A counter of calls the server encountered thus far, by method.
+	muOffset         sync.RWMutex     // Protects initialOffsets.
+	initialOffsets   map[string]int64 // Stores an initial offset to verify if retries are started over from a correct offset.
+	retriableForever bool             // Set to true to make the flaky server return a retriable error forever, rather than eventually a non-retriable error.
+	sleepDelay       time.Duration    // How long to sleep on each RPC.
+	useBSCompression bool             // Whether to use/expect compression on ByteStream calls.
 }
 
 func (f *flakyServer) incNumCalls(method string) int {
@@ -50,6 +52,22 @@ func (f *flakyServer) incNumCalls(method string) int {
 	defer f.mu.Unlock()
 	f.numCalls[method]++
 	return f.numCalls[method]
+}
+
+func (f *flakyServer) setInitialOffset(name string, offset int64) {
+	f.muOffset.Lock()
+	defer f.muOffset.Unlock()
+	f.initialOffsets[name] = offset
+}
+
+func (f *flakyServer) fetchInitialOffset(name string) int64 {
+	f.muOffset.Lock()
+	defer f.muOffset.Unlock()
+	offset, ok := f.initialOffsets[name]
+	if !ok {
+		return 0
+	}
+	return offset
 }
 
 func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
@@ -64,7 +82,8 @@ func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 		return err
 	}
 	// Verify that the client sends the first chunk, because they should retry from scratch.
-	if req.WriteOffset != 0 || req.FinishWrite {
+	initialOffset := f.fetchInitialOffset(req.ResourceName)
+	if req.WriteOffset != initialOffset || req.FinishWrite {
 		return status.Error(codes.FailedPrecondition, fmt.Sprintf("expected first chunk, got %v", req))
 	}
 	if numCalls < 5 {
@@ -230,7 +249,7 @@ func setup(t *testing.T) *flakyFixture {
 		t.Fatalf("Cannot listen: %v", err)
 	}
 	f.server = grpc.NewServer()
-	f.fake = &flakyServer{numCalls: make(map[string]int)}
+	f.fake = &flakyServer{numCalls: make(map[string]int), initialOffsets: make(map[string]int64)}
 	bsgrpc.RegisterByteStreamServer(f.server, f.fake)
 	regrpc.RegisterActionCacheServer(f.server, f.fake)
 	regrpc.RegisterContentAddressableStorageServer(f.server, f.fake)
@@ -286,30 +305,59 @@ func TestWriteRetries(t *testing.T) {
 }
 
 func TestWriteRetriesWithOptions(t *testing.T) {
-	opts := [][]client.ByteStreamWriteOption{
-		{client.ByteSteramOptFinishWrite(true), client.ByteStreamOptOffset(0)},
-		{client.ByteSteramOptFinishWrite(false), client.ByteStreamOptOffset(0)},
-		{client.ByteSteramOptFinishWrite(true)},
-		{client.ByteSteramOptFinishWrite(false)},
-		{client.ByteStreamOptOffset(0)},
-		{},
+	tests := []struct {
+		description   string
+		opts          []client.ByteStreamWriteOption
+		initialOffset int64
+	}{
+		{
+			description:   "true and offset 0",
+			opts:          []client.ByteStreamWriteOption{client.ByteSteramOptFinishWrite(true), client.ByteStreamOptOffset(0)},
+			initialOffset: 0,
+		},
+		{
+			description:   "false and offset 0",
+			opts:          []client.ByteStreamWriteOption{client.ByteSteramOptFinishWrite(false), client.ByteStreamOptOffset(0)},
+			initialOffset: 0,
+		},
+		{
+			description:   "true",
+			opts:          []client.ByteStreamWriteOption{client.ByteSteramOptFinishWrite(true)},
+			initialOffset: 0,
+		},
+		{
+			description:   "false",
+			opts:          []client.ByteStreamWriteOption{client.ByteSteramOptFinishWrite(false)},
+			initialOffset: 0,
+		},
+		{
+			description:   "offset 0",
+			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptOffset(0)},
+			initialOffset: 0,
+		},
+		{
+			description:   "offset 2",
+			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptOffset(2)},
+			initialOffset: 2,
+		},
 	}
 
-	for _, opt := range opts {
-		opt := opt
-		t.Run(fmt.Sprintf("write options=%v", opt), func(t *testing.T) {
-			t.Parallel()
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
 			f := setup(t)
 			defer f.shutDown()
-
-			name := "fake"
+			name := test.description
 			data := []byte("byte")
-			writtenBytes, err := f.client.WriteBytesWithOptions(f.ctx, name, data, opt...)
+			if test.initialOffset > 0 {
+				f.fake.setInitialOffset(name, test.initialOffset)
+			}
+
+			writtenBytes, err := f.client.WriteBytesWithOptions(f.ctx, name, data, test.opts...)
 			if err != nil {
-				t.Errorf("client.WriteBytesWithOptions(ctx, name, bytes, %v) gave error %s, wanted nil", opt, err)
+				t.Errorf("client.WriteBytesWithOptions(ctx, name, %s, %v) gave error %s, want nil", string(data), test.opts, err)
 			}
 			if len(data) != int(writtenBytes) {
-				t.Errorf("client.WriteBytesWithOptions(ctx, name, bytes, %v) got %d bytes, want %d", opt, writtenBytes, len(data))
+				t.Errorf("client.WriteBytesWithOptions(ctx, name, %s, %v) gave %d byte(s), want %d", string(data), test.opts, writtenBytes, len(data))
 			}
 		})
 	}
