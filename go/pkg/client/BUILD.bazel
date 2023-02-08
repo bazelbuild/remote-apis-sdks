@@ -56,6 +56,7 @@ go_test(
     name = "client_test",
     srcs = [
         "batch_retries_test.go",
+        "bytestream_test.go",
         "cas_internal_test.go",
         "cas_test.go",
         "client_test.go",

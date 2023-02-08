@@ -22,12 +22,29 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 	if err != nil {
 		return err
 	}
-	_, err = c.writeChunked(ctx, name, ch)
+	_, err = c.writeChunked(ctx, name, ch, false, 0)
 	return err
 }
 
+// WriteBytesAtRemoteOffset uploads a byte slice with a given resource name to the CAS
+// at an arbitrary offset but retries still resend from the initial Offset. As of now(2023-02-08),
+// ByteStream.WriteRequest.FinishWrite and an arbitrary offset are supported for uploads with LogStream
+// resource name. If doNotFinalize is set to true, ByteStream.WriteRequest.FinishWrite will be set to false.
+func (c *Client) WriteBytesAtRemoteOffset(ctx context.Context, name string, data []byte, doNotFinalize bool, initialOffset int64) (int64, error) {
+	ue := uploadinfo.EntryFromBlob(data)
+	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
+	if err != nil {
+		return 0, err
+	}
+	writtenBytes, err := c.writeChunked(ctx, name, ch, doNotFinalize, initialOffset)
+	if err != nil {
+		return 0, err
+	}
+	return writtenBytes, nil
+}
+
 // writeChunked uploads chunked data with a given resource name to the CAS.
-func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker) (int64, error) {
+func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker, doNotFinalize bool, initialOffset int64) (int64, error) {
 	var totalBytes int64
 	closure := func() error {
 		// Retry by starting the stream from the beginning.
@@ -35,24 +52,23 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			return errors.Wrap(err, "failed to Reset")
 		}
 		totalBytes = int64(0)
-		// TODO(olaola): implement resumable uploads.
+		// TODO(olaola): implement resumable uploads. initialOffset passed in allows to
+		// start writing data at an arbitrary offset, but retries still restart from initialOffset.
 
 		stream, err := c.Write(ctx)
 		if err != nil {
 			return err
 		}
 		for ch.HasNext() {
-			req := &bspb.WriteRequest{}
+			req := &bspb.WriteRequest{ResourceName: name}
 			chunk, err := ch.Next()
 			if err != nil {
 				return err
 			}
-			if chunk.Offset == 0 {
-				req.ResourceName = name
-			}
-			req.WriteOffset = chunk.Offset
+			req.WriteOffset = chunk.Offset + initialOffset
 			req.Data = chunk.Data
-			if !ch.HasNext() {
+
+			if !ch.HasNext() && !doNotFinalize {
 				req.FinishWrite = true
 			}
 			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })

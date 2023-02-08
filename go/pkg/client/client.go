@@ -487,6 +487,12 @@ func getRPCCreds(ctx context.Context, credFile string, useApplicationDefault boo
 	return rpcCreds, CredsFileAuth, nil
 }
 
+// ByteStreamWriteOpts sets options required for resumable ByteStream write operations.
+type ByteStreamWriteOpts struct {
+	FinishWrite       bool
+	LastLogicalOffset int64
+}
+
 // DialParams contains all the parameters that Dial needs.
 type DialParams struct {
 	// Service contains the address of remote execution service.

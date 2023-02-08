@@ -38,11 +38,13 @@ type flakyServer struct {
 	// TODO(jsharpe): This is a hack to work around WaitOperation not existing in some versions of
 	// the long running operations API that we need to support.
 	opgrpc.OperationsServer
-	mu               sync.RWMutex   // protects numCalls.
-	numCalls         map[string]int // A counter of calls the server encountered thus far, by method.
-	retriableForever bool           // Set to true to make the flaky server return a retriable error forever, rather than eventually a non-retriable error.
-	sleepDelay       time.Duration  // How long to sleep on each RPC.
-	useBSCompression bool           // Whether to use/expect compression on ByteStream calls.
+	mu               sync.RWMutex     // Protects numCalls.
+	numCalls         map[string]int   // A counter of calls the server encountered thus far, by method.
+	muOffset         sync.RWMutex     // Protects initialOffsets.
+	initialOffsets   map[string]int64 // Stores an initial offset to verify if retries are started over from a correct offset.
+	retriableForever bool             // Set to true to make the flaky server return a retriable error forever, rather than eventually a non-retriable error.
+	sleepDelay       time.Duration    // How long to sleep on each RPC.
+	useBSCompression bool             // Whether to use/expect compression on ByteStream calls.
 }
 
 func (f *flakyServer) incNumCalls(method string) int {
@@ -50,6 +52,22 @@ func (f *flakyServer) incNumCalls(method string) int {
 	defer f.mu.Unlock()
 	f.numCalls[method]++
 	return f.numCalls[method]
+}
+
+func (f *flakyServer) setInitialOffset(name string, offset int64) {
+	f.muOffset.Lock()
+	defer f.muOffset.Unlock()
+	f.initialOffsets[name] = offset
+}
+
+func (f *flakyServer) fetchInitialOffset(name string) int64 {
+	f.muOffset.Lock()
+	defer f.muOffset.Unlock()
+	offset, ok := f.initialOffsets[name]
+	if !ok {
+		return 0
+	}
+	return offset
 }
 
 func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
@@ -64,7 +82,8 @@ func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 		return err
 	}
 	// Verify that the client sends the first chunk, because they should retry from scratch.
-	if req.WriteOffset != 0 || req.FinishWrite {
+	initialOffset := f.fetchInitialOffset(req.ResourceName)
+	if req.WriteOffset != initialOffset || req.FinishWrite {
 		return status.Error(codes.FailedPrecondition, fmt.Sprintf("expected first chunk, got %v", req))
 	}
 	if numCalls < 5 {
@@ -230,7 +249,7 @@ func setup(t *testing.T) *flakyFixture {
 		t.Fatalf("Cannot listen: %v", err)
 	}
 	f.server = grpc.NewServer()
-	f.fake = &flakyServer{numCalls: make(map[string]int)}
+	f.fake = &flakyServer{numCalls: make(map[string]int), initialOffsets: make(map[string]int64)}
 	bsgrpc.RegisterByteStreamServer(f.server, f.fake)
 	regrpc.RegisterActionCacheServer(f.server, f.fake)
 	regrpc.RegisterContentAddressableStorageServer(f.server, f.fake)
@@ -282,6 +301,44 @@ func TestWriteRetries(t *testing.T) {
 				t.Errorf("client.WriteBlob(ctx, blob) had diff on digest returned (want -> got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestRetryWriteBytesAtRemoteOffset(t *testing.T) {
+	tests := []struct {
+		description   string
+		initialOffset int64
+	}{
+		{
+			description:   "offset 0",
+			initialOffset: 0,
+		},
+		{
+			description:   "offset 3",
+			initialOffset: 3,
+		},
+	}
+
+	for _, doNotFinalize := range []bool{true, false} {
+		for _, test := range tests {
+			t.Run(fmt.Sprintf("%s and doNotFinalize %t", test.description, doNotFinalize), func(t *testing.T) {
+				f := setup(t)
+				defer f.shutDown()
+				name := test.description
+				data := []byte("Hello World!")
+				if test.initialOffset > 0 {
+					f.fake.setInitialOffset(name, test.initialOffset)
+				}
+
+				writtenBytes, err := f.client.WriteBytesAtRemoteOffset(f.ctx, name, data[test.initialOffset:], doNotFinalize, test.initialOffset)
+				if err != nil {
+					t.Errorf("client.WriteBytesAtRemoteOffset(ctx, name, %s, %t, %d) gave error %s, want nil", string(data), doNotFinalize, test.initialOffset, err)
+				}
+				if int64(len(data))-test.initialOffset != writtenBytes {
+					t.Errorf("client.WriteBytesAtRemoteOffset(ctx, name, %s,  %t, %d) gave %d byte(s), want %d", string(data), doNotFinalize, test.initialOffset, writtenBytes, int64(len(data))-test.initialOffset)
+				}
+			})
+		}
 	}
 }
 

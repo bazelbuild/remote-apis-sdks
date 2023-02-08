@@ -105,7 +105,7 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 	if err != nil {
 		return dg, err
 	}
-	_, err = c.writeChunked(ctx, c.writeRscName(dg), ch)
+	_, err = c.writeChunked(ctx, c.writeRscName(dg), ch, false, 0)
 	return dg, err
 }
 
@@ -463,7 +463,7 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				if err != nil {
 					updateAndNotify(st, 0, err, true)
 				}
-				totalBytes, err := c.writeChunked(cCtx, c.writeRscName(dg), ch)
+				totalBytes, err := c.writeChunked(cCtx, c.writeRscName(dg), ch, false, 0)
 				updateAndNotify(st, totalBytes, err, true)
 			}
 		}()
@@ -564,7 +564,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				if err != nil {
 					return err
 				}
-				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch)
+				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch, false, 0)
 				if err != nil {
 					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
 				}
