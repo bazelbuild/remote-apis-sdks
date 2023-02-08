@@ -15,28 +15,6 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 )
 
-// ByteStreamWriteOption sets options required for resumable upload.
-type ByteStreamWriteOption interface {
-	Apply(*ByteStreamWriteOpts)
-}
-
-// ByteStreamOptFinishWrite is a boolean flag to set FinishWrite
-// in ByteStream.WriteRequest.
-type ByteStreamOptFinishWrite bool
-
-// Apply sets ByteStreamOptFinishWrite in ByteStreamWriteOpts.
-func (o ByteStreamOptFinishWrite) Apply(opts *ByteStreamWriteOpts) {
-	opts.FinishWrite = bool(o)
-}
-
-// ByteStreamOptOffset is offset for resumable upload.
-type ByteStreamOptOffset int64
-
-// Apply sets ByteStreamOptOffset in ByteStreamWriteOpts.
-func (o ByteStreamOptOffset) Apply(opts *ByteStreamWriteOpts) {
-	opts.LastLogicalOffset = int64(o)
-}
-
 // WriteBytes uploads a byte slice.
 func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error {
 	ue := uploadinfo.EntryFromBlob(data)
@@ -44,19 +22,21 @@ func (c *Client) WriteBytes(ctx context.Context, name string, data []byte) error
 	if err != nil {
 		return err
 	}
-	_, err = c.writeChunked(ctx, name, ch)
+	_, err = c.writeChunked(ctx, name, ch, false, 0)
 	return err
 }
 
-// WriteBytesWithOptions uploads a byte slice with a given resource name to the CAS
-// at an arbitrary offset but retries still resend from the specified offset.
-func (c *Client) WriteBytesWithOptions(ctx context.Context, name string, data []byte, opts ...ByteStreamWriteOption) (int64, error) {
+// WriteBytesAtRemoteOffset uploads a byte slice with a given resource name to the CAS
+// at an arbitrary offset but retries still resend from the initial Offset. As of now(2023-02-08),
+// ByteStream.WriteRequest.FinishWrite and an arbitrary offset are supported for uploads with LogStream
+// resource name. If doNotFinalize is set to true, ByteStream.WriteRequest.FinishWrite will be set to false.
+func (c *Client) WriteBytesAtRemoteOffset(ctx context.Context, name string, data []byte, doNotFinalize bool, initialOffset int64) (int64, error) {
 	ue := uploadinfo.EntryFromBlob(data)
 	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
 		return 0, err
 	}
-	writtenBytes, err := c.writeChunked(ctx, name, ch, opts...)
+	writtenBytes, err := c.writeChunked(ctx, name, ch, doNotFinalize, initialOffset)
 	if err != nil {
 		return 0, err
 	}
@@ -64,12 +44,7 @@ func (c *Client) WriteBytesWithOptions(ctx context.Context, name string, data []
 }
 
 // writeChunked uploads chunked data with a given resource name to the CAS.
-func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker, rawOpts ...ByteStreamWriteOption) (int64, error) {
-	opts := &ByteStreamWriteOpts{FinishWrite: true}
-	for _, o := range rawOpts {
-		o.Apply(opts)
-	}
-
+func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker, doNotFinalize bool, initialOffset int64) (int64, error) {
 	var totalBytes int64
 	closure := func() error {
 		// Retry by starting the stream from the beginning.
@@ -77,8 +52,8 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			return errors.Wrap(err, "failed to Reset")
 		}
 		totalBytes = int64(0)
-		// TODO(olaola): implement resumable uploads. ByteStreamWriteOption passed in allows to
-		// upload to an arbitrary offset, but retries still resend from the specified offset.
+		// TODO(olaola): implement resumable uploads. initialOffset passed in allows to
+		// start writing data at an arbitrary offset, but retries still restart from initialOffset.
 
 		stream, err := c.Write(ctx)
 		if err != nil {
@@ -90,10 +65,10 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			if err != nil {
 				return err
 			}
-			req.WriteOffset = chunk.Offset + opts.LastLogicalOffset
+			req.WriteOffset = chunk.Offset + initialOffset
 			req.Data = chunk.Data
 
-			if !ch.HasNext() && opts.FinishWrite {
+			if !ch.HasNext() && !doNotFinalize {
 				req.FinishWrite = true
 			}
 			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })

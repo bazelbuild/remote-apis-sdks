@@ -304,62 +304,41 @@ func TestWriteRetries(t *testing.T) {
 	}
 }
 
-func TestWriteRetriesWithOptions(t *testing.T) {
+func TestRetryWriteBytesAtRemoteOffset(t *testing.T) {
 	tests := []struct {
 		description   string
-		opts          []client.ByteStreamWriteOption
 		initialOffset int64
 	}{
 		{
-			description:   "true and offset 0",
-			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptFinishWrite(true), client.ByteStreamOptOffset(0)},
-			initialOffset: 0,
-		},
-		{
-			description:   "false and offset 0",
-			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptFinishWrite(false), client.ByteStreamOptOffset(0)},
-			initialOffset: 0,
-		},
-		{
-			description:   "true",
-			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptFinishWrite(true)},
-			initialOffset: 0,
-		},
-		{
-			description:   "false",
-			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptFinishWrite(false)},
-			initialOffset: 0,
-		},
-		{
 			description:   "offset 0",
-			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptOffset(0)},
 			initialOffset: 0,
 		},
 		{
-			description:   "offset 2",
-			opts:          []client.ByteStreamWriteOption{client.ByteStreamOptOffset(2)},
-			initialOffset: 2,
+			description:   "offset 3",
+			initialOffset: 3,
 		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.description, func(t *testing.T) {
-			f := setup(t)
-			defer f.shutDown()
-			name := test.description
-			data := []byte("Hello World!")
-			if test.initialOffset > 0 {
-				f.fake.setInitialOffset(name, test.initialOffset)
-			}
+	for _, doNotFinalize := range []bool{true, false} {
+		for _, test := range tests {
+			t.Run(fmt.Sprintf("%s and doNotFinalize %t", test.description, doNotFinalize), func(t *testing.T) {
+				f := setup(t)
+				defer f.shutDown()
+				name := test.description
+				data := []byte("Hello World!")
+				if test.initialOffset > 0 {
+					f.fake.setInitialOffset(name, test.initialOffset)
+				}
 
-			writtenBytes, err := f.client.WriteBytesWithOptions(f.ctx, name, data[test.initialOffset:], test.opts...)
-			if err != nil {
-				t.Errorf("client.WriteBytesWithOptions(ctx, name, %s, %v) gave error %s, want nil", string(data), test.opts, err)
-			}
-			if int64(len(data))-test.initialOffset != writtenBytes {
-				t.Errorf("client.WriteBytesWithOptions(ctx, name, %s, %v) gave %d byte(s), want %d", string(data), test.opts, writtenBytes, int64(len(data))-test.initialOffset)
-			}
-		})
+				writtenBytes, err := f.client.WriteBytesAtRemoteOffset(f.ctx, name, data[test.initialOffset:], doNotFinalize, test.initialOffset)
+				if err != nil {
+					t.Errorf("client.WriteBytesAtRemoteOffset(ctx, name, %s, %t, %d) gave error %s, want nil", string(data), doNotFinalize, test.initialOffset, err)
+				}
+				if int64(len(data))-test.initialOffset != writtenBytes {
+					t.Errorf("client.WriteBytesAtRemoteOffset(ctx, name, %s,  %t, %d) gave %d byte(s), want %d", string(data), doNotFinalize, test.initialOffset, writtenBytes, int64(len(data))-test.initialOffset)
+				}
+			})
+		}
 	}
 }
 
