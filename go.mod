@@ -1,6 +1,6 @@
 module github.com/bazelbuild/remote-apis-sdks
 
-go 1.17
+go 1.19
 
 require (
 	github.com/bazelbuild/remote-apis v0.0.0-20210718193713-0ecef08215cf

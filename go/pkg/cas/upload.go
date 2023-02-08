@@ -573,20 +573,20 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 // check.
 //
 // It distinguishes three categories of file sizes:
-//  - small: small files are buffered in memory entirely, thus read only once.
-//    See also ClientConfig.SmallFileThreshold.
-//  - medium: the hash is computed, the file is closed and a presence check is
-//    scheduled.
-//  - large: the hash is computed, the file is rewinded without closing and
-//    streamed via ByteStream.
-//    If the file is already present on the server, the ByteStream preempts
-//    the stream with EOF and WriteResponse.CommittedSize == Digest.Size.
-//    Rewinding helps locality: there is no delay between reading the file for
-//    the first and the second times.
-//    Only one large file is processed at a time because most GCE disks are
-//    network disks. Reading many large files concurrently appears to saturate
-//    the network and slows down the progress.
-//    See also ClientConfig.LargeFileThreshold.
+//   - small: small files are buffered in memory entirely, thus read only once.
+//     See also ClientConfig.SmallFileThreshold.
+//   - medium: the hash is computed, the file is closed and a presence check is
+//     scheduled.
+//   - large: the hash is computed, the file is rewinded without closing and
+//     streamed via ByteStream.
+//     If the file is already present on the server, the ByteStream preempts
+//     the stream with EOF and WriteResponse.CommittedSize == Digest.Size.
+//     Rewinding helps locality: there is no delay between reading the file for
+//     the first and the second times.
+//     Only one large file is processed at a time because most GCE disks are
+//     network disks. Reading many large files concurrently appears to saturate
+//     the network and slows down the progress.
+//     See also ClientConfig.LargeFileThreshold.
 func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os.FileInfo) (*repb.FileNode, error) {
 	isLarge := info.Size() >= u.Config.LargeFileThreshold
 

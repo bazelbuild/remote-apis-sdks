@@ -215,9 +215,10 @@ func buildCommand(ac *Action) *repb.Command {
 // The retry logic is complicated. Assuming retries are enabled, we want the retry to call
 // WaitExecution if there's an Operation "in progress", and to call Execute otherwise. In practice
 // that means:
-//   1) If an error occurs before the first operation is returned, or after the final operation is
-//      returned (i.e. the one with op.Done==true), retry by calling Execute again.
-//   2) Otherwise, retry by calling WaitExecution with the last operation name.
+//  1. If an error occurs before the first operation is returned, or after the final operation is
+//     returned (i.e. the one with op.Done==true), retry by calling Execute again.
+//  2. Otherwise, retry by calling WaitExecution with the last operation name.
+//
 // In addition, we want the retrier to trigger based on certain operation statuses as well as on
 // explicit errors. (The shouldRetry function knows which statuses.) We do this by mapping statuses,
 // if present, to errors inside the closure and then throwing away such "fake" errors outside the

@@ -4,16 +4,17 @@
 // stdout and stderr.
 //
 // Example usage:
-// rexec --alsologtostderr --v 1 \
-//   --service remotebuildexecution.googleapis.com:443 \
-//   --instance $INSTANCE \
-//   --credential_file $CRED_FILE \
-//   --exec_root $HOME/example \
-//   --platform container-image $CONTAINER \
-//   --inputs a/hello,a/goodbye
-//   --working_directory foo/bar
-//   --output_files foo/bar/out
-//   -- /bin/bash -c 'cat hello goodbye > out'
+//
+//	rexec --alsologtostderr --v 1 \
+//	  --service remotebuildexecution.googleapis.com:443 \
+//	  --instance $INSTANCE \
+//	  --credential_file $CRED_FILE \
+//	  --exec_root $HOME/example \
+//	  --platform container-image $CONTAINER \
+//	  --inputs a/hello,a/goodbye
+//	  --working_directory foo/bar
+//	  --output_files foo/bar/out
+//	  -- /bin/bash -c 'cat hello goodbye > out'
 package main
 
 import (
