@@ -6,9 +6,9 @@ import (
 	"net"
 	"testing"
 
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 
-	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
@@ -198,7 +198,7 @@ func newServer(t *testing.T) *Server {
 	}
 	s.server = grpc.NewServer()
 	s.fake = &ByteStream{}
-	bsgrpc.RegisterByteStreamServer(s.server, s.fake)
+	bspb.RegisterByteStreamServer(s.server, s.fake)
 
 	go s.server.Serve(s.listener)
 	s.client, err = NewClient(s.ctx, instance, DialParams{
@@ -222,16 +222,16 @@ func (b *ByteStream) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusReq
 	return &bspb.QueryWriteStatusResponse{}, nil
 }
 
-func (b *ByteStream) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
+func (b *ByteStream) Read(req *bspb.ReadRequest, stream bspb.ByteStream_ReadServer) error {
 	return nil
 }
 
 // Write implements the write operation for LogStream Write API.
-func (b *ByteStream) Write(stream bsgrpc.ByteStream_WriteServer) error {
+func (b *ByteStream) Write(stream bspb.ByteStream_WriteServer) error {
 	defer stream.SendAndClose(&bspb.WriteResponse{})
 	req, err := stream.Recv()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to write.")
 	}
 
 	ls, ok := b.logStreams[req.GetResourceName()]
