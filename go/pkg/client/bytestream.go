@@ -34,7 +34,7 @@ func (c *Client) WriteBytesAtRemoteOffset(ctx context.Context, name string, data
 	ue := uploadinfo.EntryFromBlob(data)
 	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
-		return 0, err
+		return 0, errors.Wrap(err, "failed to create a chunk")
 	}
 	writtenBytes, err := c.writeChunked(ctx, name, ch, doNotFinalize, initialOffset)
 	if err != nil {
