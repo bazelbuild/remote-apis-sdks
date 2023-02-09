@@ -6,6 +6,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
@@ -115,7 +116,7 @@ func TestWriteBytesAtRemoteOffsetSuccess_LogStream(t *testing.T) {
 	}
 }
 
-func WriteBytesAtRemoteOffsetErrors_LogStream(t *testing.T) {
+func TestWriteBytesAtRemoteOffsetErrors_LogStream(t *testing.T) {
 	tests := []struct {
 		description   string
 		ls            *logStream
@@ -197,7 +198,7 @@ func newServer(t *testing.T) *Server {
 		t.Fatalf("Cannot listen: %v", err)
 	}
 	s.server = grpc.NewServer()
-	s.fake = &ByteStream{}
+	s.fake = &ByteStream{logStreams: make(map[string]*logStream)}
 	bsgrpc.RegisterByteStreamServer(s.server, s.fake)
 
 	go s.server.Serve(s.listener)
@@ -208,7 +209,6 @@ func newServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
 	}
-	s.fake.logStreams = make(map[string]*logStream)
 	return s
 }
 
@@ -231,7 +231,7 @@ func (b *ByteStream) Write(stream bsgrpc.ByteStream_WriteServer) error {
 	defer stream.SendAndClose(&bspb.WriteResponse{})
 	req, err := stream.Recv()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to write")
 	}
 
 	ls, ok := b.logStreams[req.GetResourceName()]
