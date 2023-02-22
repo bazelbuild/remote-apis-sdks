@@ -13,6 +13,8 @@ import (
 	"github.com/mostynb/zstdpool-syncpool"
 )
 
+var errNotInitialized = errors.New("Not yet initialized")
+
 // Initializable is an interface containing methods to initialize a ReadSeeker.
 type Initializable interface {
 	IsInitialized() bool
@@ -64,7 +66,7 @@ func (fio *fileSeeker) Close() (err error) {
 // Read implements io.Reader.
 func (fio *fileSeeker) Read(p []byte) (int, error) {
 	if !fio.IsInitialized() {
-		return 0, errors.New("Not yet initialized")
+		return 0, errNotInitialized
 	}
 
 	return fio.reader.Read(p)
@@ -152,7 +154,6 @@ type compressedSeeker struct {
 	encdW *syncpool.EncoderWrapper
 	// This keeps the compressed data
 	buf *syncedBuffer
-	err error
 }
 
 var encoderInit sync.Once
@@ -187,13 +188,12 @@ func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 		fs:    fs,
 		encdW: encdW,
 		buf:   sb,
-		err:   nil,
 	}, nil
 }
 
 func (cfs *compressedSeeker) Read(p []byte) (int, error) {
-	if cfs.err != nil {
-		return 0, cfs.err
+	if !cfs.IsInitialized() {
+		return 0, errNotInitialized
 	}
 
 	var n int
@@ -209,17 +209,18 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 	// to plan" error. EOF implies our uncompressed input data has finished reading,
 	// but it doesn't mean that we've finished preparing/returning our compressed data.
 	// We only want to return EOF to the user when the _compressed_ data is finished reading.
+	var finalErr error
 	if errR != nil && errR != io.EOF {
-		cfs.err = errR
+		finalErr = errR
 	} else if errW != nil {
-		cfs.err = errW
+		finalErr = errW
 	}
 
 	// When the buffer ends, or in case of _any_ error, we compress all the bytes we
 	// had available. The encoder requires a Close call to finish writing compressed
 	// data smaller than zstd's window size.
 	var errC error
-	if cfs.err != nil || errR == io.EOF {
+	if finalErr != nil || errR == io.EOF {
 		errC = cfs.encdW.Encoder.Close()
 		encoders.Put(cfs.encdW)
 		cfs.encdW = nil
@@ -227,15 +228,15 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 
 	m, errR2 := cfs.buf.Read(p)
 
-	if cfs.err == nil {
+	if finalErr == nil {
 		if errC != nil {
-			cfs.err = errC
+			finalErr = errC
 		} else if errR2 != nil {
-			cfs.err = errR2
+			finalErr = errR2
 		}
 	}
 
-	return m, cfs.err
+	return m, finalErr
 }
 
 func (cfs *compressedSeeker) SeekOffset(offset int64) error {
