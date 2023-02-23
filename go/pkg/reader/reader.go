@@ -10,10 +10,15 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/mostynb/zstdpool-syncpool"
+	syncpool "github.com/mostynb/zstdpool-syncpool"
 )
 
-var errNotInitialized = errors.New("Not yet initialized")
+// errNotInitialized is the error returned from Read() by a ReedSeeker that
+// hasn't yet had Initialize() called.
+//
+// stylecheck is disabled because the error text starts with a capital letter,
+// and changing the text would be an API change.
+var errNotInitialized = errors.New("Not yet initialized") // nolint:stylecheck
 
 // Initializable is an interface containing methods to initialize a ReadSeeker.
 type Initializable interface {
@@ -219,23 +224,18 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 	// When the buffer ends, or in case of _any_ error, we compress all the bytes we
 	// had available. The encoder requires a Close call to finish writing compressed
 	// data smaller than zstd's window size.
-	var errC error
 	if finalErr != nil || errR == io.EOF {
-		errC = cfs.encdW.Encoder.Close()
+		if err := cfs.encdW.Encoder.Close(); finalErr == nil {
+			finalErr = err
+		}
 		encoders.Put(cfs.encdW)
 		cfs.encdW = nil
 	}
 
-	m, errR2 := cfs.buf.Read(p)
-
+	m, err := cfs.buf.Read(p)
 	if finalErr == nil {
-		if errC != nil {
-			finalErr = errC
-		} else if errR2 != nil {
-			finalErr = errR2
-		}
+		finalErr = err
 	}
-
 	return m, finalErr
 }
 

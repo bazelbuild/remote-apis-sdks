@@ -69,8 +69,8 @@ func TestFileReaderSeeks(t *testing.T) {
 			}
 
 			r.SeekOffset(tc.seekOffset)
-			if _, err := r.Read(data); err == nil {
-				t.Errorf("Read() = should have err'd on unitialized reader")
+			if _, err := r.Read(data); err != errNotInitialized {
+				t.Errorf("Read() should have produced %q, got %q", errNotInitialized, err)
 			}
 			if err := r.Initialize(); err != nil {
 				t.Fatalf("Failed to initialize reader: %v", err)
@@ -168,8 +168,8 @@ func TestCompressedReader(t *testing.T) {
 				t.Fatalf("Failed to create compressor reader: %v", err)
 			}
 
-			if _, err := r.Read(make([]byte, 5)); err == nil {
-				t.Errorf("Read() = should have err'd on uninitialized reader")
+			if _, err := io.ReadAll(r); err != errNotInitialized {
+				t.Errorf("Read() should have produced %q, got %q", errNotInitialized, err)
 			}
 
 			if err := r.Initialize(); err != nil {
@@ -178,11 +178,21 @@ func TestCompressedReader(t *testing.T) {
 
 			got, err := io.ReadAll(r)
 			if err != nil {
-				t.Errorf("Read() returned error: %v", err)
+				t.Fatalf("Read() returned error: %v", err)
 			}
 
 			if diff := cmp.Diff(compressedData, got); diff != "" {
 				t.Errorf("Read() = incorrect result, diff(-want, +got): %v", diff)
+			}
+
+			// The reader should continue to return an io.EOF and no bytes on
+			// subsequent Read() calls, until it's re-initialized.
+			got, err = io.ReadAll(r)
+			if err != nil {
+				t.Errorf("Unexpected error reading a consumed seeker: %v", err)
+			}
+			if len(got) != 0 {
+				t.Errorf("Unexpected result from reading a consumed seeker: %v", got)
 			}
 
 			// After a SeekOffset(0), doing the same operations all over again
@@ -196,7 +206,7 @@ func TestCompressedReader(t *testing.T) {
 
 			got, err = io.ReadAll(r)
 			if err != nil {
-				t.Errorf("Read() returned error: %v", err)
+				t.Fatalf("Read() returned error: %v", err)
 			}
 
 			if diff := cmp.Diff(compressedData, got); diff != "" {
