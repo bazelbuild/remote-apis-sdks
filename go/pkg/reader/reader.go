@@ -201,42 +201,26 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 		return 0, errNotInitialized
 	}
 
-	var n int
-	var errR, errW error
-	for cfs.encdW != nil && cfs.buf.Len() < len(p) && errR == nil && errW == nil {
-		// Read is allowed to use the entity of p as a scratchpad.
-		n, errR = cfs.fs.Read(p)
-		// errW must be non-nil if written bytes != from n.
-		_, errW = cfs.encdW.Encoder.Write(p[:n])
-	}
-
-	// We have to treat EOF differently. It's the only "everything is going according
-	// to plan" error. EOF implies our uncompressed input data has finished reading,
-	// but it doesn't mean that we've finished preparing/returning our compressed data.
-	// We only want to return EOF to the user when the _compressed_ data is finished reading.
-	var finalErr error
-	if errR != nil && errR != io.EOF {
-		finalErr = errR
-	} else if errW != nil {
-		finalErr = errW
-	}
-
-	// When the buffer ends, or in case of _any_ error, we compress all the bytes we
-	// had available. The encoder requires a Close call to finish writing compressed
-	// data smaller than zstd's window size.
-	if finalErr != nil || errR == io.EOF {
-		if err := cfs.encdW.Encoder.Close(); finalErr == nil {
-			finalErr = err
+	var err error
+	if cfs.encdW != nil && cfs.buf.Len() < len(p) {
+		// Read is allowed to use the entirety of p as a scratchpad.
+		_, err = io.CopyBuffer(cfs.encdW.Encoder, cfs.fs, p)
+		// When the buffer ends, or in case of an error, we compress all the
+		// bytes we had available. The encoder requires a Close call to finish
+		// writing compressed data smaller than zstd's window size.
+		closeErr := cfs.encdW.Encoder.Close()
+		if err == nil {
+			err = closeErr
 		}
 		encoders.Put(cfs.encdW)
 		cfs.encdW = nil
 	}
 
-	m, err := cfs.buf.Read(p)
-	if finalErr == nil {
-		finalErr = err
+	n, readErr := cfs.buf.Read(p)
+	if err == nil {
+		err = readErr
 	}
-	return m, finalErr
+	return n, err
 }
 
 func (cfs *compressedSeeker) SeekOffset(offset int64) error {
