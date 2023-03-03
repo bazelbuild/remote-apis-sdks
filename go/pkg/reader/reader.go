@@ -202,26 +202,29 @@ func (cfs *compressedSeeker) Read(p []byte) (int, error) {
 	}
 
 	var err error
-	// Repeatedly encode chunks of input data until we have enough compressed
+	// Repeatedly encode chunks of input data until there's enough compressed
 	// data to fill the output buffer. It can't be known ahead of time how much
-	// uncompressed data will correspond to a certain amount of compressed data,
-	// hence the need for a loop.
-	for cfs.encdW != nil && cfs.buf.Len() < len(p) && err == nil {
+	// uncompressed data will correspond to the desired amount of output
+	// compressed data, hence the need for a loop.
+	//
+	// err will be nil until the loop encounters an error. cfs.encdW will be nil
+	// when entering the loop if a previous Read call encountered an error or
+	// reached an EOF, in which case there's no more data to encode.
+	for cfs.buf.Len() < len(p) && err == nil && cfs.encdW != nil {
 		var n int
-		// Read is allowed to use the entity of p as a scratchpad.
+		// Read is allowed to use the entirety of p as a scratchpad.
 		n, err = cfs.fs.Read(p)
 		// errW must be non-nil if written bytes != n.
 		_, errW := cfs.encdW.Write(p[:n])
-		if err == nil {
+		if errW != nil && (err == nil || err == io.EOF) {
 			err = errW
 		}
 	}
 
 	if err != nil {
-		// When the buffer ends (EOF), or in case of an unexpected error, we
-		// compress all the bytes we had available. The encoder requires a Close
-		// call to finish writing compressed data smaller than zstd's window
-		// size.
+		// When the buffer ends (EOF), or in case of an unexpected error,
+		// compress remaining available bytes. The encoder requires a Close call
+		// to finish writing compressed data smaller than zstd's window size.
 		closeErr := cfs.encdW.Close()
 		if err == io.EOF {
 			err = closeErr
