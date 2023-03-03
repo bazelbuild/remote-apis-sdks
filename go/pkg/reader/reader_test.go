@@ -69,8 +69,8 @@ func TestFileReaderSeeks(t *testing.T) {
 			}
 
 			r.SeekOffset(tc.seekOffset)
-			if _, err := r.Read(data); err == nil {
-				t.Errorf("Read() = should have err'd on unitialized reader")
+			if _, err := r.Read(data); err != errNotInitialized {
+				t.Errorf("Read() should have failed with %q, got %q", errNotInitialized, err)
 			}
 			if err := r.Initialize(); err != nil {
 				t.Fatalf("Failed to initialize reader: %v", err)
@@ -165,28 +165,52 @@ func TestCompressedReader(t *testing.T) {
 
 			r, err := NewCompressedFileSeeker(path, 10)
 			if err != nil {
-				t.Fatalf("Failed to initialize compressor reader: %v", err)
+				t.Fatalf("Failed to create compressor reader: %v", err)
+			}
+
+			if _, err := io.ReadAll(r); err != errNotInitialized {
+				t.Errorf("Read() should have failed with %q, got %q", errNotInitialized, err)
+			}
+
+			if err := r.Initialize(); err != nil {
+				t.Fatalf("Failed to initialize reader: %v", err)
+			}
+
+			got, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("Read() returned error: %v", err)
+			}
+
+			if diff := cmp.Diff(compressedData, got); diff != "" {
+				t.Errorf("Read() = incorrect result, diff(-want, +got): %v", diff)
+				t.Errorf("Read() = wrong length, wanted %d, got %d", len(compressedData), len(got))
+			}
+
+			// The reader should continue to return an io.EOF and no bytes on
+			// subsequent Read() calls, until it's re-initialized.
+			got, err = io.ReadAll(r)
+			if err != nil {
+				t.Errorf("Unexpected error reading a consumed seeker: %v", err)
+			}
+			if len(got) != 0 {
+				t.Errorf("Unexpected result from reading a consumed seeker: %v", got)
+			}
+
+			// After a SeekOffset(0), doing the same operations all over again
+			// should produce the same results.
+			if err := r.SeekOffset(0); err != nil {
+				t.Fatalf("SeekOffset(0) failed: %v", err)
 			}
 			if err := r.Initialize(); err != nil {
 				t.Fatalf("Failed to initialize reader: %v", err)
 			}
 
-			// It is theoretically possible for the compressed data to be
-			// larger than the original - even more for these small blobs
-			// that are barelly compressible and will need metadata.
-			fullData := make([]byte, len(blob)+100)
-			dataBuf := make([]byte, 5)
-			var n, m int
-			for err = nil; err == nil; {
-				m, err = r.Read(dataBuf)
-				copy(fullData[n:], dataBuf)
-				n += m
-			}
-			if err != io.EOF {
-				t.Errorf("Expected EOF, got nil")
+			got, err = io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("Read() returned error: %v", err)
 			}
 
-			if diff := cmp.Diff(compressedData[:buf.Len()], fullData[:buf.Len()]); diff != "" {
+			if diff := cmp.Diff(compressedData, got); diff != "" {
 				t.Errorf("Read() = incorrect result, diff(-want, +got): %v", diff)
 			}
 		})

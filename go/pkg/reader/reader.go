@@ -10,8 +10,15 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/mostynb/zstdpool-syncpool"
+	syncpool "github.com/mostynb/zstdpool-syncpool"
 )
+
+// errNotInitialized is the error returned from Read() by a ReedSeeker that
+// hasn't yet had Initialize() called.
+//
+// stylecheck is disabled because the error text starts with a capital letter,
+// and changing the text would be an API change.
+var errNotInitialized = errors.New("Not yet initialized") // nolint:stylecheck
 
 // Initializable is an interface containing methods to initialize a ReadSeeker.
 type Initializable interface {
@@ -64,7 +71,7 @@ func (fio *fileSeeker) Close() (err error) {
 // Read implements io.Reader.
 func (fio *fileSeeker) Read(p []byte) (int, error) {
 	if !fio.IsInitialized() {
-		return 0, errors.New("Not yet initialized")
+		return 0, errNotInitialized
 	}
 
 	return fio.reader.Read(p)
@@ -152,7 +159,6 @@ type compressedSeeker struct {
 	encdW *syncpool.EncoderWrapper
 	// This keeps the compressed data
 	buf *syncedBuffer
-	err error
 }
 
 var encoderInit sync.Once
@@ -182,60 +188,56 @@ func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 		return nil, errors.New("failed creating new encoder")
 	}
 
-	encdW.Encoder.Reset(sb)
+	encdW.Reset(sb)
 	return &compressedSeeker{
 		fs:    fs,
 		encdW: encdW,
 		buf:   sb,
-		err:   nil,
 	}, nil
 }
 
 func (cfs *compressedSeeker) Read(p []byte) (int, error) {
-	if cfs.err != nil {
-		return 0, cfs.err
+	if !cfs.IsInitialized() {
+		return 0, errNotInitialized
 	}
 
-	var n int
-	var errR, errW error
-	for cfs.encdW != nil && cfs.buf.Len() < len(p) && errR == nil && errW == nil {
-		// Read is allowed to use the entity of p as a scratchpad.
-		n, errR = cfs.fs.Read(p)
-		// errW must be non-nil if written bytes != from n.
-		_, errW = cfs.encdW.Encoder.Write(p[:n])
+	var err error
+	// Repeatedly encode chunks of input data until there's enough compressed
+	// data to fill the output buffer. It can't be known ahead of time how much
+	// uncompressed data will correspond to the desired amount of output
+	// compressed data, hence the need for a loop.
+	//
+	// err will be nil until the loop encounters an error. cfs.encdW will be nil
+	// when entering the loop if a previous Read call encountered an error or
+	// reached an EOF, in which case there's no more data to encode.
+	for cfs.buf.Len() < len(p) && err == nil && cfs.encdW != nil {
+		var n int
+		// Read is allowed to use the entirety of p as a scratchpad.
+		n, err = cfs.fs.Read(p)
+		// errW must be non-nil if written bytes != n.
+		_, errW := cfs.encdW.Write(p[:n])
+		if errW != nil && (err == nil || err == io.EOF) {
+			err = errW
+		}
 	}
 
-	// We have to treat EOF differently. It's the only "everything is going according
-	// to plan" error. EOF implies our uncompressed input data has finished reading,
-	// but it doesn't mean that we've finished preparing/returning our compressed data.
-	// We only want to return EOF to the user when the _compressed_ data is finished reading.
-	if errR != nil && errR != io.EOF {
-		cfs.err = errR
-	} else if errW != nil {
-		cfs.err = errW
-	}
-
-	// When the buffer ends, or in case of _any_ error, we compress all the bytes we
-	// had available. The encoder requires a Close call to finish writing compressed
-	// data smaller than zstd's window size.
-	var errC error
-	if cfs.err != nil || errR == io.EOF {
-		errC = cfs.encdW.Encoder.Close()
+	if err != nil {
+		// When the buffer ends (EOF), or in case of an unexpected error,
+		// compress remaining available bytes. The encoder requires a Close call
+		// to finish writing compressed data smaller than zstd's window size.
+		closeErr := cfs.encdW.Close()
+		if err == io.EOF {
+			err = closeErr
+		}
 		encoders.Put(cfs.encdW)
 		cfs.encdW = nil
 	}
 
-	m, errR2 := cfs.buf.Read(p)
-
-	if cfs.err == nil {
-		if errC != nil {
-			cfs.err = errC
-		} else if errR2 != nil {
-			cfs.err = errR2
-		}
+	n, readErr := cfs.buf.Read(p)
+	if err == nil {
+		err = readErr
 	}
-
-	return m, cfs.err
+	return n, err
 }
 
 func (cfs *compressedSeeker) SeekOffset(offset int64) error {
@@ -247,19 +249,15 @@ func (cfs *compressedSeeker) SeekOffset(offset int64) error {
 		if !ok || cfs.encdW == nil {
 			return errors.New("failed to get a new encoder")
 		}
-	} else if err := cfs.encdW.Encoder.Close(); err != nil {
+	} else if err := cfs.encdW.Close(); err != nil {
 		encoders.Put(cfs.encdW)
 		cfs.encdW = nil
 		return err
 	}
 
 	cfs.buf.Reset()
-	cfs.encdW.Encoder.Reset(cfs.buf)
-	if err := cfs.fs.SeekOffset(offset); err != nil {
-		return err
-	}
-
-	return nil
+	cfs.encdW.Reset(cfs.buf)
+	return cfs.fs.SeekOffset(offset)
 }
 
 func (cfs *compressedSeeker) IsInitialized() bool { return cfs.fs.IsInitialized() }
