@@ -4,6 +4,7 @@ go_library(
     name = "cas",
     srcs = [
         "client.go",
+        "config.go",
         "ioutil.go",
         "upload.go",
     ],
