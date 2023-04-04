@@ -412,12 +412,15 @@ func TestOutputSymlinks(t *testing.T) {
 		t.Errorf("expected output file %s to not be downloaded, but it was", path)
 	}
 	path = filepath.Join(e.ExecRoot, "a/b/sl")
-	file, err := os.Stat(path)
+	file, err := os.Lstat(path)
 	if err != nil {
 		t.Errorf("expected output file %s to be downloaded, but it was not", path)
 	}
-	if file.Mode()&os.ModeSymlink != 0 {
+	if file.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("expected output file %s to be a symlink, but it was not", path)
+	}
+	if dest, err := os.Readlink(path); err != nil || dest != "out" {
+		t.Errorf("expected output file %s to link to a/b/out, got %v, %v", path, dest, err)
 	}
 	wantMeta := &command.Metadata{
 		CommandDigest:    cmdDg,
