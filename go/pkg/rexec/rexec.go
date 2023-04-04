@@ -100,6 +100,7 @@ func (ec *Context) setOutputMetadata() {
 	ec.Metadata.OutputDirectories = len(ec.resPb.OutputDirectories) + len(ec.resPb.OutputDirectorySymlinks)
 	ec.Metadata.OutputFileDigests = make(map[string]digest.Digest)
 	ec.Metadata.OutputDirectoryDigests = make(map[string]digest.Digest)
+	ec.Metadata.OutputSymlinks = make(map[string]string)
 	ec.Metadata.TotalOutputBytes = 0
 	for _, file := range ec.resPb.OutputFiles {
 		dg := digest.NewFromProtoUnvalidated(file.Digest)
@@ -110,6 +111,9 @@ func (ec *Context) setOutputMetadata() {
 		dg := digest.NewFromProtoUnvalidated(dir.TreeDigest)
 		ec.Metadata.OutputDirectoryDigests[dir.Path] = dg
 		ec.Metadata.TotalOutputBytes += dg.Size
+	}
+	for _, sl := range ec.resPb.OutputFileSymlinks {
+		ec.Metadata.OutputSymlinks[sl.Path] = sl.Target
 	}
 	if ec.resPb.StdoutRaw != nil {
 		ec.Metadata.TotalOutputBytes += int64(len(ec.resPb.StdoutRaw))
