@@ -509,6 +509,8 @@ type Metadata struct {
 	OutputFileDigests map[string]digest.Digest
 	// Output Directory digests.
 	OutputDirectoryDigests map[string]digest.Digest
+	// Output Symlinks.
+	OutputSymlinks map[string]string
 	// Missing digests that are uploaded to CAS.
 	MissingDigests []digest.Digest
 	// LogicalBytesUploaded is the sum of sizes in bytes of the blobs that were uploaded. It should be

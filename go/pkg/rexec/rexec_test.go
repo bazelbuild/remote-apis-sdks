@@ -87,6 +87,7 @@ func TestExecCacheHit(t *testing.T) {
 					RealBytesDownloaded:    12,
 					OutputFileDigests:      map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
 					OutputDirectoryDigests: map[string]digest.Digest{},
+					OutputSymlinks:         map[string]string{},
 				}
 				if diff := cmp.Diff(wantRes, res); diff != "" {
 					t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
@@ -378,6 +379,69 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 				t.Errorf("expected output file %s to not be downloaded, but it was", path)
 			}
 		})
+	}
+}
+
+func TestOutputSymlinks(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	e.Client.GrpcClient.Retrier = nil // Disable retries
+	cmd := &command.Command{
+		Args:        []string{"tool"},
+		OutputFiles: []string{"a/b/out"},
+		ExecRoot:    e.ExecRoot,
+	}
+	opt := &command.ExecutionOptions{AcceptCached: true, DownloadOutputs: true, DownloadOutErr: false}
+	wantRes := &command.Result{Status: command.CacheHitResultStatus}
+	cmdDg, acDg := e.Set(cmd, opt, wantRes, fakes.StdOut("stdout"), fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output"}, &fakes.OutputSymlink{Path: "a/b/sl", Target: "out"}, fakes.ExecutionCacheHit(true))
+	oe := outerr.NewRecordingOutErr()
+
+	res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
+
+	if diff := cmp.Diff(wantRes, res, cmp.Comparer(proto.Equal), cmp.Comparer(equalError)); diff != "" {
+		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
+	}
+	if len(oe.Stdout()) != 0 {
+		t.Errorf("Run() gave unexpected stdout: %v", string(oe.Stdout()))
+	}
+	if len(oe.Stderr()) != 0 {
+		t.Errorf("Run() gave unexpected stderr: %v", string(oe.Stderr()))
+	}
+	path := filepath.Join(e.ExecRoot, "a/b/out")
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("expected output file %s to not be downloaded, but it was", path)
+	}
+	path = filepath.Join(e.ExecRoot, "a/b/sl")
+	file, err := os.Lstat(path)
+	if err != nil {
+		t.Errorf("expected output file %s to be downloaded, but it was not", path)
+	}
+	if file.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected output file %s to be a symlink, but it was not", path)
+	}
+	if dest, err := os.Readlink(path); err != nil || dest != "out" {
+		t.Errorf("expected output file %s to link to a/b/out, got %v, %v", path, dest, err)
+	}
+	wantMeta := &command.Metadata{
+		CommandDigest:    cmdDg,
+		ActionDigest:     acDg,
+		InputDirectories: 1,
+		TotalInputBytes:  cmdDg.Size + acDg.Size,
+		OutputFiles:      2,
+		TotalOutputBytes: 18, // "output" + "stdout" + "stderr"
+		// "output" + "stdout" for both. StdErr is inlined in ActionResult in this test, and ActionResult
+		// isn't done through bytestream so not checked here.
+		LogicalBytesDownloaded: 6,
+		RealBytesDownloaded:    6,
+		OutputFileDigests:      map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
+		OutputDirectoryDigests: map[string]digest.Digest{},
+		OutputSymlinks:         map[string]string{"a/b/sl": "out"},
+	}
+	if diff := cmp.Diff(wantRes, res); diff != "" {
+		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "EventTimes")); diff != "" {
+		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
 }
 

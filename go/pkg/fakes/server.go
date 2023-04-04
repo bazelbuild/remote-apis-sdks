@@ -297,6 +297,18 @@ func (d *OutputDir) Apply(ac *repb.ActionResult, s *Server, execRoot string) err
 	return nil
 }
 
+// OutputSymlink is to be added as an output of the fake action.
+type OutputSymlink struct {
+	Path   string
+	Target string
+}
+
+// Apply puts the file in the fake CAS and the given ActionResult.
+func (l *OutputSymlink) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+	ac.OutputFileSymlinks = append(ac.OutputFileSymlinks, &repb.OutputSymlink{Path: l.Path, Target: l.Target})
+	return nil
+}
+
 // BuildDir builds the directory tree by recursively iterating through the directory.
 // This is similar to tree.go ComputeMerkleTree.
 func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, childDir []*repb.Directory, err error) {
