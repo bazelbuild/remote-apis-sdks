@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "impath",
+    srcs = ["impath.go"],
+    importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath",
+    visibility = ["//visibility:public"],
+    deps = ["//go/pkg/errors"],
+)
+
+go_test(
+    name = "impath_test",
+    srcs = ["impath_test.go"],
+    deps = [":impath"],
+)
