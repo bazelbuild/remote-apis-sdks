@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
@@ -170,6 +171,8 @@ type Client struct {
 	casDownloadRequests chan *downloadRequest
 	rpcTimeouts         RPCTimeouts
 	creds               credentials.PerRPCCredentials
+	uploadOnce          sync.Once
+	downloadOnce        sync.Once
 }
 
 const (
@@ -242,36 +245,8 @@ func (s UtilizeLocality) Apply(c *Client) {
 // UnifiedUploads is to specify whether client uploads files in the background, unifying operations between different actions.
 type UnifiedUploads bool
 
-func (c *Client) restartUploader() {
-	if c.casUploadRequests == nil {
-		return
-	}
-	close(c.casUploadRequests)
-	c.casUploadRequests = make(chan *uploadRequest, c.UnifiedUploadBufferSize)
-	go c.uploadProcessor()
-}
-
-func (c *Client) restartDownloader() {
-	if c.casDownloadRequests == nil {
-		return
-	}
-	close(c.casDownloadRequests)
-	c.casDownloadRequests = make(chan *downloadRequest, c.UnifiedDownloadBufferSize)
-	go c.downloadProcessor()
-}
-
 // Apply sets the client's UnifiedUploads.
-// Note: it is unsafe to change this property when connections are ongoing.
 func (s UnifiedUploads) Apply(c *Client) {
-	if c.UnifiedUploads == s {
-		return
-	}
-	if s {
-		c.casUploadRequests = make(chan *uploadRequest, c.UnifiedUploadBufferSize)
-		go c.uploadProcessor()
-	} else {
-		close(c.casUploadRequests)
-	}
 	c.UnifiedUploads = s
 }
 
@@ -283,10 +258,7 @@ const DefaultUnifiedUploadBufferSize = 10000
 
 // Apply sets the client's UnifiedDownloadBufferSize.
 func (s UnifiedUploadBufferSize) Apply(c *Client) {
-	if c.UnifiedUploadBufferSize != s {
-		c.UnifiedUploadBufferSize = s
-		c.restartUploader()
-	}
+	c.UnifiedUploadBufferSize = s
 }
 
 // UnifiedUploadTickDuration is to tune how often the daemon for UnifiedUploads flushes the pending requests.
@@ -297,10 +269,7 @@ const DefaultUnifiedUploadTickDuration = UnifiedUploadTickDuration(50 * time.Mil
 
 // Apply sets the client's UnifiedUploadTickDuration.
 func (s UnifiedUploadTickDuration) Apply(c *Client) {
-	if c.UnifiedUploadTickDuration != s {
-		c.UnifiedUploadTickDuration = s
-		c.restartUploader()
-	}
+	c.UnifiedUploadTickDuration = s
 }
 
 // UnifiedDownloads is to specify whether client uploads files in the background, unifying operations between different actions.
@@ -309,15 +278,6 @@ type UnifiedDownloads bool
 // Apply sets the client's UnifiedDownloads.
 // Note: it is unsafe to change this property when connections are ongoing.
 func (s UnifiedDownloads) Apply(c *Client) {
-	if c.UnifiedDownloads == s {
-		return
-	}
-	if s {
-		c.casDownloadRequests = make(chan *downloadRequest, c.UnifiedDownloadBufferSize)
-		go c.downloadProcessor()
-	} else {
-		close(c.casDownloadRequests)
-	}
 	c.UnifiedDownloads = s
 }
 
@@ -329,10 +289,7 @@ const DefaultUnifiedDownloadBufferSize = 10000
 
 // Apply sets the client's UnifiedDownloadBufferSize.
 func (s UnifiedDownloadBufferSize) Apply(c *Client) {
-	if c.UnifiedDownloadBufferSize != s {
-		c.UnifiedDownloadBufferSize = s
-		c.restartDownloader()
-	}
+	c.UnifiedDownloadBufferSize = s
 }
 
 // UnifiedDownloadTickDuration is to tune how often the daemon for UnifiedDownloads flushes the pending requests.
@@ -343,10 +300,7 @@ const DefaultUnifiedDownloadTickDuration = UnifiedDownloadTickDuration(50 * time
 
 // Apply sets the client's UnifiedDownloadTickDuration.
 func (s UnifiedDownloadTickDuration) Apply(c *Client) {
-	if c.UnifiedDownloadTickDuration != s {
-		c.UnifiedDownloadTickDuration = s
-		c.restartDownloader()
-	}
+	c.UnifiedDownloadTickDuration = s
 }
 
 // Apply sets the client's TreeSymlinkOpts.
@@ -777,7 +731,24 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 	if client.casConcurrency < 1 {
 		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
+	client.RunBackgroundTasks()
 	return client, nil
+}
+
+// RunBackgroundTasks starts background goroutines for the client.
+func (c *Client) RunBackgroundTasks() {
+	if c.UnifiedUploads {
+		c.uploadOnce.Do(func() {
+			c.casUploadRequests = make(chan *uploadRequest, c.UnifiedUploadBufferSize)
+			go c.uploadProcessor()
+		})
+	}
+	if c.UnifiedDownloads {
+		c.downloadOnce.Do(func() {
+			c.casDownloadRequests = make(chan *downloadRequest, c.UnifiedDownloadBufferSize)
+			go c.downloadProcessor()
+		})
+	}
 }
 
 // RPCTimeouts is a Opt that sets the per-RPC deadline.

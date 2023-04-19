@@ -235,22 +235,38 @@ type uploadState struct {
 }
 
 func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
-	uploads := len(entries)
-	LogContextInfof(ctx, log.Level(2), "Request to upload %d blobs", uploads)
+	LogContextInfof(ctx, log.Level(2), "Request to upload %d blobs", len(entries))
 
-	if uploads == 0 {
+	if len(entries) == 0 {
 		return nil, 0, nil
 	}
 	meta, err := GetContextMetadata(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	wait := make(chan *uploadResponse, uploads)
-	var missing []digest.Digest
+	wait := make(chan *uploadResponse, len(entries))
+	var dgs []digest.Digest
+	dedupDgs := make(map[digest.Digest]bool, len(entries))
+	for _, ue := range entries {
+		if _, ok := dedupDgs[ue.Digest]; !ok {
+			dgs = append(dgs, ue.Digest)
+			dedupDgs[ue.Digest] = true
+		}
+	}
+	missing, err := c.MissingBlobs(ctx, dgs)
+	if err != nil {
+		return nil, 0, err
+	}
+	missingDgs := make(map[digest.Digest]bool, len(missing))
+	for _, dg := range missing {
+		missingDgs[dg] = true
+	}
 	var reqs []*uploadRequest
 	for _, ue := range entries {
+		if _, ok := missingDgs[ue.Digest]; !ok {
+			continue
+		}
 		if ue.Digest.IsEmpty() {
-			uploads--
 			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty entry %s", ue.Digest)
 			continue
 		}
@@ -270,7 +286,8 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 		}
 	}
 	totalBytesMoved := int64(0)
-	for uploads > 0 {
+	finalMissing := make([]digest.Digest, len(reqs))
+	for i := 0; i < len(reqs); i++ {
 		select {
 		case <-ctx.Done():
 			c.cancelPendingRequests(reqs)
@@ -280,13 +297,12 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 				return nil, 0, resp.err
 			}
 			if resp.missing {
-				missing = append(missing, resp.digest)
+				finalMissing = append(finalMissing, resp.digest)
 			}
 			totalBytesMoved += resp.bytesMoved
-			uploads--
 		}
 	}
-	return missing, totalBytesMoved, nil
+	return finalMissing, totalBytesMoved, nil
 }
 
 func (c *Client) uploadProcessor() {
@@ -390,26 +406,16 @@ func (c *Client) upload(reqs []*uploadRequest) {
 		}
 		return
 	}
-	missing, present, err := c.findBlobState(ctx, newUploads)
-	if err != nil {
-		for _, st := range newStates {
-			updateAndNotify(st, 0, err, false)
-		}
-		return
-	}
-	for _, dg := range present {
-		updateAndNotify(newStates[dg], 0, nil, false)
-	}
 
-	LogContextInfof(ctx, log.Level(2), "%d new items to store", len(missing))
+	LogContextInfof(ctx, log.Level(2), "%d new items to store", len(newUploads))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
-		batches = c.makeBatches(ctx, missing, true)
+		batches = c.makeBatches(ctx, newUploads, true)
 	} else {
 		LogContextInfof(ctx, log.Level(2), "Uploading them individually")
-		for i := range missing {
-			LogContextInfof(ctx, log.Level(3), "Creating single batch of blob %s", missing[i])
-			batches = append(batches, missing[i:i+1])
+		for i := range newUploads {
+			LogContextInfof(ctx, log.Level(3), "Creating single batch of blob %s", newUploads[i])
+			batches = append(batches, newUploads[i:i+1])
 		}
 	}
 
@@ -468,21 +474,6 @@ func (c *Client) upload(reqs []*uploadRequest) {
 			}
 		}()
 	}
-}
-
-func (c *Client) findBlobState(ctx context.Context, dgs []digest.Digest) (missing []digest.Digest, present []digest.Digest, err error) {
-	dgMap := make(map[digest.Digest]bool)
-	for _, d := range dgs {
-		dgMap[d] = true
-	}
-	missing, err = c.MissingBlobs(ctx, dgs)
-	for _, d := range missing {
-		delete(dgMap, d)
-	}
-	for d := range dgMap {
-		present = append(present, d)
-	}
-	return missing, present, err
 }
 
 // This function is only used when UnifiedUploads is false. It will be removed

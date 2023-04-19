@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+
 	"strings"
 	"testing"
 	"time"
@@ -477,6 +478,7 @@ func TestUploadConcurrent(t *testing.T) {
 			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency, tc.unified} {
 				opt.Apply(c)
 			}
+			c.RunBackgroundTasks()
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			for i := 0; i < 100; i++ {
@@ -501,8 +503,9 @@ func TestUploadConcurrent(t *testing.T) {
 					if fake.BlobWrites(dg) != 1 {
 						t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
 					}
-					if fake.BlobMissingReqs(dg) != 1 {
-						t.Errorf("wanted 1 missing request for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
+					if fake.BlobMissingReqs(dg) != 100 {
+						// 100 requests per blob.
+						t.Errorf("wanted 100 missing request for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
 					}
 				}
 			}
@@ -530,6 +533,7 @@ func TestUploadConcurrentBatch(t *testing.T) {
 			c.MaxBatchDigests = 50
 			client.UnifiedUploadTickDuration(500 * time.Millisecond).Apply(c)
 			uo.Apply(c)
+			c.RunBackgroundTasks()
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			for i := 0; i < 10; i++ {
@@ -557,9 +561,6 @@ func TestUploadConcurrentBatch(t *testing.T) {
 				if c.UnifiedUploads {
 					if fake.BlobWrites(dg) != 1 {
 						t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
-					}
-					if fake.BlobMissingReqs(dg) != 1 {
-						t.Errorf("wanted 1 missing requests for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
 					}
 				}
 			}
@@ -594,6 +595,7 @@ func TestUploadCancel(t *testing.T) {
 			c := e.Client.GrpcClient
 			uo.Apply(c)
 			client.UseBatchOps(false).Apply(c)
+			c.RunBackgroundTasks()
 
 			cCtx, cancel := context.WithCancel(ctx)
 			eg, _ := errgroup.WithContext(cCtx)
@@ -673,6 +675,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency, tc.unified} {
 				opt.Apply(c)
 			}
+			c.RunBackgroundTasks()
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			eg.Go(func() error {
@@ -705,12 +708,6 @@ func TestUploadConcurrentCancel(t *testing.T) {
 					dg := digest.NewFromBlob(blob)
 					if fake.BlobWrites(dg) != 1 {
 						t.Errorf("wanted 1 write for blob %v: %v, got %v", i, dg, fake.BlobWrites(dg))
-					}
-					// It is possible to get more than 1 GetMissingBlobs requests if all concurrent requests for a particular
-					// digest get cancelled, because then this upload gets actually cancelled and deleted.
-					// This will happen if e.g. the original (non-canceled) upload thread is the last to run.
-					if fake.BlobMissingReqs(dg) > 2 {
-						t.Errorf("wanted <=2 missing requests for blob %v: %v, got %v", i, dg, fake.BlobMissingReqs(dg))
 					}
 				}
 			}
@@ -798,6 +795,7 @@ func TestUpload(t *testing.T) {
 			for _, o := range tc.opts {
 				o.Apply(c)
 			}
+			c.RunBackgroundTasks()
 
 			present := make(map[digest.Digest]bool)
 			for _, blob := range tc.present {
@@ -1583,6 +1581,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 				for _, b := range blobs {
 					fake.Put(b.blob)
 				}
+				c.RunBackgroundTasks()
 
 				eg, eCtx := errgroup.WithContext(ctx)
 				for i := 0; i < 100; i++ {
