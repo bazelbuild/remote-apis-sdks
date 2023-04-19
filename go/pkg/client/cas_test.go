@@ -795,6 +795,7 @@ func TestUpload(t *testing.T) {
 			for _, o := range tc.opts {
 				o.Apply(c)
 			}
+			c.RunBackgroundTasks()
 
 			present := make(map[digest.Digest]bool)
 			for _, blob := range tc.present {
@@ -1580,6 +1581,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 				for _, b := range blobs {
 					fake.Put(b.blob)
 				}
+				c.RunBackgroundTasks()
 
 				eg, eCtx := errgroup.WithContext(ctx)
 				for i := 0; i < 100; i++ {

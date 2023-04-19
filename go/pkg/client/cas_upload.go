@@ -235,19 +235,18 @@ type uploadState struct {
 }
 
 func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
-	uploads := len(entries)
-	LogContextInfof(ctx, log.Level(2), "Request to upload %d blobs", uploads)
+	LogContextInfof(ctx, log.Level(2), "Request to upload %d blobs", len(entries))
 
-	if uploads == 0 {
+	if len(entries) == 0 {
 		return nil, 0, nil
 	}
 	meta, err := GetContextMetadata(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	wait := make(chan *uploadResponse, uploads)
+	wait := make(chan *uploadResponse, len(entries))
 	var dgs []digest.Digest
-	dedupDgs := make(map[digest.Digest]bool, uploads)
+	dedupDgs := make(map[digest.Digest]bool, len(entries))
 	for _, ue := range entries {
 		if _, ok := dedupDgs[ue.Digest]; !ok {
 			dgs = append(dgs, ue.Digest)
@@ -258,18 +257,16 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 	if err != nil {
 		return nil, 0, err
 	}
-	missingDgs := make(map[digest.Digest]bool)
+	missingDgs := make(map[digest.Digest]bool, len(missing))
 	for _, dg := range missing {
 		missingDgs[dg] = true
 	}
 	var reqs []*uploadRequest
 	for _, ue := range entries {
 		if _, ok := missingDgs[ue.Digest]; !ok {
-			uploads--
 			continue
 		}
 		if ue.Digest.IsEmpty() {
-			uploads--
 			LogContextInfof(ctx, log.Level(2), "Skipping upload of empty entry %s", ue.Digest)
 			continue
 		}
@@ -289,7 +286,8 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 		}
 	}
 	totalBytesMoved := int64(0)
-	for uploads > 0 {
+	finalMissing := make([]digest.Digest, len(reqs))
+	for i := 0; i < len(reqs); i++ {
 		select {
 		case <-ctx.Done():
 			c.cancelPendingRequests(reqs)
@@ -299,13 +297,12 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 				return nil, 0, resp.err
 			}
 			if resp.missing {
-				missing = append(missing, resp.digest)
+				finalMissing = append(finalMissing, resp.digest)
 			}
 			totalBytesMoved += resp.bytesMoved
-			uploads--
 		}
 	}
-	return missing, totalBytesMoved, nil
+	return finalMissing, totalBytesMoved, nil
 }
 
 func (c *Client) uploadProcessor() {
