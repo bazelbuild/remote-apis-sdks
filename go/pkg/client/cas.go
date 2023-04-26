@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"google.golang.org/protobuf/encoding/protowire"
 
 	log "github.com/golang/glog"
+	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
 // DefaultCompressedBytestreamThreshold is the default threshold, in bytes, for
@@ -55,6 +57,13 @@ func (mbm *MovedBytesMetadata) addFrom(other *MovedBytesMetadata) *MovedBytesMet
 
 func (c *Client) shouldCompress(sizeBytes int64) bool {
 	return int64(c.CompressedBytestreamThreshold) >= 0 && int64(c.CompressedBytestreamThreshold) <= sizeBytes
+}
+
+func (c *Client) shouldCompressUpload(ue *uploadinfo.Entry) bool {
+	if c.UploadCompressionClassifier != nil {
+		return c.UploadCompressionClassifier(ue) != repb.Compressor_IDENTITY
+	}
+	return c.shouldCompress(ue.Digest.Size)
 }
 
 // makeBatches splits a list of digests into batches of size no more than the maximum.

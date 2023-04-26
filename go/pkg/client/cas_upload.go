@@ -101,11 +101,11 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 		LogContextInfof(ctx, log.Level(2), "Skipping upload of empty blob %s", dg)
 		return dg, nil
 	}
-	ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
+	ch, err := chunker.New(ue, c.shouldCompressUpload(ue), int(c.ChunkMaxSize))
 	if err != nil {
 		return dg, err
 	}
-	_, err = c.writeChunked(ctx, c.writeRscName(dg), ch, false, 0)
+	_, err = c.writeChunked(ctx, c.writeRscName(ue), ch, false, 0)
 	return dg, err
 }
 
@@ -199,11 +199,11 @@ func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) strin
 	return fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
 }
 
-func (c *Client) writeRscName(dg digest.Digest) string {
-	if c.shouldCompress(dg.Size) {
-		return c.ResourceNameCompressedWrite(dg.Hash, dg.Size)
+func (c *Client) writeRscName(ue *uploadinfo.Entry) string {
+	if c.shouldCompressUpload(ue) {
+		return c.ResourceNameCompressedWrite(ue.Digest.Hash, ue.Digest.Size)
 	}
-	return c.ResourceNameWrite(dg.Hash, dg.Size)
+	return c.ResourceNameWrite(ue.Digest.Hash, ue.Digest.Size)
 }
 
 type uploadRequest struct {
@@ -463,13 +463,12 @@ func (c *Client) upload(reqs []*uploadRequest) {
 				cCtx, cancel := context.WithCancel(ctx)
 				st.cancel = cancel
 				st.mu.Unlock()
-				dg := st.ue.Digest
 				log.V(3).Infof("Uploading single blob with digest %s", batch[0])
-				ch, err := chunker.New(st.ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
+				ch, err := chunker.New(st.ue, c.shouldCompressUpload(st.ue), int(c.ChunkMaxSize))
 				if err != nil {
 					updateAndNotify(st, 0, err, true)
 				}
-				totalBytes, err := c.writeChunked(cCtx, c.writeRscName(dg), ch, false, 0)
+				totalBytes, err := c.writeChunked(cCtx, c.writeRscName(st.ue), ch, false, 0)
 				updateAndNotify(st, totalBytes, err, true)
 			}
 		}()
@@ -550,12 +549,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 			} else {
 				LogContextInfof(ctx, log.Level(3), "Uploading single blob with digest %s", batch[0])
 				ue := ueList[batch[0]]
-				dg := ue.Digest
-				ch, err := chunker.New(ue, c.shouldCompress(dg.Size), int(c.ChunkMaxSize))
+				ch, err := chunker.New(ue, c.shouldCompressUpload(ue), int(c.ChunkMaxSize))
 				if err != nil {
 					return err
 				}
-				written, err := c.writeChunked(eCtx, c.writeRscName(dg), ch, false, 0)
+				written, err := c.writeChunked(eCtx, c.writeRscName(ue), ch, false, 0)
 				if err != nil {
 					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
 				}

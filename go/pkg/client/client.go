@@ -18,6 +18,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/semaphore"
@@ -133,8 +134,8 @@ type Client struct {
 	// compressed. Use 0 for all writes being compressed, and a negative number for all operations being
 	// uncompressed.
 	CompressedBytestreamThreshold CompressedBytestreamThreshold
-	// CompressionClassifier is a function called to decide how blobs for upload should be compressed.
-	CompressionClassifier CompressionClassifier
+	// UploadCompressionClassifier is a function called to decide how blobs for upload should be compressed.
+	UploadCompressionClassifier UploadCompressionClassifier
 	// MaxBatchDigests is maximum amount of digests to batch in upload and download operations.
 	MaxBatchDigests MaxBatchDigests
 	// MaxQueryBatchDigests is maximum amount of digests to batch in CAS query operations.
@@ -236,11 +237,12 @@ func (s CompressedBytestreamThreshold) Apply(c *Client) {
 	c.CompressedBytestreamThreshold = s
 }
 
-// A CompressionClassifier determines what kind of compression to use for a blob on upload.
-type CompressionClassifier func(uploadinfo.Entry) repb.Compressor_Value
+// An UploadCompressionClassifier determines what kind of compression to use for a blob on upload.
+type UploadCompressionClassifier func(*uploadinfo.Entry) repb.Compressor_Value
 
-func (cc CompressionClassifier) Apply(c *Client) {
-	c.CompressionClassifier = cc
+// Apply sets the client's compression classifier.
+func (cc UploadCompressionClassifier) Apply(c *Client) {
+	c.UploadCompressionClassifier = cc
 }
 
 // UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
