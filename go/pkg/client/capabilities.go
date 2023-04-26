@@ -44,6 +44,11 @@ func (c *Client) CheckCapabilities(ctx context.Context) (err error) {
 		if !foundZstd {
 			return errors.New("zstd is not supported by server, while the SDK only supports ZSTD compression")
 		}
+		for _, compressor := range c.serverCaps.CacheCapabilities.SupportedBatchUpdateCompressors {
+			if compressor == repb.Compressor_ZSTD {
+				c.batchCompression = true
+			}
+		}
 	}
 	return nil
 }

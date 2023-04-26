@@ -135,7 +135,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 			Digest: k.ToProto(),
 			Data:   b,
 		}
-		if c.shouldCompress(k.Size) {
+		if c.batchCompression && c.shouldCompress(k.Size) {
 			r.Data = zstdEncoder.EncodeAll(r.Data, nil)
 			r.Compressor = repb.Compressor_ZSTD
 		}

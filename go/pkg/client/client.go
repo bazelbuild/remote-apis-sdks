@@ -173,6 +173,7 @@ type Client struct {
 	creds               credentials.PerRPCCredentials
 	uploadOnce          sync.Once
 	downloadOnce        sync.Once
+	batchCompression    bool
 }
 
 const (
