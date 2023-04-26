@@ -609,10 +609,10 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 	st.ue = nil
 }
 
-// DetectArchiveUploadClassifier is an UploadCompressionClassifier that attempts to detect whether
+// DetectArchiveUploads is an UploadCompressionClassifier that attempts to detect whether
 // uploads are already archives, either based on their initial few bytes or known file extensions.
 // It is a best-effort classifier that may not recognise every possible type.
-func DetectArchiveUploadClassifier(ue *uploadinfo.Entry) repb.Compressor_Value {
+func DetectArchiveUploads(ue *uploadinfo.Entry) repb.Compressor_Value {
 	if len(ue.Contents) > 0 {
 		switch http.DetectContentType(ue.Contents) {
 		case "application/x-rar-compressed", "application/x-gzip", "application/zip", "video/webm", "image/gif", "image/webp", "image/png", "image/jpeg":
