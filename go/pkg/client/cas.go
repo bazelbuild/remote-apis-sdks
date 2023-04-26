@@ -60,10 +60,12 @@ func (c *Client) shouldCompress(sizeBytes int64) bool {
 }
 
 func (c *Client) shouldCompressUpload(ue *uploadinfo.Entry) bool {
-	if c.UploadCompressionClassifier != nil {
-		return c.UploadCompressionClassifier(ue) != repb.Compressor_IDENTITY
+	if !c.shouldCompress(ue.Digest.Size) {
+		return false
+	} else if c.UploadCompressionClassifier == nil {
+		return true
 	}
-	return c.shouldCompress(ue.Digest.Size)
+	return c.UploadCompressionClassifier(ue) != repb.Compressor_IDENTITY
 }
 
 // makeBatches splits a list of digests into batches of size no more than the maximum.
