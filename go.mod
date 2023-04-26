@@ -3,7 +3,7 @@ module github.com/bazelbuild/remote-apis-sdks
 go 1.19
 
 require (
-	github.com/bazelbuild/remote-apis v0.0.0-20210718193713-0ecef08215cf
+	github.com/bazelbuild/remote-apis v0.0.0-20230411132548-35aee1c4a425
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/google/go-cmp v0.5.9
 	github.com/klauspost/compress v1.12.3
