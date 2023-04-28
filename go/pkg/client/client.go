@@ -240,7 +240,7 @@ func (s CompressedBytestreamThreshold) Apply(c *Client) {
 // An UploadCompressionClassifier determines what kind of compression to use for a blob on upload.
 // Note that the CompressedBytestreamThreshold takes priority over this (i.e. if the blob to be uploaded
 // is smaller than the threshold, this will not be called to classify it).
-type UploadCompressionClassifier func(*uploadinfo.Entry) repb.Compressor_Value
+type UploadCompressionClassifier func(*uploadinfo.Entry) bool
 
 // Apply sets the client's compression classifier.
 func (cc UploadCompressionClassifier) Apply(c *Client) {
