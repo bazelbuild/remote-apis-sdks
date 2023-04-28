@@ -431,7 +431,7 @@ func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRe
 			if err != nil {
 				resps = append(resps, &repb.BatchUpdateBlobsResponse_Response{
 					Digest: r.Digest,
-					Status: status.Newf(codes.InvalidArgument, "Invalid blob: could not decompress: %s", err).Proto(),
+					Status: status.Newf(codes.InvalidArgument, "invalid blob: could not decompress: %s", err).Proto(),
 				})
 				continue
 			}

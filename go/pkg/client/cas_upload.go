@@ -119,6 +119,7 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 	return c.WriteBlob(ctx, bytes)
 }
 
+// zstdEncoder is a shared instance that should only be used in stateless mode, i.e. only by calling EncodeAll()
 var zstdEncoder, _ = zstd.NewWriter(nil)
 
 // BatchWriteBlobs (over)writes specified blobs to the CAS, regardless if they already exist.
@@ -130,7 +131,6 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 	var reqs []*repb.BatchUpdateBlobsRequest_Request
 	var sz int64
 	for k, b := range blobs {
-		sz += int64(k.Size)
 		r := &repb.BatchUpdateBlobsRequest_Request{
 			Digest: k.ToProto(),
 			Data:   b,
@@ -138,6 +138,9 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 		if c.batchCompression && c.shouldCompress(k.Size) {
 			r.Data = zstdEncoder.EncodeAll(r.Data, nil)
 			r.Compressor = repb.Compressor_ZSTD
+			sz += int64(len(r.Data))
+		} else {
+			sz += int64(k.Size)
 		}
 		reqs = append(reqs, r)
 	}
