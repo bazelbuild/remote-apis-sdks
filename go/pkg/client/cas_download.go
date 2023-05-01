@@ -181,6 +181,9 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, outDir 
 	return outputs, stats, err
 }
 
+// zstdDecoder is a shared instance that should only be used in stateless mode, i.e. only by calling DecodeAll()
+var zstdDecoder, _ = zstd.NewReader(nil)
+
 // BatchDownloadBlobs downloads a number of blobs from the CAS to memory. They must collectively be below the
 // maximum total size for a batch read, which is about 4 MB (see MaxBatchSize). Digests must be
 // computed in advance by the caller. In case multiple errors occur during the blob read, the
@@ -190,6 +193,9 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 		return nil, fmt.Errorf("batch read of %d total blobs exceeds maximum of %d", len(dgs), c.MaxBatchDigests)
 	}
 	req := &repb.BatchReadBlobsRequest{InstanceName: c.InstanceName}
+	if c.batchCompression {
+		req.AcceptableCompressors = []repb.Compressor_Value{repb.Compressor_ZSTD}
+	}
 	var sz int64
 	foundEmpty := false
 	for _, dg := range dgs {
@@ -236,6 +242,22 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 				errDg = r.Digest
 				errMsg = r.Status.Message
 			} else {
+				switch r.Compressor {
+				case repb.Compressor_IDENTITY:
+					// do nothing
+				case repb.Compressor_ZSTD:
+					b, err := zstdDecoder.DecodeAll(r.Data, nil)
+					if err != nil {
+						errDg = r.Digest
+						errMsg = err.Error()
+						continue
+					}
+					r.Data = b
+				default:
+					errDg = r.Digest
+					errMsg = fmt.Sprintf("blob returned with unsupported compressor %s", r.Compressor)
+					continue
+				}
 				res[digest.NewFromProtoUnvalidated(r.Digest)] = r.Data
 			}
 		}

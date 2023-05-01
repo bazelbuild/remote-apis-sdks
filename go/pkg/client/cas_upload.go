@@ -12,6 +12,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -118,6 +119,9 @@ func (c *Client) WriteProto(ctx context.Context, msg proto.Message) (digest.Dige
 	return c.WriteBlob(ctx, bytes)
 }
 
+// zstdEncoder is a shared instance that should only be used in stateless mode, i.e. only by calling EncodeAll()
+var zstdEncoder, _ = zstd.NewWriter(nil)
+
 // BatchWriteBlobs (over)writes specified blobs to the CAS, regardless if they already exist.
 //
 // The collective size must be below the maximum total size for a batch upload, which
@@ -127,11 +131,18 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 	var reqs []*repb.BatchUpdateBlobsRequest_Request
 	var sz int64
 	for k, b := range blobs {
-		sz += int64(k.Size)
-		reqs = append(reqs, &repb.BatchUpdateBlobsRequest_Request{
+		r := &repb.BatchUpdateBlobsRequest_Request{
 			Digest: k.ToProto(),
 			Data:   b,
-		})
+		}
+		if c.batchCompression && c.shouldCompress(k.Size) {
+			r.Data = zstdEncoder.EncodeAll(r.Data, nil)
+			r.Compressor = repb.Compressor_ZSTD
+			sz += int64(len(r.Data))
+		} else {
+			sz += int64(k.Size)
+		}
+		reqs = append(reqs, r)
 	}
 	if sz > int64(c.MaxBatchSize) {
 		return fmt.Errorf("batch update of %d total bytes exceeds maximum of %d", sz, c.MaxBatchSize)

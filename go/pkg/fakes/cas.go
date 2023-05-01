@@ -426,6 +426,18 @@ func (f *CAS) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRe
 
 	var resps []*repb.BatchUpdateBlobsResponse_Response
 	for _, r := range req.Requests {
+		if r.Compressor == repb.Compressor_ZSTD {
+			d, err := zstdDecoder.DecodeAll(r.Data, nil)
+			if err != nil {
+				resps = append(resps, &repb.BatchUpdateBlobsResponse_Response{
+					Digest: r.Digest,
+					Status: status.Newf(codes.InvalidArgument, "invalid blob: could not decompress: %s", err).Proto(),
+				})
+				continue
+			}
+			r.Data = d
+		}
+
 		dg := digest.NewFromBlob(r.Data)
 		rdg := digest.NewFromProtoUnvalidated(r.Digest)
 		if dg != rdg {
