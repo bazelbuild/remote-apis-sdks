@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"google.golang.org/protobuf/encoding/protowire"
 
 	log "github.com/golang/glog"
@@ -55,6 +56,15 @@ func (mbm *MovedBytesMetadata) addFrom(other *MovedBytesMetadata) *MovedBytesMet
 
 func (c *Client) shouldCompress(sizeBytes int64) bool {
 	return int64(c.CompressedBytestreamThreshold) >= 0 && int64(c.CompressedBytestreamThreshold) <= sizeBytes
+}
+
+func (c *Client) shouldCompressEntry(ue *uploadinfo.Entry) bool {
+	if !c.shouldCompress(ue.Digest.Size) {
+		return false
+	} else if c.UploadCompressionPredicate == nil {
+		return true
+	}
+	return c.UploadCompressionPredicate(ue)
 }
 
 // makeBatches splits a list of digests into batches of size no more than the maximum.

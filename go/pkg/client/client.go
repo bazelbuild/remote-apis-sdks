@@ -18,6 +18,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/semaphore"
@@ -133,6 +134,8 @@ type Client struct {
 	// compressed. Use 0 for all writes being compressed, and a negative number for all operations being
 	// uncompressed.
 	CompressedBytestreamThreshold CompressedBytestreamThreshold
+	// UploadCompressionPredicate is a function called to decide whether a blob should be compressed for upload.
+	UploadCompressionPredicate UploadCompressionPredicate
 	// MaxBatchDigests is maximum amount of digests to batch in upload and download operations.
 	MaxBatchDigests MaxBatchDigests
 	// MaxQueryBatchDigests is maximum amount of digests to batch in CAS query operations.
@@ -233,6 +236,16 @@ type CompressedBytestreamThreshold int64
 // Apply sets the client's maximal chunk size s.
 func (s CompressedBytestreamThreshold) Apply(c *Client) {
 	c.CompressedBytestreamThreshold = s
+}
+
+// An UploadCompressionPredicate determines whether to comress a blob on upload.
+// Note that the CompressedBytestreamThreshold takes priority over this (i.e. if the blob to be uploaded
+// is smaller than the threshold, this will not be called).
+type UploadCompressionPredicate func(*uploadinfo.Entry) bool
+
+// Apply sets the client's compression predicate.
+func (cc UploadCompressionPredicate) Apply(c *Client) {
+	c.UploadCompressionPredicate = cc
 }
 
 // UtilizeLocality is to specify whether client downloads files utilizing disk access locality.
