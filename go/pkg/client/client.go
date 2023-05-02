@@ -134,7 +134,7 @@ type Client struct {
 	// compressed. Use 0 for all writes being compressed, and a negative number for all operations being
 	// uncompressed.
 	CompressedBytestreamThreshold CompressedBytestreamThreshold
-	// UploadCompressionClassifier is a function called to decide how blobs for upload should be compressed.
+	// UploadCompressionClassifier is a function called to decide whether a blob should be compressed for upload.
 	UploadCompressionClassifier UploadCompressionClassifier
 	// MaxBatchDigests is maximum amount of digests to batch in upload and download operations.
 	MaxBatchDigests MaxBatchDigests
