@@ -12,10 +12,17 @@ import (
 )
 
 var (
-	ErrNotAbsolute   = errors.New("path is not absolute")
-	ErrNotRelative   = errors.New("path is not relative")
+	// ErrNotAbsolute indicates that the path is not absolute.
+	ErrNotAbsolute = errors.New("path is not absolute")
+
+	// ErrNotRelative indicates that the path is not relative.
+	ErrNotRelative = errors.New("path is not relative")
+
+	// ErrNotDescendant indicates that the target is a descendant of base.
 	ErrNotDescendant = errors.New("target is not a descendant of base")
-	Root             = os.Getenv("SYSTEMDRIVE") + string(os.PathSeparator)
+
+	// Root is / on unix-like systems and c:\ on Windows.
+	Root = os.Getenv("SYSTEMDRIVE") + string(os.PathSeparator)
 )
 
 // Absolute represents an immutable absolute path.
