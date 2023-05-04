@@ -79,7 +79,7 @@ func (c *Client) UploadIfMissing(ctx context.Context, entries ...*uploadinfo.Ent
 	return c.uploadUnified(ctx, entries...)
 }
 
-// WriteBlobs is a proxy method for UploadIfMissing that facilitates specifing a map of
+// WriteBlobs is a proxy method for UploadIfMissing that facilitates specifying a map of
 // digest-to-blob. It's intended for use with PackageTree.
 // TODO(olaola): rethink the API of this layer:
 // * Do we want to allow []byte uploads, or require the user to construct Chunkers?
@@ -297,7 +297,7 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 		}
 	}
 	totalBytesMoved := int64(0)
-	finalMissing := make([]digest.Digest, len(reqs))
+	finalMissing := make([]digest.Digest, 0, len(reqs))
 	for i := 0; i < len(reqs); i++ {
 		select {
 		case <-ctx.Done():
