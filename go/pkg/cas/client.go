@@ -11,12 +11,11 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/sync/semaphore"
-	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
+	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
-	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
@@ -34,8 +33,8 @@ type Client struct {
 	// Config is the configuration that the client was created with.
 	Config ClientConfig
 
-	byteStream bsgrpc.ByteStreamClient
-	cas        regrpc.ContentAddressableStorageClient
+	byteStream bspb.ByteStreamClient
+	cas        repb.ContentAddressableStorageClient
 
 	// per-RPC semaphores
 
@@ -252,8 +251,8 @@ func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceNam
 		InstanceName: instanceName,
 		Config:       config,
 		conn:         conn,
-		byteStream:   bsgrpc.NewByteStreamClient(conn),
-		cas:          regrpc.NewContentAddressableStorageClient(conn),
+		byteStream:   bspb.NewByteStreamClient(conn),
+		cas:          repb.NewContentAddressableStorageClient(conn),
 	}
 	if !client.Config.IgnoreCapabilities {
 		if err := client.checkCapabilities(ctx); err != nil {
@@ -312,7 +311,7 @@ func (c *Client) withRetries(ctx context.Context, f func(context.Context) error)
 // checkCapabilities consults with server-side capabilities and potentially
 // mutates c.ClientConfig.
 func (c *Client) checkCapabilities(ctx context.Context) error {
-	caps, err := regrpc.NewCapabilitiesClient(c.conn).GetCapabilities(ctx, &repb.GetCapabilitiesRequest{InstanceName: c.InstanceName})
+	caps, err := repb.NewCapabilitiesClient(c.conn).GetCapabilities(ctx, &repb.GetCapabilitiesRequest{InstanceName: c.InstanceName})
 	if err != nil {
 		return errors.Wrapf(err, "GetCapabilities RPC")
 	}

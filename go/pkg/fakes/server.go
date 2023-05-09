@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
@@ -21,9 +20,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
-	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
+	bspb "google.golang.org/genproto/googleapis/bytestream"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 	tspb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -47,11 +45,11 @@ func NewServer(t testing.TB) (s *Server, err error) {
 		return nil, err
 	}
 	s.srv = grpc.NewServer()
-	bsgrpc.RegisterByteStreamServer(s.srv, s.CAS)
-	regrpc.RegisterContentAddressableStorageServer(s.srv, s.CAS)
-	regrpc.RegisterActionCacheServer(s.srv, s.ActionCache)
-	regrpc.RegisterCapabilitiesServer(s.srv, s.Exec)
-	regrpc.RegisterExecutionServer(s.srv, s.Exec)
+	bspb.RegisterByteStreamServer(s.srv, s.CAS)
+	repb.RegisterContentAddressableStorageServer(s.srv, s.CAS)
+	repb.RegisterActionCacheServer(s.srv, s.ActionCache)
+	repb.RegisterCapabilitiesServer(s.srv, s.Exec)
+	repb.RegisterExecutionServer(s.srv, s.Exec)
 	go s.srv.Serve(s.listener)
 	return s, nil
 }
@@ -77,7 +75,7 @@ func (s *Server) NewTestClient(ctx context.Context) (*rc.Client, error) {
 // NewClientConn returns a gRPC client connction to the server.
 func (s *Server) NewClientConn(ctx context.Context) (*grpc.ClientConn, error) {
 	p := s.dialParams()
-	conn, _, err := client.Dial(ctx, p.Service, p)
+	conn, _, err := rc.Dial(ctx, p.Service, p)
 	return conn, err
 }
 
