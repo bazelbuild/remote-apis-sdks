@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
@@ -53,7 +54,7 @@ func (c *Client) NewContext(ctx context.Context, cmd *command.Command, opt *comm
 	if err := cmd.Validate(); err != nil {
 		return nil, err
 	}
-	grpcCtx, err := rc.ContextWithMetadata(ctx, &rc.ContextMetadata{
+	grpcCtx, err := contextmd.WithMetadata(ctx, &contextmd.Metadata{
 		ToolName:               cmd.Identifiers.ToolName,
 		ToolVersion:            cmd.Identifiers.ToolVersion,
 		ActionID:               cmd.Identifiers.CommandID,

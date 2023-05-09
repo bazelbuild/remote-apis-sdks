@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//go/pkg/client",
         "//go/pkg/command",
+        "//go/pkg/contextmd",
         "//go/pkg/digest",
         "//go/pkg/filemetadata",
         "//go/pkg/outerr",

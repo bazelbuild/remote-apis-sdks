@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -36,7 +37,7 @@ func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[d
 	if count == 0 {
 		return stats, nil
 	}
-	meta, err := GetContextMetadata(ctx)
+	meta, err := contextmd.ExtractMetadata(ctx)
 	if err != nil {
 		return stats, err
 	}
@@ -52,7 +53,7 @@ func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[d
 		}
 		select {
 		case <-ctx.Done():
-			LogContextInfof(ctx, log.Level(2), "Download canceled")
+			contextmd.Infof(ctx, log.Level(2), "Download canceled")
 			return stats, ctx.Err()
 		case c.casDownloadRequests <- r:
 			continue
@@ -63,7 +64,7 @@ func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[d
 	for count > 0 {
 		select {
 		case <-ctx.Done():
-			LogContextInfof(ctx, log.Level(2), "Download canceled")
+			contextmd.Infof(ctx, log.Level(2), "Download canceled")
 			return stats, ctx.Err()
 		case resp := <-wait:
 			if resp.err != nil {
@@ -603,7 +604,7 @@ type downloadRequest struct {
 	// TODO(olaola): use channels for cancellations instead of embedding download context.
 	context context.Context
 	output  *TreeOutput
-	meta    *ContextMetadata
+	meta    *contextmd.Metadata
 	wait    chan<- *downloadResponse
 }
 
@@ -646,7 +647,7 @@ func (c *Client) download(data []*downloadRequest) {
 	// It is possible to have multiple same files download to different locations.
 	// This will download once and copy to the other locations.
 	reqs := make(map[digest.Digest][]*downloadRequest)
-	var metas []*ContextMetadata
+	var metas []*contextmd.Metadata
 	for _, r := range data {
 		rs := reqs[r.digest]
 		rs = append(rs, r)
@@ -676,25 +677,25 @@ func (c *Client) download(data []*downloadRequest) {
 		}
 	}
 
-	unifiedMeta := getUnifiedMetadata(metas)
+	unifiedMeta := contextmd.MergeMetadata(metas...)
 	var err error
 	ctx := context.Background()
 	if unifiedMeta.ActionID != "" {
-		ctx, err = ContextWithMetadata(context.Background(), unifiedMeta)
+		ctx, err = contextmd.WithMetadata(context.Background(), unifiedMeta)
 	}
 	if err != nil {
 		afterDownload(dgs, reqs, map[digest.Digest]*MovedBytesMetadata{}, err)
 		return
 	}
 
-	LogContextInfof(ctx, log.Level(2), "%d digests to download (%d reqs)", len(dgs), len(reqs))
+	contextmd.Infof(ctx, log.Level(2), "%d digests to download (%d reqs)", len(dgs), len(reqs))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
 		batches = c.makeBatches(ctx, dgs, !bool(c.UtilizeLocality))
 	} else {
-		LogContextInfof(ctx, log.Level(2), "Downloading them individually")
+		contextmd.Infof(ctx, log.Level(2), "Downloading them individually")
 		for i := range dgs {
-			LogContextInfof(ctx, log.Level(3), "Creating single batch of blob %s", dgs[i])
+			contextmd.Infof(ctx, log.Level(3), "Creating single batch of blob %s", dgs[i])
 			batches = append(batches, dgs[i:i+1])
 		}
 	}
@@ -706,7 +707,7 @@ func (c *Client) download(data []*downloadRequest) {
 				defer c.casDownloaders.Release(1)
 			}
 			if i%logInterval == 0 {
-				LogContextInfof(ctx, log.Level(2), "%d batches left to download", len(batches)-i)
+				contextmd.Infof(ctx, log.Level(2), "%d batches left to download", len(batches)-i)
 			}
 			if len(batch) > 1 {
 				c.downloadBatch(ctx, batch, reqs)
@@ -725,7 +726,7 @@ func (c *Client) download(data []*downloadRequest) {
 }
 
 func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest) {
-	LogContextInfof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
+	contextmd.Infof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 	bchMap, err := c.BatchDownloadBlobs(ctx, batch)
 	if err != nil {
 		afterDownload(batch, reqs, map[digest.Digest]*MovedBytesMetadata{}, err)
@@ -778,7 +779,7 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	r := rs[0]
 	rs = rs[1:]
 	path := filepath.Join(r.outDir, r.output.Path)
-	LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
+	contextmd.Infof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
 	stats, err := c.ReadBlobToFile(ctx, r.output.Digest, path)
 	if err != nil {
 		return err
@@ -833,14 +834,14 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 		}
 	}
 
-	LogContextInfof(ctx, log.Level(2), "%d items to download", len(dgs))
+	contextmd.Infof(ctx, log.Level(2), "%d items to download", len(dgs))
 	var batches [][]digest.Digest
 	if c.useBatchOps {
 		batches = c.makeBatches(ctx, dgs, !bool(c.UtilizeLocality))
 	} else {
-		LogContextInfof(ctx, log.Level(2), "Downloading them individually")
+		contextmd.Infof(ctx, log.Level(2), "Downloading them individually")
 		for i := range dgs {
-			LogContextInfof(ctx, log.Level(3), "Creating single batch of blob %s", dgs[i])
+			contextmd.Infof(ctx, log.Level(3), "Creating single batch of blob %s", dgs[i])
 			batches = append(batches, dgs[i:i+1])
 		}
 	}
@@ -854,10 +855,10 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 			}
 			defer c.casDownloaders.Release(1)
 			if i%logInterval == 0 {
-				LogContextInfof(ctx, log.Level(2), "%d batches left to download", len(batches)-i)
+				contextmd.Infof(ctx, log.Level(2), "%d batches left to download", len(batches)-i)
 			}
 			if len(batch) > 1 {
-				LogContextInfof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
+				contextmd.Infof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 				bchMap, err := c.BatchDownloadBlobs(eCtx, batch)
 				for _, dg := range batch {
 					data := bchMap[dg]
@@ -880,7 +881,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 			} else {
 				out := outputs[batch[0]]
 				path := filepath.Join(outDir, out.Path)
-				LogContextInfof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
+				contextmd.Infof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
 				stats, err := c.ReadBlobToFile(ctx, out.Digest, path)
 				if err != nil {
 					return err
@@ -901,9 +902,9 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 		})
 	}
 
-	LogContextInfof(ctx, log.Level(3), "Waiting for remaining jobs")
+	contextmd.Infof(ctx, log.Level(3), "Waiting for remaining jobs")
 	err := eg.Wait()
-	LogContextInfof(ctx, log.Level(3), "Done")
+	contextmd.Infof(ctx, log.Level(3), "Done")
 	return fullStats, err
 }
 
