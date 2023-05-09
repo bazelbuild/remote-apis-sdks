@@ -9,7 +9,6 @@ go_library(
         "cas_download.go",
         "cas_upload.go",
         "client.go",
-        "client_context.go",
         "exec.go",
         "status.go",
         "tree.go",
@@ -22,6 +21,7 @@ go_library(
         "//go/pkg/balancer/proto",
         "//go/pkg/chunker",
         "//go/pkg/command",
+        "//go/pkg/context",
         "//go/pkg/digest",
         "//go/pkg/filemetadata",
         "//go/pkg/retry",
@@ -57,7 +57,6 @@ go_test(
     srcs = [
         "batch_retries_test.go",
         "bytestream_test.go",
-        "cas_internal_test.go",
         "cas_test.go",
         "client_test.go",
         "exec_test.go",
@@ -69,6 +68,7 @@ go_test(
     deps = [
         "//go/pkg/chunker",
         "//go/pkg/command",
+        "//go/pkg/context",
         "//go/pkg/digest",
         "//go/pkg/fakes",
         "//go/pkg/filemetadata",
