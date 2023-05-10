@@ -13,6 +13,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	gerrors "github.com/pkg/errors"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
@@ -237,7 +239,7 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 	opError := false // Are we propagating an Operation status as an error for the retrier's benefit?
 	lastOp := &oppb.Operation{}
 	closure := func(ctx context.Context) (e error) {
-		var res repb.Execution_ExecuteClient
+		var res regrpc.Execution_ExecuteClient
 		if wait {
 			res, e = c.WaitExecution(ctx, &repb.WaitExecutionRequest{Name: lastOp.Name})
 		} else {

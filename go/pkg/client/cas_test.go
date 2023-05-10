@@ -28,8 +28,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	bspb "google.golang.org/genproto/googleapis/bytestream"
+	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 )
 
 const (
@@ -60,7 +61,7 @@ func TestSplitEndpoints(t *testing.T) {
 		Chunks:           []int{6},
 		ExpectCompressed: false,
 	}
-	bspb.RegisterByteStreamServer(casServer, fake)
+	bsgrpc.RegisterByteStreamServer(casServer, fake)
 	go execServer.Serve(l1)
 	go casServer.Serve(l2)
 	defer casServer.Stop()
@@ -225,7 +226,7 @@ func TestRead(t *testing.T) {
 			}
 			defer listener.Close()
 			server := grpc.NewServer()
-			bspb.RegisterByteStreamServer(server, &tc.fake)
+			bsgrpc.RegisterByteStreamServer(server, &tc.fake)
 			go server.Serve(listener)
 			defer server.Stop()
 			c, err := client.NewClient(ctx, instance, client.DialParams{
@@ -326,7 +327,7 @@ func TestWrite(t *testing.T) {
 			defer listener.Close()
 			server := grpc.NewServer()
 			fake := &fakes.Writer{}
-			bspb.RegisterByteStreamServer(server, fake)
+			bsgrpc.RegisterByteStreamServer(server, fake)
 			go server.Serve(listener)
 			defer server.Stop()
 			c, err := client.NewClient(ctx, instance, client.DialParams{
