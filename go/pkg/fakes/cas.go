@@ -22,7 +22,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
@@ -56,7 +58,7 @@ func (f *Reader) Validate(t *testing.T) {
 }
 
 // Read implements the corresponding RE API function.
-func (f *Reader) Read(req *bspb.ReadRequest, stream bspb.ByteStream_ReadServer) error {
+func (f *Reader) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	path := strings.Split(req.ResourceName, "/")
 	if (len(path) != 4 && len(path) != 5) || path[0] != "instance" || (path[1] != "blobs" && path[1] != "compressed-blobs") {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
@@ -120,7 +122,7 @@ func (f *Reader) Read(req *bspb.ReadRequest, stream bspb.ByteStream_ReadServer) 
 }
 
 // Write implements the corresponding RE API function.
-func (f *Reader) Write(bspb.ByteStream_WriteServer) error {
+func (f *Reader) Write(bsgrpc.ByteStream_WriteServer) error {
 	return status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
@@ -140,7 +142,7 @@ type Writer struct {
 }
 
 // Write implements the corresponding RE API function.
-func (f *Writer) Write(stream bspb.ByteStream_WriteServer) (err error) {
+func (f *Writer) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	// Store the error so we can verify that the client didn't drop the stream early, meaning the
 	// request won't error.
 	defer func() { f.Err = err }()
@@ -245,7 +247,7 @@ func (f *Writer) Write(stream bspb.ByteStream_WriteServer) (err error) {
 }
 
 // Read implements the corresponding RE API function.
-func (f *Writer) Read(*bspb.ReadRequest, bspb.ByteStream_ReadServer) error {
+func (f *Writer) Read(*bspb.ReadRequest, bsgrpc.ByteStream_ReadServer) error {
 	return status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
@@ -510,7 +512,7 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 }
 
 // GetTree implements the corresponding RE API function.
-func (f *CAS) GetTree(req *repb.GetTreeRequest, stream repb.ContentAddressableStorage_GetTreeServer) error {
+func (f *CAS) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
 	f.maybeSleep()
 	rootDigest, err := digest.NewFromProto(req.RootDigest)
 	if err != nil {
@@ -568,7 +570,7 @@ func (f *CAS) GetTree(req *repb.GetTreeRequest, stream repb.ContentAddressableSt
 }
 
 // Write implements the corresponding RE API function.
-func (f *CAS) Write(stream bspb.ByteStream_WriteServer) (err error) {
+func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	off := int64(0)
 	buf := new(bytes.Buffer)
 
@@ -680,7 +682,7 @@ func (f *CAS) Write(stream bspb.ByteStream_WriteServer) (err error) {
 }
 
 // Read implements the corresponding RE API function.
-func (f *CAS) Read(req *bspb.ReadRequest, stream bspb.ByteStream_ReadServer) error {
+func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	if req.ReadOffset != 0 || req.ReadLimit != 0 {
 		return status.Error(codes.Unimplemented, "test fake does not implement read_offset or limit")
 	}
