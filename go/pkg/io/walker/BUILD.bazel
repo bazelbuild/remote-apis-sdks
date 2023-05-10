@@ -9,10 +9,7 @@ go_library(
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/io/walker",
     visibility = ["//visibility:public"],
-    deps = [
-        "//go/pkg/errors",
-        "//go/pkg/io/impath",
-    ],
+    deps = ["//go/pkg/io/impath"],
 )
 
 go_test(
@@ -23,7 +20,6 @@ go_test(
     ],
     deps = [
         ":walker",
-        "//go/pkg/errors",
         "//go/pkg/io/impath",
         "@com_github_google_go_cmp//cmp:go_default_library",
     ],

@@ -22,7 +22,7 @@ var (
 	hexStringRegex = regexp.MustCompile("^[a-f0-9]+$")
 
 	// HashFn is the digest function used.
-	HashFn = crypto.SHA256
+	HashFn crypto.Hash = crypto.SHA256
 
 	// Empty is the digest of the empty blob.
 	Empty = NewFromBlob([]byte{})
@@ -44,9 +44,7 @@ type Digest struct {
 
 // GetDigestFunction returns the digest function used by the client.
 func GetDigestFunction() repb.DigestFunction_Value {
-	// TODO: replace this line after all clients support Go 1.15 where .String() is defined:
-	// name := strings.ReplaceAll(HashFn.String(), "-", "")
-	name := "SHA256"
+	name := strings.ReplaceAll(HashFn.String(), "-", "")
 	if val, ok := repb.DigestFunction_Value_value[name]; ok {
 		return repb.DigestFunction_Value(val)
 	}
