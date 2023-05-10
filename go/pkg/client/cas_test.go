@@ -29,7 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
+	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
 const (
@@ -60,7 +60,7 @@ func TestSplitEndpoints(t *testing.T) {
 		Chunks:           []int{6},
 		ExpectCompressed: false,
 	}
-	bsgrpc.RegisterByteStreamServer(casServer, fake)
+	bspb.RegisterByteStreamServer(casServer, fake)
 	go execServer.Serve(l1)
 	go casServer.Serve(l2)
 	defer casServer.Stop()
@@ -225,7 +225,7 @@ func TestRead(t *testing.T) {
 			}
 			defer listener.Close()
 			server := grpc.NewServer()
-			bsgrpc.RegisterByteStreamServer(server, &tc.fake)
+			bspb.RegisterByteStreamServer(server, &tc.fake)
 			go server.Serve(listener)
 			defer server.Stop()
 			c, err := client.NewClient(ctx, instance, client.DialParams{
@@ -326,7 +326,7 @@ func TestWrite(t *testing.T) {
 			defer listener.Close()
 			server := grpc.NewServer()
 			fake := &fakes.Writer{}
-			bsgrpc.RegisterByteStreamServer(server, fake)
+			bspb.RegisterByteStreamServer(server, fake)
 			go server.Serve(listener)
 			defer server.Stop()
 			c, err := client.NewClient(ctx, instance, client.DialParams{

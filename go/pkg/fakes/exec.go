@@ -12,7 +12,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
 	anypb "google.golang.org/protobuf/types/known/anypb"
@@ -131,7 +130,7 @@ func (s *Exec) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesReq
 
 // Execute returns the saved result ActionResult, or a Status. It also puts it in the action cache
 // unless the execute request specified
-func (s *Exec) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_ExecuteServer) (err error) {
+func (s *Exec) Execute(req *repb.ExecuteRequest, stream repb.Execution_ExecuteServer) (err error) {
 	dg, err := digest.NewFromProto(req.ActionDigest)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, fmt.Sprintf("invalid digest received: %v", req.ActionDigest))
@@ -150,6 +149,6 @@ func (s *Exec) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_Execute
 }
 
 // WaitExecution is not implemented on this fake.
-func (s *Exec) WaitExecution(req *repb.WaitExecutionRequest, stream regrpc.Execution_WaitExecutionServer) (err error) {
+func (s *Exec) WaitExecution(req *repb.WaitExecutionRequest, stream repb.Execution_WaitExecutionServer) (err error) {
 	return status.Error(codes.Unimplemented, "method WaitExecution not implemented by test fake")
 }

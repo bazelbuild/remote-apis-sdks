@@ -22,11 +22,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
-	opgrpc "google.golang.org/genproto/googleapis/longrunning"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
@@ -37,7 +34,7 @@ var zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
 type flakyServer struct {
 	// TODO(jsharpe): This is a hack to work around WaitOperation not existing in some versions of
 	// the long running operations API that we need to support.
-	opgrpc.OperationsServer
+	oppb.OperationsServer
 	mu               sync.RWMutex     // Protects numCalls.
 	numCalls         map[string]int   // A counter of calls the server encountered thus far, by method.
 	muOffset         sync.RWMutex     // Protects initialOffsets.
@@ -70,7 +67,7 @@ func (f *flakyServer) fetchInitialOffset(name string) int64 {
 	return offset
 }
 
-func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
+func (f *flakyServer) Write(stream bspb.ByteStream_WriteServer) error {
 	numCalls := f.incNumCalls("Write")
 	if numCalls < 3 {
 		time.Sleep(f.sleepDelay)
@@ -92,7 +89,7 @@ func (f *flakyServer) Write(stream bsgrpc.ByteStream_WriteServer) error {
 	return stream.SendAndClose(&bspb.WriteResponse{CommittedSize: 4})
 }
 
-func (f *flakyServer) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
+func (f *flakyServer) Read(req *bspb.ReadRequest, stream bspb.ByteStream_ReadServer) error {
 	numCalls := f.incNumCalls("Read")
 	if numCalls < 3 {
 		time.Sleep(f.sleepDelay)
@@ -162,7 +159,7 @@ func (f *flakyServer) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlo
 	return nil, f.flakeAndFail("BatchReadBlobs")
 }
 
-func (f *flakyServer) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
+func (f *flakyServer) GetTree(req *repb.GetTreeRequest, stream repb.ContentAddressableStorage_GetTreeServer) error {
 	numCalls := f.incNumCalls("GetTree")
 	if numCalls < 3 {
 		return status.Error(codes.Canceled, "transient error!")
@@ -188,7 +185,7 @@ func (f *flakyServer) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAdd
 	return stream.Send(resp)
 }
 
-func (f *flakyServer) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_ExecuteServer) error {
+func (f *flakyServer) Execute(req *repb.ExecuteRequest, stream repb.Execution_ExecuteServer) error {
 	numCalls := f.incNumCalls("Execute")
 	if numCalls < 2 {
 		return status.Error(codes.Canceled, "transient error!")
@@ -198,7 +195,7 @@ func (f *flakyServer) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_
 	return status.Error(codes.Internal, "another transient error!")
 }
 
-func (f *flakyServer) WaitExecution(req *repb.WaitExecutionRequest, stream regrpc.Execution_WaitExecutionServer) error {
+func (f *flakyServer) WaitExecution(req *repb.WaitExecutionRequest, stream repb.Execution_WaitExecutionServer) error {
 	numCalls := f.incNumCalls("WaitExecution")
 	if numCalls < 2 {
 		return status.Error(codes.Canceled, "transient error!")
@@ -250,11 +247,11 @@ func setup(t *testing.T) *flakyFixture {
 	}
 	f.server = grpc.NewServer()
 	f.fake = &flakyServer{numCalls: make(map[string]int), initialOffsets: make(map[string]int64)}
-	bsgrpc.RegisterByteStreamServer(f.server, f.fake)
-	regrpc.RegisterActionCacheServer(f.server, f.fake)
-	regrpc.RegisterContentAddressableStorageServer(f.server, f.fake)
-	regrpc.RegisterExecutionServer(f.server, f.fake)
-	opgrpc.RegisterOperationsServer(f.server, f.fake)
+	bspb.RegisterByteStreamServer(f.server, f.fake)
+	repb.RegisterActionCacheServer(f.server, f.fake)
+	repb.RegisterContentAddressableStorageServer(f.server, f.fake)
+	repb.RegisterExecutionServer(f.server, f.fake)
+	oppb.RegisterOperationsServer(f.server, f.fake)
 	go f.server.Serve(f.listener)
 	f.client, err = client.NewClient(f.ctx, instance, client.DialParams{
 		Service:    f.listener.Addr().String(),

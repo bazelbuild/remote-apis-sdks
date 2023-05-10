@@ -18,7 +18,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 )
@@ -77,7 +76,7 @@ func (f *flakyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchRe
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (f *flakyBatchServer) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
+func (f *flakyBatchServer) GetTree(req *repb.GetTreeRequest, stream repb.ContentAddressableStorage_GetTreeServer) error {
 	return status.Error(codes.Unimplemented, "")
 }
 
@@ -131,7 +130,7 @@ func TestBatchUpdateBlobsIndividualRequestRetries(t *testing.T) {
 	}
 	server := grpc.NewServer()
 	fake := &flakyBatchServer{}
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
+	repb.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
 	ctx := context.Background()
 	client, err := client.NewClient(ctx, instance, client.DialParams{
@@ -205,7 +204,7 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 	}
 	server := grpc.NewServer()
 	fake := &flakyBatchServer{}
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
+	repb.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
 	ctx := context.Background()
 	client, err := client.NewClient(ctx, instance, client.DialParams{
@@ -292,7 +291,7 @@ func (s *sleepyBatchServer) FindMissingBlobs(ctx context.Context, req *repb.Find
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (s *sleepyBatchServer) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressableStorage_GetTreeServer) error {
+func (s *sleepyBatchServer) GetTree(req *repb.GetTreeRequest, stream repb.ContentAddressableStorage_GetTreeServer) error {
 	return status.Error(codes.Unimplemented, "")
 }
 
@@ -334,7 +333,7 @@ func TestBatchReadBlobsDeadlineExceededRetries(t *testing.T) {
 	}
 	server := grpc.NewServer()
 	fake := &sleepyBatchServer{timeout: 200 * time.Millisecond}
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
+	repb.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
 	ctx := context.Background()
 	retrier := client.RetryTransient()
@@ -373,7 +372,7 @@ func TestBatchUpdateBlobsDeadlineExceededRetries(t *testing.T) {
 	}
 	server := grpc.NewServer()
 	fake := &sleepyBatchServer{timeout: 200 * time.Millisecond}
-	regrpc.RegisterContentAddressableStorageServer(server, fake)
+	repb.RegisterContentAddressableStorageServer(server, fake)
 	go server.Serve(listener)
 	ctx := context.Background()
 	retrier := client.RetryTransient()
