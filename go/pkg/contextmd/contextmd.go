@@ -37,12 +37,12 @@ type Metadata struct {
 
 // Infof is equivalent to log.V(x).Infof(...) except it
 // also logs context metadata, if available.
-func Infof(ctx context.Context, v log.Level, format string, args ...interface{}) {
+func Infof(ctx context.Context, v log.Level, format string, args ...any) {
 	if log.V(v) {
 		m, err := ExtractMetadata(ctx)
 		if err != nil && m.ActionID != "" {
 			format = "%s: " + format
-			args = append([]interface{}{m.ActionID}, args...)
+			args = append([]any{m.ActionID}, args...)
 		}
 		log.InfoDepth(1, fmt.Sprintf(format, args...))
 	}
@@ -132,24 +132,25 @@ func MergeMetadata(metas ...*Metadata) *Metadata {
 
 // FromContexts returns a context derived from the first one with metadata merged from all of ctxs.
 //
-// If len(ctxs) > 0, the first context is always returned.
+// If len(ctxs) == 0, ctx is returned as is.
 // Returns the first error or nil.
-func FromContexts(ctxs ...context.Context) (context.Context, error) {
+func FromContexts(ctx context.Context, ctxs ...context.Context) (context.Context, error) {
 	if len(ctxs) == 0 {
-		return nil, nil
-	}
-	ctx := ctxs[0]
-	if len(ctxs) == 1 {
 		return ctx, nil
 	}
 
-	metas := make([]*Metadata, len(ctxs))
+	metas := make([]*Metadata, len(ctxs)+1)
+	md, err := ExtractMetadata(ctx)
+	if err != nil {
+		return ctx, err
+	}
+	metas[0] = md
 	for i, c := range ctxs {
 		md, err := ExtractMetadata(c)
 		if err != nil {
 			return ctx, err
 		}
-		metas[i] = md
+		metas[i+1] = md
 	}
 
 	// We cap to a bit less than the maximum header size in order to allow
