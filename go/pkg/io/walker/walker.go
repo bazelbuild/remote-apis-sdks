@@ -1,3 +1,4 @@
+// Package walker provides a simple interface for traversing the filesystem by abstracting away IO and implementation naunces.
 package walker
 
 import (

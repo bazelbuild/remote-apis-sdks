@@ -384,7 +384,7 @@ func validateSequence(t *testing.T, seq []string, fsLayout map[string][]string) 
 	pathVisitCount := pathCount{}
 	pendingParent := map[string]bool{}
 	for _, p := range seq {
-		pathVisitCount[p] += 1
+		pathVisitCount[p]++
 		parent := filepath.Dir(p)
 		// Parent should be visited after this child.
 		pendingParent[parent] = true

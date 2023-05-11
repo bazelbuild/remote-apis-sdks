@@ -157,7 +157,7 @@ type Stats struct {
 	// It does not necessarily equal the total number of bytes uploaded/downloaded.
 	BytesRequested int64
 
-	// LogicalBytesMoved is the amount of BytesRequsted that was processed.
+	// LogicalBytesMoved is the amount of BytesRequested that was processed.
 	// It cannot be larger than BytesRequested, but may be smaller in case of a partial response.
 	LogicalBytesMoved int64
 
