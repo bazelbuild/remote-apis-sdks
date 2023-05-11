@@ -20,6 +20,8 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes"
+	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
@@ -832,7 +834,7 @@ func uploadInputChanFrom(inputs ...*UploadInput) chan *UploadInput {
 }
 
 type fakeCAS struct {
-	repb.ContentAddressableStorageClient
+	regrpc.ContentAddressableStorageClient
 	findMissingBlobs func(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error)
 	batchUpdateBlobs func(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error)
 }
