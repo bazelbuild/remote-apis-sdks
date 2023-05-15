@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "symlinkopts",
+    srcs = ["opts.go"],
+    importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/symlinkopts",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "symlinkopts_test",
+    srcs = ["opts_test.go"],
+    deps = [":symlinkopts"],
+)
