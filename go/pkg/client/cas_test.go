@@ -479,7 +479,7 @@ func TestUploadConcurrent(t *testing.T) {
 			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency, tc.unified} {
 				opt.Apply(c)
 			}
-			c.RunBackgroundTasks()
+			c.RunBackgroundTasks(ctx)
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			for i := 0; i < 100; i++ {
@@ -534,7 +534,7 @@ func TestUploadConcurrentBatch(t *testing.T) {
 			c.MaxBatchDigests = 50
 			client.UnifiedUploadTickDuration(500 * time.Millisecond).Apply(c)
 			uo.Apply(c)
-			c.RunBackgroundTasks()
+			c.RunBackgroundTasks(ctx)
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			for i := 0; i < 10; i++ {
@@ -596,7 +596,7 @@ func TestUploadCancel(t *testing.T) {
 			c := e.Client.GrpcClient
 			uo.Apply(c)
 			client.UseBatchOps(false).Apply(c)
-			c.RunBackgroundTasks()
+			c.RunBackgroundTasks(ctx)
 
 			cCtx, cancel := context.WithCancel(ctx)
 			eg, _ := errgroup.WithContext(cCtx)
@@ -676,7 +676,7 @@ func TestUploadConcurrentCancel(t *testing.T) {
 			for _, opt := range []client.Opt{tc.batching, tc.maxBatchDigests, tc.concurrency, tc.unified} {
 				opt.Apply(c)
 			}
-			c.RunBackgroundTasks()
+			c.RunBackgroundTasks(ctx)
 
 			eg, eCtx := errgroup.WithContext(ctx)
 			eg.Go(func() error {
@@ -796,7 +796,7 @@ func TestUpload(t *testing.T) {
 			for _, o := range tc.opts {
 				o.Apply(c)
 			}
-			c.RunBackgroundTasks()
+			c.RunBackgroundTasks(ctx)
 
 			present := make(map[digest.Digest]bool)
 			for _, blob := range tc.present {
@@ -1582,7 +1582,7 @@ func TestDownloadActionOutputsConcurrency(t *testing.T) {
 				for _, b := range blobs {
 					fake.Put(b.blob)
 				}
-				c.RunBackgroundTasks()
+				c.RunBackgroundTasks(ctx)
 
 				eg, eCtx := errgroup.WithContext(ctx)
 				for i := 0; i < 100; i++ {

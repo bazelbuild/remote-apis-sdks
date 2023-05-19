@@ -613,7 +613,7 @@ type downloadResponse struct {
 	err   error
 }
 
-func (c *Client) downloadProcessor() {
+func (c *Client) downloadProcessor(ctx context.Context) {
 	var buffer []*downloadRequest
 	ticker := time.NewTicker(time.Duration(c.UnifiedDownloadTickDuration))
 	for {
@@ -631,19 +631,19 @@ func (c *Client) downloadProcessor() {
 			}
 			buffer = append(buffer, ch)
 			if len(buffer) >= int(c.UnifiedDownloadBufferSize) {
-				c.download(buffer)
+				c.download(ctx, buffer)
 				buffer = nil
 			}
 		case <-ticker.C:
 			if buffer != nil {
-				c.download(buffer)
+				c.download(ctx, buffer)
 				buffer = nil
 			}
 		}
 	}
 }
 
-func (c *Client) download(data []*downloadRequest) {
+func (c *Client) download(ctx context.Context, data []*downloadRequest) {
 	// It is possible to have multiple same files download to different locations.
 	// This will download once and copy to the other locations.
 	reqs := make(map[digest.Digest][]*downloadRequest)
@@ -679,9 +679,8 @@ func (c *Client) download(data []*downloadRequest) {
 
 	unifiedMeta := contextmd.MergeMetadata(metas...)
 	var err error
-	ctx := context.Background()
 	if unifiedMeta.ActionID != "" {
-		ctx, err = contextmd.WithMetadata(context.Background(), unifiedMeta)
+		ctx, err = contextmd.WithMetadata(ctx, unifiedMeta)
 	}
 	if err != nil {
 		afterDownload(dgs, reqs, map[digest.Digest]*MovedBytesMetadata{}, err)
