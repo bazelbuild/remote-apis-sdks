@@ -317,7 +317,7 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 	return finalMissing, totalBytesMoved, nil
 }
 
-func (c *Client) uploadProcessor() {
+func (c *Client) uploadProcessor(ctx context.Context) {
 	var buffer []*uploadRequest
 	ticker := time.NewTicker(time.Duration(c.UnifiedUploadTickDuration))
 	for {
@@ -336,7 +336,7 @@ func (c *Client) uploadProcessor() {
 			if !req.cancel {
 				buffer = append(buffer, req)
 				if len(buffer) >= int(c.UnifiedUploadBufferSize) {
-					c.upload(buffer)
+					c.upload(ctx, buffer)
 					buffer = nil
 				}
 				continue
@@ -370,14 +370,14 @@ func (c *Client) uploadProcessor() {
 			}
 		case <-ticker.C:
 			if buffer != nil {
-				c.upload(buffer)
+				c.upload(ctx, buffer)
 				buffer = nil
 			}
 		}
 	}
 }
 
-func (c *Client) upload(reqs []*uploadRequest) {
+func (c *Client) upload(ctx context.Context, reqs []*uploadRequest) {
 	// Collect new uploads.
 	newStates := make(map[digest.Digest]*uploadState)
 	var newUploads []digest.Digest
@@ -408,9 +408,8 @@ func (c *Client) upload(reqs []*uploadRequest) {
 
 	unifiedMeta := contextmd.MergeMetadata(metas...)
 	var err error
-	ctx := context.Background()
 	if unifiedMeta.ActionID != "" {
-		ctx, err = contextmd.WithMetadata(context.Background(), unifiedMeta)
+		ctx, err = contextmd.WithMetadata(ctx, unifiedMeta)
 	}
 	if err != nil {
 		for _, st := range newStates {

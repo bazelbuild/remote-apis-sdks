@@ -746,22 +746,22 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 	if client.casConcurrency < 1 {
 		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
-	client.RunBackgroundTasks()
+	client.RunBackgroundTasks(ctx)
 	return client, nil
 }
 
 // RunBackgroundTasks starts background goroutines for the client.
-func (c *Client) RunBackgroundTasks() {
+func (c *Client) RunBackgroundTasks(ctx context.Context) {
 	if c.UnifiedUploads {
 		c.uploadOnce.Do(func() {
 			c.casUploadRequests = make(chan *uploadRequest, c.UnifiedUploadBufferSize)
-			go c.uploadProcessor()
+			go c.uploadProcessor(ctx)
 		})
 	}
 	if c.UnifiedDownloads {
 		c.downloadOnce.Do(func() {
 			c.casDownloadRequests = make(chan *downloadRequest, c.UnifiedDownloadBufferSize)
-			go c.downloadProcessor()
+			go c.downloadProcessor(ctx)
 		})
 	}
 }
