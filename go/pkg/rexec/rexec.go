@@ -126,6 +126,12 @@ func (ec *Context) setOutputMetadata() {
 	} else if ec.resPb.StderrDigest != nil {
 		ec.Metadata.TotalOutputBytes += ec.resPb.StderrDigest.SizeBytes
 	}
+	if ec.resPb.StdoutDigest != nil {
+		ec.Metadata.StdoutDigest = digest.NewFromProtoUnvalidated(ec.resPb.StdoutDigest)
+	}
+	if ec.resPb.StderrDigest != nil {
+		ec.Metadata.StderrDigest = digest.NewFromProtoUnvalidated(ec.resPb.StderrDigest)
+	}
 }
 
 func (ec *Context) downloadOutErr() *command.Result {
