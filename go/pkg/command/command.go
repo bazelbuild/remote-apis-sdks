@@ -525,6 +525,10 @@ type Metadata struct {
 	// RealBytesDownloaded is the number of bytes that were put on the wire for download (exclusing metadata).
 	// It may differ from LogicalBytesDownloaded due to compression.
 	RealBytesDownloaded int64
+	// StderrDigest is a digest of the standard error after being executed.
+	StderrDigest digest.Digest
+	// StdoutDigest is a digest of the standard output after being executed.
+	StdoutDigest digest.Digest
 	// TODO(olaola): Add a lot of other fields.
 }
 

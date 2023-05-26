@@ -25,7 +25,7 @@ func TestTool_DownloadActionResult(t *testing.T) {
 	}
 	opt := command.DefaultExecutionOptions()
 	output := "output"
-	_, acDg := e.Set(cmd, opt, &command.Result{Status: command.CacheHitResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: output},
+	_, acDg, _, _ := e.Set(cmd, opt, &command.Result{Status: command.CacheHitResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: output},
 		fakes.StdOut("stdout"), fakes.StdErr("stderr"))
 
 	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
@@ -65,7 +65,7 @@ func TestTool_ShowAction(t *testing.T) {
 	}
 
 	opt := command.DefaultExecutionOptions()
-	_, acDg := e.Set(cmd, opt, &command.Result{Status: command.CacheHitResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: "output"},
+	_, acDg, _, _ := e.Set(cmd, opt, &command.Result{Status: command.CacheHitResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: "output"},
 		fakes.StdOut("stdout"), fakes.StdErr("stderr"), &fakes.InputFile{Path: "a/b/input.txt", Contents: "input"})
 
 	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
@@ -122,7 +122,7 @@ func TestTool_CheckDeterminism(t *testing.T) {
 	}
 	out := "output"
 	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
-	_, acDg := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out})
+	_, acDg, _, _ := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out})
 
 	client := &Client{GrpcClient: e.Client.GrpcClient}
 	if err := client.CheckDeterminism(context.Background(), acDg.String(), "", 2); err != nil {
@@ -156,7 +156,7 @@ func TestTool_ExecuteAction(t *testing.T) {
 	}
 	out := "output"
 	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
-	_, acDg := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
+	_, acDg, _, _ := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
 		fakes.StdOut("stdout"), fakes.StdErr("stderr"))
 
 	client := &Client{GrpcClient: e.Client.GrpcClient}
@@ -179,7 +179,7 @@ func TestTool_ExecuteAction(t *testing.T) {
 		t.Fatalf("failed creating input file: %v", err)
 	}
 	cmd.ExecRoot = tmpDir
-	_, acDg2 := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
+	_, acDg2, _, _ := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: out},
 		fakes.StdOut("stdout2"), fakes.StdErr("stderr2"))
 	oe = outerr.NewRecordingOutErr()
 	if _, err := client.ExecuteAction(context.Background(), acDg2.String(), "", tmpDir, oe); err != nil {

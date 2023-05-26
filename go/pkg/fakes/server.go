@@ -137,7 +137,7 @@ func timeToProto(t time.Time) *tspb.Timestamp {
 
 // Set sets up the fake to return the given result on the given command execution.
 // It is not possible to make the fake result in a LocalErrorResultStatus or an InterruptedResultStatus.
-func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...option) (cmdDg, acDg digest.Digest) {
+func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...option) (cmdDg, acDg, stderrDg, stdoutDg digest.Digest) {
 	e.t.Helper()
 	cmd.FillDefaultFieldValues()
 	if err := cmd.Validate(); err != nil {
@@ -169,7 +169,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 	root, inputs, _, err := e.Client.GrpcClient.ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir, cmd.InputSpec, e.Client.FileMetadataCache)
 	if err != nil {
 		e.t.Fatalf("error building input tree in fake setup: %v", err)
-		return digest.Empty, digest.Empty
+		return digest.Empty, digest.Empty, digest.Empty, digest.Empty
 	}
 	for _, inp := range inputs {
 		ch, err := chunker.New(inp, false, int(e.Client.GrpcClient.ChunkMaxSize))
@@ -200,6 +200,12 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		ac.Timeout = dpb.New(cmd.Timeout)
 	}
 	acDg = digest.TestNewFromMessage(ac)
+	if ar.StderrDigest != nil {
+		stderrDg = digest.NewFromProtoUnvalidated(ar.StderrDigest)
+	}
+	if ar.StdoutDigest != nil {
+		stdoutDg = digest.NewFromProtoUnvalidated(ar.StdoutDigest)
+	}
 
 	bytes, err = proto.Marshal(ac)
 	if err != nil {
@@ -231,7 +237,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 			e.Server.ActionCache.Put(acDg, ar)
 		}
 	}
-	return cmdDg, acDg
+	return cmdDg, acDg, stderrDg, stdoutDg
 }
 
 type option interface {

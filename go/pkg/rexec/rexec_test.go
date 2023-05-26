@@ -61,7 +61,7 @@ func TestExecCacheHit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			opt := command.DefaultExecutionOptions()
 			wantRes := &command.Result{Status: command.CacheHitResultStatus}
-			cmdDg, acDg := e.Set(tc.cmd, opt, wantRes, &fakes.OutputFile{Path: "a/b/out", Contents: "output"},
+			cmdDg, acDg, stderrDg, stdoutDg := e.Set(tc.cmd, opt, wantRes, &fakes.OutputFile{Path: "a/b/out", Contents: "output"},
 				fakes.StdOut("stdout"), fakes.StdErrRaw("stderr"))
 			oe := outerr.NewRecordingOutErr()
 			for i := 0; i < 2; i++ {
@@ -88,6 +88,8 @@ func TestExecCacheHit(t *testing.T) {
 					OutputFileDigests:      map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
 					OutputDirectoryDigests: map[string]digest.Digest{},
 					OutputSymlinks:         map[string]string{},
+					StderrDigest:           stderrDg,
+					StdoutDigest:           stdoutDg,
 				}
 				if diff := cmp.Diff(wantRes, res); diff != "" {
 					t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
@@ -138,7 +140,7 @@ func TestExecNotAcceptCached(t *testing.T) {
 	cmd := &command.Command{Args: []string{"tool"}, ExecRoot: e.ExecRoot}
 	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
 	wantRes := &command.Result{Status: command.SuccessResultStatus}
-	_, acDg := e.Set(cmd, opt, wantRes, fakes.StdOutRaw("not cached"))
+	_, acDg, stderrDg, stdoutDg := e.Set(cmd, opt, wantRes, fakes.StdOutRaw("not cached"))
 	e.Server.ActionCache.Put(acDg, &repb.ActionResult{StdoutRaw: []byte("cached")})
 
 	oe := outerr.NewRecordingOutErr()
@@ -148,6 +150,8 @@ func TestExecNotAcceptCached(t *testing.T) {
 		ActionDigest:     acDg,
 		InputDirectories: 1,
 		TotalOutputBytes: 10,
+		StderrDigest:     stderrDg,
+		StdoutDigest:     stdoutDg,
 	}
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
@@ -235,7 +239,7 @@ func TestExecDoNotCache_NotAcceptCached(t *testing.T) {
 	// DoNotCache true implies in particular that we also skip action cache lookups, local or remote.
 	opt := &command.ExecutionOptions{DoNotCache: true, DownloadOutputs: true, DownloadOutErr: true}
 	wantRes := &command.Result{Status: command.SuccessResultStatus}
-	_, acDg := e.Set(cmd, opt, wantRes, fakes.StdOutRaw("not cached"))
+	_, acDg, _, _ := e.Set(cmd, opt, wantRes, fakes.StdOutRaw("not cached"))
 	e.Server.ActionCache.Put(acDg, &repb.ActionResult{StdoutRaw: []byte("cached")})
 	oe := outerr.NewRecordingOutErr()
 
@@ -393,7 +397,7 @@ func TestOutputSymlinks(t *testing.T) {
 	}
 	opt := &command.ExecutionOptions{AcceptCached: true, DownloadOutputs: true, DownloadOutErr: false}
 	wantRes := &command.Result{Status: command.CacheHitResultStatus}
-	cmdDg, acDg := e.Set(cmd, opt, wantRes, fakes.StdOut("stdout"), fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output"}, &fakes.OutputSymlink{Path: "a/b/sl", Target: "out"}, fakes.ExecutionCacheHit(true))
+	cmdDg, acDg, stderrDg, stdoutDg := e.Set(cmd, opt, wantRes, fakes.StdOut("stdout"), fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output"}, &fakes.OutputSymlink{Path: "a/b/sl", Target: "out"}, fakes.ExecutionCacheHit(true))
 	oe := outerr.NewRecordingOutErr()
 
 	res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
@@ -436,6 +440,8 @@ func TestOutputSymlinks(t *testing.T) {
 		OutputFileDigests:      map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
 		OutputDirectoryDigests: map[string]digest.Digest{},
 		OutputSymlinks:         map[string]string{"a/b/sl": "out"},
+		StderrDigest:           stderrDg,
+		StdoutDigest:           stdoutDg,
 	}
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
