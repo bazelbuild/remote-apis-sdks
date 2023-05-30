@@ -116,14 +116,23 @@ func Compute(filename string) *Metadata {
 		if err == nil {
 			xattrStr := string(xattrValue)
 			if strings.Contains(xattrStr, "/") {
-				md.Digest, md.Err = digest.NewFromString(xattrStr)
+				md.Digest, err = digest.NewFromString(xattrStr)
+				if err != nil {
+					md.Err = &FileError{Err: err}
+				}
 				return md
 			}
-			md.Digest, md.Err = digest.NewFromString(fmt.Sprintf("%s/%d", xattrStr, file.Size()))
+			md.Digest, err = digest.NewFromString(fmt.Sprintf("%s/%d", xattrStr, file.Size()))
+			if err != nil {
+				md.Err = &FileError{Err: err}
+			}
 			return md
 		}
 	}
-	md.Digest, md.Err = digest.NewFromFile(filename)
+	md.Digest, err = digest.NewFromFile(filename)
+	if err != nil {
+		md.Err = &FileError{Err: err}
+	}
 	return md
 }
 
