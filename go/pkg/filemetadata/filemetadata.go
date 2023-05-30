@@ -107,6 +107,13 @@ func Compute(filename string) *Metadata {
 		return md
 	}
 
+	setDgAndFileErr := func(dgGenerator func(str string) (digest.Digest, error), str string) {
+		md.Digest, err = dgGenerator(str)
+		if err != nil {
+			md.Err = &FileError{Err: err}
+		}
+	}
+
 	if len(XattrDigestName) > 0 {
 		if !XattrAccess.isSupported() {
 			md.Err = &FileError{Err: errors.New("x-attributes are not supported by the system")}
@@ -116,23 +123,15 @@ func Compute(filename string) *Metadata {
 		if err == nil {
 			xattrStr := string(xattrValue)
 			if strings.Contains(xattrStr, "/") {
-				md.Digest, err = digest.NewFromString(xattrStr)
-				if err != nil {
-					md.Err = &FileError{Err: err}
-				}
+				setDgAndFileErr(digest.NewFromString, xattrStr)
 				return md
 			}
-			md.Digest, err = digest.NewFromString(fmt.Sprintf("%s/%d", xattrStr, file.Size()))
-			if err != nil {
-				md.Err = &FileError{Err: err}
-			}
+			xattrStr = fmt.Sprintf("%s/%d", xattrStr, file.Size())
+			setDgAndFileErr(digest.NewFromString, xattrStr)
 			return md
 		}
 	}
-	md.Digest, err = digest.NewFromFile(filename)
-	if err != nil {
-		md.Err = &FileError{Err: err}
-	}
+	setDgAndFileErr(digest.NewFromFile, filename)
 	return md
 }
 
