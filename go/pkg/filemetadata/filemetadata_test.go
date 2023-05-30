@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/xattr"
+
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
@@ -113,6 +115,87 @@ func TestComputeFilesWithXattr(t *testing.T) {
 			}
 			if got.MTime.Before(before) || got.MTime.After(after) {
 				t.Errorf("Compute(%v) returned MTime %v, want time in (%v, %v).", filename, got.MTime, before, after)
+			}
+		})
+	}
+}
+
+func TestComputeFileDigestWithXattr(t *testing.T) {
+	xattrDgName := "user.myhash"
+	overwriteXattrDgName(t, xattrDgName)
+	tests := []struct {
+		filename     string
+		contents     string
+		xattrDgStr   string
+		expectDgStr  string
+		expectErrStr string
+	}{
+		{
+			filename:    "provide_no_xattr_will_generate_real_digest(sha256sum+real_size)",
+			contents:    "123456",
+			expectDgStr: "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92/6",
+		},
+		{
+			filename:    "provide_only_digest_hash_will_generate_digest_with_real_size",
+			contents:    "123456",
+			xattrDgStr:  "1111111111111111111111111111111111111111111111111111111111111111",
+			expectDgStr: "1111111111111111111111111111111111111111111111111111111111111111/6",
+		},
+		{
+			filename:    "valid_full_digest_(hash+size)_in_xatrr_will_be_used_directly",
+			contents:    "",
+			xattrDgStr:  "1111111111111111111111111111111111111111111111111111111111111111/666",
+			expectDgStr: "1111111111111111111111111111111111111111111111111111111111111111/666",
+		},
+		{
+			filename:     "provide_invalid_digest_(hash_missing_digits)_will_set_md.Err",
+			contents:     "123456",
+			xattrDgStr:   "abc",
+			expectErrStr: "valid hash length is 64, got length 3 (abc)",
+		},
+		{
+			filename:     "provide_invalid_full_digest_(hash_missing_digits)_will_set_md.Err",
+			contents:     "123456",
+			xattrDgStr:   "666/666",
+			expectErrStr: "valid hash length is 64, got length 3 (666)",
+		},
+		{
+			filename:     "provide_invalid_full_digest_(extra_slash)_will_set_md.Err",
+			contents:     "123456",
+			xattrDgStr:   "///666",
+			expectErrStr: "expected digest in the form hash/size, got ///666",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.filename, func(t *testing.T) {
+			file, err := os.Create(tc.filename)
+			if err != nil {
+				t.Fatalf("Failed to create file: %s", err)
+			}
+			path := file.Name()
+			defer os.Remove(path)
+			defer file.Close()
+			_, err = file.WriteString(tc.contents)
+			if err != nil {
+				t.Fatalf("Failed to write to file: %v\n", err)
+				return
+			}
+			if tc.xattrDgStr != "" {
+				xattr.Set(path, xattrDgName, []byte(tc.xattrDgStr))
+			}
+			md := Compute(path)
+			if md.Err != nil {
+				got := md.Err.Error()
+				want := tc.expectErrStr
+				if diff := cmp.Diff(want, got); diff != "" {
+					t.Errorf("Compute Digest for (%v) returned diff Error Msg. (-want +got)\n%s", tc.filename, diff)
+				}
+			} else {
+				got := md.Digest.String()
+				want := tc.expectDgStr
+				if diff := cmp.Diff(want, got); diff != "" {
+					t.Errorf("Compute Digest for (%v) returned diff. (-want +got)\n%s", tc.filename, diff)
+				}
 			}
 		})
 	}
@@ -229,6 +312,15 @@ func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, cont
 func createSymlinkToTarget(t *testing.T, symlinkPath string, targetPath string) error {
 	t.Helper()
 	return os.Symlink(targetPath, symlinkPath)
+}
+
+func overwriteXattrDgName(t *testing.T, newXattrDigestName string) {
+	t.Helper()
+	oldXattrDigestName := XattrDigestName
+	XattrDigestName = newXattrDigestName
+	t.Cleanup(func() {
+		XattrDigestName = oldXattrDigestName
+	})
 }
 
 func overwriteXattrGlobals(t *testing.T, newXattrDigestName string, newXattrAccess xattributeAccessorInterface) {

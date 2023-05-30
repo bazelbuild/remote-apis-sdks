@@ -3,6 +3,7 @@ package filemetadata
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -114,15 +115,11 @@ func Compute(filename string) *Metadata {
 		xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
 		if err == nil {
 			xattrStr := string(xattrValue)
-
 			if strings.Contains(xattrStr, "/") {
 				md.Digest, md.Err = digest.NewFromString(xattrStr)
 				return md
 			}
-			md.Digest = digest.Digest{
-				Hash: xattrStr,
-				Size: file.Size(),
-			}
+			md.Digest, md.Err = digest.NewFromString(fmt.Sprintf("%s/%d", xattrStr, file.Size()))
 			return md
 		}
 	}
