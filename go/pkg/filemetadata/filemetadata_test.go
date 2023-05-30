@@ -17,6 +17,7 @@ import (
 
 var (
 	ignoreMtime = cmpopts.IgnoreFields(Metadata{}, "MTime")
+	ignoreErr   = cmpopts.IgnoreFields(Metadata{}, "Err")
 )
 
 func TestComputeFilesNoXattr(t *testing.T) {
@@ -102,15 +103,17 @@ func TestComputeFilesWithXattr(t *testing.T) {
 			after := time.Now().Truncate(time.Second).Add(time.Second)
 			defer os.RemoveAll(filename)
 			got := Compute(filename)
+			wantDigest, wantErr := digest.NewFromString(fmt.Sprintf("%s/%d", tc.name, len(tc.contents)))
 			if got.Err != nil {
-				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
+				if diff := cmp.Diff(wantErr.Error(), got.Err.Error()); diff != "" {
+					t.Errorf("Compute(%v) returned diff Err. (-want +got)\n%s", filename, diff)
+				}
 			}
-			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", tc.name, len(tc.contents)))
 			want := &Metadata{
 				Digest:       wantDigest,
 				IsExecutable: tc.executable,
 			}
-			if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
+			if diff := cmp.Diff(want, got, ignoreMtime, ignoreErr); diff != "" {
 				t.Errorf("Compute(%v) returned diff. (-want +got)\n%s", filename, diff)
 			}
 			if got.MTime.Before(before) || got.MTime.After(after) {
@@ -181,7 +184,10 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 				return
 			}
 			if tc.xattrDgStr != "" {
-				xattr.Set(path, xattrDgName, []byte(tc.xattrDgStr))
+				if err = xattr.Set(path, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
+					t.Fatalf("Failed to set xattr to file: %v\n", err)
+					return
+				}
 			}
 			md := Compute(path)
 			if md.Err != nil {
