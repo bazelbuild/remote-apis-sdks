@@ -107,31 +107,29 @@ func Compute(filename string) *Metadata {
 		return md
 	}
 
-	setDgAndFileErr := func(dgGenerator func(str string) (digest.Digest, error), str string) {
-		md.Digest, err = dgGenerator(str)
-		if err != nil {
-			md.Err = &FileError{Err: err}
-		}
-	}
-
-	if len(XattrDigestName) > 0 {
-		if !XattrAccess.isSupported() {
-			md.Err = &FileError{Err: errors.New("x-attributes are not supported by the system")}
-			return md
-		}
-		xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
-		if err == nil {
-			xattrStr := string(xattrValue)
-			if strings.Contains(xattrStr, "/") {
-				setDgAndFileErr(digest.NewFromString, xattrStr)
-				return md
+	computeDg := func() (digest.Digest, error) {
+		if len(XattrDigestName) > 0 {
+			if !XattrAccess.isSupported() {
+				dg := md.Digest
+				err := errors.New("x-attributes are not supported by the system")
+				return dg, err
 			}
-			xattrStr = fmt.Sprintf("%s/%d", xattrStr, file.Size())
-			setDgAndFileErr(digest.NewFromString, xattrStr)
-			return md
+			xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
+			if err == nil {
+				xattrStr := string(xattrValue)
+				if !strings.Contains(xattrStr, "/") {
+					xattrStr = fmt.Sprintf("%s/%d", xattrStr, file.Size())
+				}
+				dg, err := digest.NewFromString(xattrStr)
+				return dg, err
+			}
 		}
+		return digest.NewFromFile(filename)
 	}
-	setDgAndFileErr(digest.NewFromFile, filename)
+	md.Digest, err = computeDg()
+	if err != nil {
+		md.Err = &FileError{Err: err}
+	}
 	return md
 }
 
