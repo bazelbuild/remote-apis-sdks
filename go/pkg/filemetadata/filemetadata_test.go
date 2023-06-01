@@ -169,14 +169,15 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 			expectErrStr: "expected digest in the form hash/size, got ///666",
 		},
 	}
-	tempDir := t.TempDir()
+
 	for _, tc := range tests {
 		t.Run(tc.filename, func(t *testing.T) {
-			path := filepath.Join(tempDir, tc.filename)
+			path := tc.filename
 			_, err := os.Create(path)
 			if err != nil {
 				t.Fatalf("Failed to create file: %s", err)
 			}
+			defer os.Remove(path)
 			err = os.WriteFile(path, []byte(tc.contents), 0666)
 			if err != nil {
 				t.Fatalf("Failed to write to file: %v\n", err)
