@@ -15,6 +15,10 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
+const (
+	mocked_hash = "000000000000000000000000000000000000000000000000000000000000000a"
+)
+
 var (
 	ignoreMtime = cmpopts.IgnoreFields(Metadata{}, "MTime")
 	ignoreErr   = cmpopts.IgnoreFields(Metadata{}, "Err")
@@ -92,7 +96,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			getXAttrMock = func(_ string, _ string) ([]byte, error) {
-				return []byte(tc.name), nil
+				return []byte(mocked_hash), nil
 			}
 
 			before := time.Now().Truncate(time.Second)
@@ -106,7 +110,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 			if got.Err != nil {
 				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
 			}
-			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", tc.name, len(tc.contents)))
+			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", mocked_hash, len(tc.contents)))
 			want := &Metadata{
 				Digest:       wantDigest,
 				IsExecutable: tc.executable,
