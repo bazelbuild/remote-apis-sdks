@@ -1,7 +1,6 @@
 package filemetadata
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -132,7 +131,7 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 		contents   string
 		xattrDgStr string
 		wantDgStr  string
-		wantErr    error
+		wantErr    bool
 	}{
 		{
 			filename:  "provide_no_xattr_will_generate_real_digest(sha256sum+real_size)",
@@ -156,21 +155,21 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 			contents:   "123456",
 			xattrDgStr: "abc",
 			wantDgStr:  "abc/6",
-			wantErr:    &FileError{Err: errors.New("valid hash length is 64, got length 3 (abc)")},
+			wantErr:    true,
 		},
 		{
 			filename:   "provide_invalid_full_digest_(hash_missing_digits)_will_set_md.Err",
 			contents:   "123456",
 			xattrDgStr: "666/666",
 			wantDgStr:  "666/666",
-			wantErr:    &FileError{Err: errors.New("valid hash length is 64, got length 3 (666)")},
+			wantErr:    true,
 		},
 		{
 			filename:   "provide_invalid_full_digest_(extra_slash)_will_set_md.Err",
 			contents:   "123456",
 			xattrDgStr: "///666",
 			wantDgStr:  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/0",
-			wantErr:    &FileError{Err: errors.New("expected digest in the form hash/size, got ///666")},
+			wantErr:    true,
 		},
 	}
 
@@ -194,10 +193,8 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 				}
 			}
 			md := Compute(path)
-			if md.Err != nil {
-				if !errors.As(md.Err, &tc.wantErr) {
-					t.Fatalf("Compute Digest for %v return different types of errors. %T, %T\n", path, md.Err, tc.wantErr)
-				}
+			if tc.wantErr && md.Err == nil {
+				t.Fatalf("Failed to generate error for invalid xattr input: %v\n", path)
 			}
 			got := md.Digest.String()
 			want := tc.wantDgStr
