@@ -176,17 +176,13 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.filename, func(t *testing.T) {
 			path := tc.filename
-			//In the Github pipeline, set xatrr to files created under /tmp folder (by running t.tempDir()) will raise an error for operation not supported
+			//In the Github pipeline, set xatrr for files created under /tmp folder (by running t.tempDir()) will raise an error for operation not supported
 			//But local run of the unit test will pass. So we have to create these test files under the PWD.
-			_, err := os.Create(path)
-			if err != nil {
-				t.Fatalf("Failed to create file: %s", err)
-			}
-			defer os.Remove(path)
-			err = os.WriteFile(path, []byte(tc.contents), 0666)
+			err := os.WriteFile(path, []byte(tc.contents), 0666)
 			if err != nil {
 				t.Fatalf("Failed to write to file: %v\n", err)
 			}
+			defer os.RemoveAll(path)
 			if tc.xattrDgStr != "" {
 				if err = xattr.Set(path, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
 					t.Fatalf("Failed to set xattr to file: %v\n", err)
@@ -201,7 +197,6 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 			if diff := cmp.Diff(want, got); diff != "" {
 				t.Errorf("Compute Digest for (%v) returned diff. (-want +got)\n%s", tc.filename, diff)
 			}
-
 		})
 	}
 }
