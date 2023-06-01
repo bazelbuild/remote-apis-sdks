@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	mocked_hash = "000000000000000000000000000000000000000000000000000000000000000a"
+	mockedHash = "000000000000000000000000000000000000000000000000000000000000000a"
 )
 
 var (
@@ -96,7 +96,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			getXAttrMock = func(_ string, _ string) ([]byte, error) {
-				return []byte(mocked_hash), nil
+				return []byte(mockedHash), nil
 			}
 
 			before := time.Now().Truncate(time.Second)
@@ -110,7 +110,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 			if got.Err != nil {
 				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
 			}
-			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", mocked_hash, len(tc.contents)))
+			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", mockedHash, len(tc.contents)))
 			want := &Metadata{
 				Digest:       wantDigest,
 				IsExecutable: tc.executable,
