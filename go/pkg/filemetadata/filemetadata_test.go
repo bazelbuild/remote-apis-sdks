@@ -103,12 +103,10 @@ func TestComputeFilesWithXattr(t *testing.T) {
 			after := time.Now().Truncate(time.Second).Add(time.Second)
 			t.Cleanup(func() { os.RemoveAll(filename) })
 			got := Compute(filename)
-			wantDigest, wantErr := digest.NewFromString(fmt.Sprintf("%s/%d", tc.name, len(tc.contents)))
 			if got.Err != nil {
-				if diff := cmp.Diff(wantErr.Error(), got.Err.Error()); diff != "" {
-					t.Errorf("Compute(%v) returned diff Err. (-want +got)\n%s", filename, diff)
-				}
+				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
 			}
+			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", tc.name, len(tc.contents)))
 			want := &Metadata{
 				Digest:       wantDigest,
 				IsExecutable: tc.executable,
@@ -190,7 +188,10 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 			}
 			md := Compute(filePath)
 			if tc.wantErr && md.Err == nil {
-				t.Fatalf("Failed to generate error for invalid xattr input: %v\n", filePath)
+				t.Errorf("No error while computing digest %v, but error was expected", filePath)
+			}
+			if !tc.wantErr && md.Err != nil {
+				t.Errorf("Returned error while computing digest %v, err: %v", filePath, md.Err)
 			}
 			got := md.Digest.String()
 			want := tc.wantDgStr
