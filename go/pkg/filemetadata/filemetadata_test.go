@@ -49,7 +49,7 @@ func TestComputeFilesNoXattr(t *testing.T) {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
 			after := time.Now().Truncate(time.Second).Add(time.Second)
-			defer os.RemoveAll(filename)
+			t.Cleanup(func() { os.RemoveAll(filename) })
 			got := Compute(filename)
 			if got.Err != nil {
 				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
@@ -101,7 +101,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
 			after := time.Now().Truncate(time.Second).Add(time.Second)
-			defer os.RemoveAll(filename)
+			t.Cleanup(func() { os.RemoveAll(filename) })
 			got := Compute(filename)
 			wantDigest, wantErr := digest.NewFromString(fmt.Sprintf("%s/%d", tc.name, len(tc.contents)))
 			if got.Err != nil {
@@ -127,45 +127,45 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 	xattrDgName := "user.myhash"
 	overwriteXattrDgName(t, xattrDgName)
 	tests := []struct {
-		filename   string
+		name       string
 		contents   string
 		xattrDgStr string
 		wantDgStr  string
 		wantErr    bool
 	}{
 		{
-			filename:  "provide_no_xattr_will_generate_real_digest(sha256sum+real_size)",
+			name:      "no-xattr",
 			contents:  "123456",
 			wantDgStr: "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92/6",
 		},
 		{
-			filename:   "provide_only_digest_hash_will_generate_digest_with_real_size",
+			name:       "only-digest-hash",
 			contents:   "123456",
 			xattrDgStr: "1111111111111111111111111111111111111111111111111111111111111111",
 			wantDgStr:  "1111111111111111111111111111111111111111111111111111111111111111/6",
 		},
 		{
-			filename:   "valid_full_digest_(hash+size)_in_xatrr_will_be_used_directly",
+			name:       "full-digest-(hash+size)",
 			contents:   "",
 			xattrDgStr: "1111111111111111111111111111111111111111111111111111111111111111/666",
 			wantDgStr:  "1111111111111111111111111111111111111111111111111111111111111111/666",
 		},
 		{
-			filename:   "provide_invalid_digest_(hash_missing_digits)_will_set_md.Err",
+			name:       "invalid-digest-hash",
 			contents:   "123456",
 			xattrDgStr: "abc",
 			wantDgStr:  "abc/6",
 			wantErr:    true,
 		},
 		{
-			filename:   "provide_invalid_full_digest_(hash_missing_digits)_will_set_md.Err",
+			name:       "invalid-full-digest",
 			contents:   "123456",
 			xattrDgStr: "666/666",
 			wantDgStr:  "666/666",
 			wantErr:    true,
 		},
 		{
-			filename:   "provide_invalid_full_digest_(extra_slash)_will_set_md.Err",
+			name:       "invalid-full-digest-(extra-slash)",
 			contents:   "123456",
 			xattrDgStr: "///666",
 			wantDgStr:  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/0",
@@ -174,28 +174,28 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.filename, func(t *testing.T) {
-			path := tc.filename
+		t.Run(tc.name, func(t *testing.T) {
+			filePath := tc.name
 			//In the Github pipeline, set xatrr for files created under /tmp folder (by running t.tempDir()) will raise an error for operation not supported
 			//But local run of the unit test will pass. So we have to create these test files under the PWD.
-			err := os.WriteFile(path, []byte(tc.contents), 0666)
+			err := os.WriteFile(filePath, []byte(tc.contents), 0666)
 			if err != nil {
 				t.Fatalf("Failed to write to file: %v\n", err)
 			}
-			defer os.RemoveAll(path)
+			t.Cleanup(func() { os.RemoveAll(filePath) })
 			if tc.xattrDgStr != "" {
-				if err = xattr.Set(path, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
+				if err = xattr.Set(filePath, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
 					t.Fatalf("Failed to set xattr to file: %v\n", err)
 				}
 			}
-			md := Compute(path)
+			md := Compute(filePath)
 			if tc.wantErr && md.Err == nil {
-				t.Fatalf("Failed to generate error for invalid xattr input: %v\n", path)
+				t.Fatalf("Failed to generate error for invalid xattr input: %v\n", filePath)
 			}
 			got := md.Digest.String()
 			want := tc.wantDgStr
 			if diff := cmp.Diff(want, got); diff != "" {
-				t.Errorf("Compute Digest for (%v) returned diff. (-want +got)\n%s", tc.filename, diff)
+				t.Errorf("Compute Digest for (%v) returned diff. (-want +got)\n%s", filePath, diff)
 			}
 		})
 	}
@@ -234,7 +234,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			symlinkPath := filepath.Join(os.TempDir(), tc.name)
-			defer os.RemoveAll(symlinkPath)
+			t.Cleanup(func() { os.RemoveAll(symlinkPath) })
 			targetPath, err := createSymlinkToFile(t, symlinkPath, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
@@ -263,7 +263,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 func TestComputeDanglingSymlinks(t *testing.T) {
 	// Create a temporary fake target so that os.Symlink() can work.
 	symlinkPath := filepath.Join(os.TempDir(), "dangling")
-	defer os.RemoveAll(symlinkPath)
+	t.Cleanup(func() { os.RemoveAll(symlinkPath) })
 	targetPath, err := createSymlinkToFile(t, symlinkPath, false, "transient")
 	if err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
@@ -282,7 +282,7 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 
 func TestComputeSymlinksToDirectory(t *testing.T) {
 	symlinkPath := filepath.Join(os.TempDir(), "dir-symlink")
-	defer os.RemoveAll(symlinkPath)
+	t.Cleanup(func() { os.RemoveAll(symlinkPath) })
 	targetPath := t.TempDir()
 	if err := createSymlinkToTarget(t, symlinkPath, targetPath); err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
