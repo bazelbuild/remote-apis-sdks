@@ -21,7 +21,6 @@ const (
 
 var (
 	ignoreMtime = cmpopts.IgnoreFields(Metadata{}, "MTime")
-	ignoreErr   = cmpopts.IgnoreFields(Metadata{}, "Err")
 )
 
 func TestComputeFilesNoXattr(t *testing.T) {
@@ -115,7 +114,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 				Digest:       wantDigest,
 				IsExecutable: tc.executable,
 			}
-			if diff := cmp.Diff(want, got, ignoreMtime, ignoreErr); diff != "" {
+			if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
 				t.Errorf("Compute(%v) returned diff. (-want +got)\n%s", filename, diff)
 			}
 			if got.MTime.Before(before) || got.MTime.After(after) {
