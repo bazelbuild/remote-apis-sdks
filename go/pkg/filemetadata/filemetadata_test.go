@@ -17,6 +17,7 @@ import (
 
 const (
 	mockedHash = "000000000000000000000000000000000000000000000000000000000000000a"
+	inputFile  = "test.txt"
 )
 
 var (
@@ -109,7 +110,10 @@ func TestComputeFilesWithXattr(t *testing.T) {
 			if got.Err != nil {
 				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
 			}
-			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", mockedHash, len(tc.contents)))
+			wantDigest, err := digest.NewFromString(fmt.Sprintf("%s/%d", mockedHash, len(tc.contents)))
+			if err != nil {
+				t.Fatalf("Failed to create wantDigest: %v", err)
+			}
 			want := &Metadata{
 				Digest:       wantDigest,
 				IsExecutable: tc.executable,
@@ -140,33 +144,33 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 			wantDgStr: "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92/6",
 		},
 		{
-			name:       "only-digest-hash",
+			name:       "only digest hash",
 			contents:   "123456",
 			xattrDgStr: "1111111111111111111111111111111111111111111111111111111111111111",
 			wantDgStr:  "1111111111111111111111111111111111111111111111111111111111111111/6",
 		},
 		{
-			name:       "full-digest-(hash+size)",
+			name:       "full digest (hash+size)",
 			contents:   "",
 			xattrDgStr: "1111111111111111111111111111111111111111111111111111111111111111/666",
 			wantDgStr:  "1111111111111111111111111111111111111111111111111111111111111111/666",
 		},
 		{
-			name:       "invalid-digest-hash",
+			name:       "invalid digest hash",
 			contents:   "123456",
 			xattrDgStr: "abc",
 			wantDgStr:  "abc/6",
 			wantErr:    true,
 		},
 		{
-			name:       "invalid-full-digest",
+			name:       "invalid full digest",
 			contents:   "123456",
 			xattrDgStr: "666/666",
 			wantDgStr:  "666/666",
 			wantErr:    true,
 		},
 		{
-			name:       "invalid-full-digest-(extra-slash)",
+			name:       "invalid full digest (extra-slash)",
 			contents:   "123456",
 			xattrDgStr: "///666",
 			wantDgStr:  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/0",
@@ -176,30 +180,31 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			filePath := tc.name
-			//In the Github pipeline, set xatrr for files created under /tmp folder (by running t.tempDir()) will raise an error for operation not supported
-			//But local run of the unit test will pass. So we have to create these test files under the PWD.
-			err := os.WriteFile(filePath, []byte(tc.contents), 0666)
+			testName := tc.name
+			// Most Linux operating systems use the tmpfs file system for the /tmp directory, and the tmpfs file system does not support user extended attributes.
+			// Ref: https://man7.org/linux/man-pages/man5/tmpfs.5.html.
+			// Current pipeline's /tmp folder is located on a tmpfs file system, attempt to generate test files under t.TempDir() directory will result in an "Operation not supported" error.
+			err := os.WriteFile(inputFile, []byte(tc.contents), 0666)
 			if err != nil {
 				t.Fatalf("Failed to write to file: %v\n", err)
 			}
-			t.Cleanup(func() { os.RemoveAll(filePath) })
+			t.Cleanup(func() { os.RemoveAll(inputFile) })
 			if tc.xattrDgStr != "" {
-				if err = xattr.Set(filePath, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
+				if err = xattr.Set(inputFile, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
 					t.Fatalf("Failed to set xattr to file: %v\n", err)
 				}
 			}
-			md := Compute(filePath)
+			md := Compute(inputFile)
 			if tc.wantErr && md.Err == nil {
-				t.Errorf("No error while computing digest %v, but error was expected", filePath)
+				t.Errorf("No error while computing digest for test %v, but error was expected", testName)
 			}
 			if !tc.wantErr && md.Err != nil {
-				t.Errorf("Returned error while computing digest %v, err: %v", filePath, md.Err)
+				t.Errorf("Returned error while computing digest for test %v, err: %v", testName, md.Err)
 			}
 			got := md.Digest.String()
 			want := tc.wantDgStr
 			if diff := cmp.Diff(want, got); diff != "" {
-				t.Errorf("Compute Digest for (%v) returned diff. (-want +got)\n%s", filePath, diff)
+				t.Errorf("Compute Digest for test %v returned diff. (-want +got)\n%s", testName, diff)
 			}
 		})
 	}
