@@ -17,7 +17,7 @@ import (
 
 const (
 	mockedHash = "000000000000000000000000000000000000000000000000000000000000000a"
-	inputFile  = "test.txt"
+	targetFile = "test.txt"
 )
 
 var (
@@ -184,17 +184,17 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 			// Most Linux operating systems use the tmpfs file system for the /tmp directory, and the tmpfs file system does not support user extended attributes.
 			// Ref: https://man7.org/linux/man-pages/man5/tmpfs.5.html.
 			// Current pipeline's /tmp folder is located on a tmpfs file system, attempt to generate test files under t.TempDir() directory will result in an "Operation not supported" error.
-			err := os.WriteFile(inputFile, []byte(tc.contents), 0666)
+			err := os.WriteFile(targetFile, []byte(tc.contents), 0666)
 			if err != nil {
 				t.Fatalf("Failed to write to file: %v\n", err)
 			}
-			t.Cleanup(func() { os.RemoveAll(inputFile) })
+			t.Cleanup(func() { os.RemoveAll(targetFile) })
 			if tc.xattrDgStr != "" {
-				if err = xattr.Set(inputFile, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
+				if err = xattr.Set(targetFile, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
 					t.Fatalf("Failed to set xattr to file: %v\n", err)
 				}
 			}
-			md := Compute(inputFile)
+			md := Compute(targetFile)
 			if tc.wantErr && md.Err == nil {
 				t.Errorf("No error while computing digest for test %v, but error was expected", testName)
 			}
