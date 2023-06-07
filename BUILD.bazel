@@ -7,7 +7,7 @@ gazelle(
     name = "gazelle-external-deps",
     args = [
         "-from_file=go.mod",
-        "-to_macro=go_deps.bzl%go_dependencies",
+        "-to_macro=go_deps.bzl%remote_apis_sdks_go_deps",
         "-prune",
     ],
     command = "update-repos",
