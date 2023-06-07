@@ -3,7 +3,9 @@ package filemetadata
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -112,14 +114,21 @@ func Compute(filename string) *Metadata {
 		}
 		xattrValue, err := XattrAccess.getXAttr(filename, XattrDigestName)
 		if err == nil {
-			md.Digest = digest.Digest{
-				Hash: string(xattrValue),
-				Size: file.Size(),
+			xattrStr := string(xattrValue)
+			if !strings.Contains(xattrStr, "/") {
+				xattrStr = fmt.Sprintf("%s/%d", xattrStr, file.Size())
+			}
+			md.Digest, err = digest.NewFromString(xattrStr)
+			if err != nil {
+				md.Err = &FileError{Err: err}
 			}
 			return md
 		}
 	}
-	md.Digest, md.Err = digest.NewFromFile(filename)
+	md.Digest, err = digest.NewFromFile(filename)
+	if err != nil {
+		md.Err = &FileError{Err: err}
+	}
 	return md
 }
 

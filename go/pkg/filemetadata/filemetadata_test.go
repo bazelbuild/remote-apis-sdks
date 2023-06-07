@@ -7,10 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/xattr"
+
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+)
+
+const (
+	mockedHash = "000000000000000000000000000000000000000000000000000000000000000a"
+	targetFile = "test.txt"
 )
 
 var (
@@ -46,7 +53,7 @@ func TestComputeFilesNoXattr(t *testing.T) {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
 			after := time.Now().Truncate(time.Second).Add(time.Second)
-			defer os.RemoveAll(filename)
+			t.Cleanup(func() { os.RemoveAll(filename) })
 			got := Compute(filename)
 			if got.Err != nil {
 				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
@@ -89,7 +96,7 @@ func TestComputeFilesWithXattr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			getXAttrMock = func(_ string, _ string) ([]byte, error) {
-				return []byte(tc.name), nil
+				return []byte(mockedHash), nil
 			}
 
 			before := time.Now().Truncate(time.Second)
@@ -98,12 +105,15 @@ func TestComputeFilesWithXattr(t *testing.T) {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
 			after := time.Now().Truncate(time.Second).Add(time.Second)
-			defer os.RemoveAll(filename)
+			t.Cleanup(func() { os.RemoveAll(filename) })
 			got := Compute(filename)
 			if got.Err != nil {
 				t.Errorf("Compute(%v) failed. Got error: %v", filename, got.Err)
 			}
-			wantDigest, _ := digest.NewFromString(fmt.Sprintf("%s/%d", tc.name, len(tc.contents)))
+			wantDigest, err := digest.NewFromString(fmt.Sprintf("%s/%d", mockedHash, len(tc.contents)))
+			if err != nil {
+				t.Fatalf("Failed to create wantDigest: %v", err)
+			}
 			want := &Metadata{
 				Digest:       wantDigest,
 				IsExecutable: tc.executable,
@@ -113,6 +123,88 @@ func TestComputeFilesWithXattr(t *testing.T) {
 			}
 			if got.MTime.Before(before) || got.MTime.After(after) {
 				t.Errorf("Compute(%v) returned MTime %v, want time in (%v, %v).", filename, got.MTime, before, after)
+			}
+		})
+	}
+}
+
+func TestComputeFileDigestWithXattr(t *testing.T) {
+	xattrDgName := "user.myhash"
+	overwriteXattrDgName(t, xattrDgName)
+	tests := []struct {
+		name       string
+		contents   string
+		xattrDgStr string
+		wantDgStr  string
+		wantErr    bool
+	}{
+		{
+			name:      "no-xattr",
+			contents:  "123456",
+			wantDgStr: "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92/6",
+		},
+		{
+			name:       "only digest hash",
+			contents:   "123456",
+			xattrDgStr: "1111111111111111111111111111111111111111111111111111111111111111",
+			wantDgStr:  "1111111111111111111111111111111111111111111111111111111111111111/6",
+		},
+		{
+			name:       "full digest (hash+size)",
+			contents:   "",
+			xattrDgStr: "1111111111111111111111111111111111111111111111111111111111111111/666",
+			wantDgStr:  "1111111111111111111111111111111111111111111111111111111111111111/666",
+		},
+		{
+			name:       "invalid digest hash",
+			contents:   "123456",
+			xattrDgStr: "abc",
+			wantDgStr:  "abc/6",
+			wantErr:    true,
+		},
+		{
+			name:       "invalid full digest",
+			contents:   "123456",
+			xattrDgStr: "666/666",
+			wantDgStr:  "666/666",
+			wantErr:    true,
+		},
+		{
+			name:       "invalid full digest (extra-slash)",
+			contents:   "123456",
+			xattrDgStr: "///666",
+			wantDgStr:  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/0",
+			wantErr:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			testName := tc.name
+			// Most Linux operating systems use the tmpfs file system for the /tmp directory, and the tmpfs file system does not support user extended attributes.
+			// Ref: https://man7.org/linux/man-pages/man5/tmpfs.5.html.
+			// Current pipeline's /tmp folder is located on a tmpfs file system, attempt to generate test files under t.TempDir() directory will result in an "Operation not supported" error.
+			err := os.WriteFile(targetFile, []byte(tc.contents), 0666)
+			if err != nil {
+				t.Fatalf("Failed to write to file: %v\n", err)
+			}
+			t.Cleanup(func() { os.RemoveAll(targetFile) })
+			if tc.xattrDgStr != "" {
+				if err = xattr.Set(targetFile, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
+					t.Fatalf("Failed to set xattr to file: %v\n", err)
+				}
+			}
+			md := Compute(targetFile)
+			if tc.wantErr && md.Err == nil {
+				t.Errorf("No error while computing digest for test %v, but error was expected", testName)
+			}
+			if !tc.wantErr && md.Err != nil {
+				t.Errorf("Returned error while computing digest for test %v, err: %v", testName, md.Err)
+			}
+			got := md.Digest.String()
+			want := tc.wantDgStr
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("Compute Digest for test %v returned diff. (-want +got)\n%s", testName, diff)
 			}
 		})
 	}
@@ -151,7 +243,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			symlinkPath := filepath.Join(os.TempDir(), tc.name)
-			defer os.RemoveAll(symlinkPath)
+			t.Cleanup(func() { os.RemoveAll(symlinkPath) })
 			targetPath, err := createSymlinkToFile(t, symlinkPath, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
@@ -180,7 +272,7 @@ func TestComputeSymlinksToFile(t *testing.T) {
 func TestComputeDanglingSymlinks(t *testing.T) {
 	// Create a temporary fake target so that os.Symlink() can work.
 	symlinkPath := filepath.Join(os.TempDir(), "dangling")
-	defer os.RemoveAll(symlinkPath)
+	t.Cleanup(func() { os.RemoveAll(symlinkPath) })
 	targetPath, err := createSymlinkToFile(t, symlinkPath, false, "transient")
 	if err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
@@ -199,7 +291,7 @@ func TestComputeDanglingSymlinks(t *testing.T) {
 
 func TestComputeSymlinksToDirectory(t *testing.T) {
 	symlinkPath := filepath.Join(os.TempDir(), "dir-symlink")
-	defer os.RemoveAll(symlinkPath)
+	t.Cleanup(func() { os.RemoveAll(symlinkPath) })
 	targetPath := t.TempDir()
 	if err := createSymlinkToTarget(t, symlinkPath, targetPath); err != nil {
 		t.Fatalf("Failed to create tmp symlink for testing digests: %v", err)
@@ -229,6 +321,15 @@ func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, cont
 func createSymlinkToTarget(t *testing.T, symlinkPath string, targetPath string) error {
 	t.Helper()
 	return os.Symlink(targetPath, symlinkPath)
+}
+
+func overwriteXattrDgName(t *testing.T, newXattrDigestName string) {
+	t.Helper()
+	oldXattrDigestName := XattrDigestName
+	XattrDigestName = newXattrDigestName
+	t.Cleanup(func() {
+		XattrDigestName = oldXattrDigestName
+	})
 }
 
 func overwriteXattrGlobals(t *testing.T, newXattrDigestName string, newXattrAccess xattributeAccessorInterface) {
