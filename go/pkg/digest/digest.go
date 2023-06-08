@@ -121,8 +121,8 @@ func NewFromMessage(msg proto.Message) (Digest, error) {
 // It returns an empty digest and an error if the hash/size are invalid.
 func NewFromProto(dg *repb.Digest) (Digest, error) {
 	d := NewFromProtoUnvalidated(dg)
-	if d.Validate() != nil {
-		return Empty, d.Validate()
+	if err := d.Validate(); err != nil {
+		return Empty, err
 	}
 	return d, nil
 }
