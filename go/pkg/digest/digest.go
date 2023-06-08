@@ -90,8 +90,8 @@ func (d Digest) Validate() error {
 // yourself. It returns an empty digest and an error if the hash/size are invalid.
 func New(hash string, size int64) (Digest, error) {
 	d := Digest{Hash: hash, Size: size}
-	if d.Validate() != nil {
-		return Empty, d.Validate()
+	if err := d.Validate(); err != nil {
+		return Empty, err
 	}
 	return d, nil
 }
