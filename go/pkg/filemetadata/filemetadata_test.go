@@ -296,6 +296,7 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 }
 
 func createFileWithXattr(t *testing.T, fileContent, xattrName, xattrValue string) string {
+	t.Helper()
 	filePath := filepath.Join(t.TempDir(), targetFile)
 	err := os.WriteFile(filePath, []byte(fileContent), 0666)
 	if err != nil {
