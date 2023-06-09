@@ -181,20 +181,21 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			testName := tc.name
+			targetFilePath := filepath.Join(t.TempDir(), testName)
 			// Most Linux operating systems use the tmpfs file system for the /tmp directory, and the tmpfs file system does not support user extended attributes.
 			// Ref: https://man7.org/linux/man-pages/man5/tmpfs.5.html.
 			// Current pipeline's /tmp folder is located on a tmpfs file system, attempt to generate test files under t.TempDir() directory will result in an "Operation not supported" error.
-			err := os.WriteFile(targetFile, []byte(tc.contents), 0666)
+			err := os.WriteFile(targetFilePath, []byte(tc.contents), 0666)
 			if err != nil {
 				t.Fatalf("Failed to write to file: %v\n", err)
 			}
-			t.Cleanup(func() { os.RemoveAll(targetFile) })
+			t.Cleanup(func() { os.RemoveAll(targetFilePath) })
 			if tc.xattrDgStr != "" {
-				if err = xattr.Set(targetFile, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
+				if err = xattr.Set(targetFilePath, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
 					t.Fatalf("Failed to set xattr to file: %v\n", err)
 				}
 			}
-			md := Compute(targetFile)
+			md := Compute(targetFilePath)
 			if tc.wantErr && md.Err == nil {
 				t.Errorf("No error while computing digest for test %v, but error was expected", testName)
 			}
