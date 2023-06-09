@@ -181,20 +181,9 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			testName := tc.name
-			// Most Linux operating systems use the tmpfs file system for the /tmp directory, and the tmpfs file system does not support user extended attributes.
-			// Ref: https://man7.org/linux/man-pages/man5/tmpfs.5.html.
-			// Current pipeline's /tmp folder is located on a tmpfs file system, attempt to generate test files under t.TempDir() directory will result in an "Operation not supported" error.
-			err := os.WriteFile(targetFile, []byte(tc.contents), 0666)
-			if err != nil {
-				t.Fatalf("Failed to write to file: %v\n", err)
-			}
-			t.Cleanup(func() { os.RemoveAll(targetFile) })
-			if tc.xattrDgStr != "" {
-				if err = xattr.Set(targetFile, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
-					t.Fatalf("Failed to set xattr to file: %v\n", err)
-				}
-			}
-			md := Compute(targetFile)
+			targetFilePath := createFileWithXattr(t, tc.contents, xattrDgName, tc.xattrDgStr)
+			t.Cleanup(func() { os.RemoveAll(targetFilePath) })
+			md := Compute(targetFilePath)
 			if tc.wantErr && md.Err == nil {
 				t.Errorf("No error while computing digest for test %v, but error was expected", testName)
 			}
@@ -304,6 +293,42 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 	if !got.IsDirectory {
 		t.Errorf("Compute(%v).IsDirectory = false, want true", symlinkPath)
 	}
+}
+
+func createFileWithXattr(t *testing.T, fileContent, xattrName, xattrValue string) string {
+	t.Helper()
+	filePath := filepath.Join(t.TempDir(), targetFile)
+	err := os.WriteFile(filePath, []byte(fileContent), 0666)
+	if err != nil {
+		t.Fatalf("Failed to write to a file: %v\n", err)
+	}
+	if xattrValue == "" {
+		return filePath
+	}
+	if err = xattr.Set(filePath, xattrName, []byte(xattrValue)); err == nil {
+		// setting xattr for a file in a TempDir succeeded
+		return filePath
+	}
+	// Setting xattr for a file in a TempDir might've failed because on some linux systems
+	// temp dir is mounted on tmpfs which does not support user extended attributes
+	// (https://man7.org/linux/man-pages/man5/tmpfs.5.html.
+	// In this case, try to create a file in a a working directory instead
+	t.Logf("Setting xattr for a file in %v failed. Using a working directory instead. err: %v",
+		t.TempDir(), err)
+	filePath = targetFile
+	if err = os.WriteFile(filePath, []byte(fileContent), 0666); err != nil {
+		t.Fatalf("Failed to write to a file: %v\n", err)
+	}
+	if err = xattr.Set(filePath, xattrName, []byte(xattrValue)); err == nil {
+		return filePath
+	}
+	os.RemoveAll(filePath)
+	// It's possible that the working directory is read only, skipping the test
+	// because it's not possible to set a user xattr neither in temp dir nor in working dir
+	// on a test environment
+	t.Logf("Setting xattr for a file in a working directory failed. Skipping the test. err: %v", err)
+	t.Skip("Cannot set a user xattr for a file in neither temp nor working directory")
+	return ""
 }
 
 func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, contents string) (string, error) {
