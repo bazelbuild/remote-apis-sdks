@@ -1,9 +1,11 @@
 package filemetadata
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -181,20 +183,11 @@ func TestComputeFileDigestWithXattr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			testName := tc.name
-			targetFilePath := filepath.Join(t.TempDir(), testName)
-			// Most Linux operating systems use the tmpfs file system for the /tmp directory, and the tmpfs file system does not support user extended attributes.
-			// Ref: https://man7.org/linux/man-pages/man5/tmpfs.5.html.
-			// Current pipeline's /tmp folder is located on a tmpfs file system, attempt to generate test files under t.TempDir() directory will result in an "Operation not supported" error.
-			err := os.WriteFile(targetFilePath, []byte(tc.contents), 0666)
+			targetFilePath, err := createFileWithXattr(t, tc.contents, xattrDgName, tc.xattrDgStr)
 			if err != nil {
-				t.Fatalf("Failed to write to file: %v\n", err)
+				t.Fatalf("Failed to create a file with a xattr: %v", err)
 			}
 			t.Cleanup(func() { os.RemoveAll(targetFilePath) })
-			if tc.xattrDgStr != "" {
-				if err = xattr.Set(targetFilePath, xattrDgName, []byte(tc.xattrDgStr)); err != nil {
-					t.Fatalf("Failed to set xattr to file: %v\n", err)
-				}
-			}
 			md := Compute(targetFilePath)
 			if tc.wantErr && md.Err == nil {
 				t.Errorf("No error while computing digest for test %v, but error was expected", testName)
@@ -305,6 +298,44 @@ func TestComputeSymlinksToDirectory(t *testing.T) {
 	if !got.IsDirectory {
 		t.Errorf("Compute(%v).IsDirectory = false, want true", symlinkPath)
 	}
+}
+
+func createFileWithXattr(t *testing.T, fileContent, xattrName, xattrValue string) (string, error) {
+	filePath := filepath.Join(t.TempDir(), targetFile)
+	err := os.WriteFile(filePath, []byte(fileContent), 0666)
+	if err != nil {
+		t.Fatalf("Failed to write to a file: %v\n", err)
+	}
+	if xattrValue == "" {
+		return filePath, nil
+	}
+	if err = xattr.Set(filePath, xattrName, []byte(xattrValue)); err == nil {
+		// setting xattr for a file in a TempDir succeeded
+		return filePath, nil
+	}
+	xattrErr, ok := err.(*xattr.Error)
+	if !ok {
+		return "", err
+	}
+	errno, ok := xattrErr.Err.(syscall.Errno)
+	if !ok || !errors.Is(errno, syscall.ENOTSUP) {
+		return "", err
+	}
+	// setting xattr for a file in a TempDir did not succeed because the operation is not supported
+	// for this dir. This is probably because it's mounted on tmpfs
+	// (https://man7.org/linux/man-pages/man5/tmpfs.5.html.
+	// In this case, try to create a file in a a working directory instead
+	t.Logf("Setting xattr in %v is not supported. Trying to use a working directory instead",
+		t.TempDir())
+	path, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	filePath = filepath.Join(path, targetFile)
+	if err = xattr.Set(filePath, xattrName, []byte(xattrValue)); err != nil {
+		return "", err
+	}
+	return filePath, nil
 }
 
 func createSymlinkToFile(t *testing.T, symlinkPath string, executable bool, contents string) (string, error) {
