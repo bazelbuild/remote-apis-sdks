@@ -1,9 +1,8 @@
-package cas
+package casng
 
 import (
 	"errors"
 	"math"
-	"sync"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
@@ -11,28 +10,28 @@ import (
 
 var (
 	// ErrNegativeLimit indicates an invalid value that is < 0.
-	ErrNegativeLimit = errors.New("cas: limit value must be >= 0")
+	ErrNegativeLimit = errors.New("limit value must be >= 0")
 
 	// ErrZeroOrNegativeLimit indicates an invalid value that is <= 0.
-	ErrZeroOrNegativeLimit = errors.New("cas: limit value must be > 0")
+	ErrZeroOrNegativeLimit = errors.New("limit value must be > 0")
 )
 
 const (
-	// MegaByte is 1_048_576 bytes.
-	MegaByte = 1024 * 1024
+	// megaByte is 1_048_576 bytes.
+	megaByte = 1024 * 1024
 
-	// DefaultGRPCConcurrentCallsLimit is set arbitrarily to a power of 2.
+	// DefaultGRPCConcurrentCallsLimit is set arbitrarily to 256 as a power of 2.
 	DefaultGRPCConcurrentCallsLimit = 256
 
-	// DefaultGRPCBytesLimit is the same as the default gRPC request size limit.
-	// See: https://pkg.go.dev/google.golang.org/grpc#MaxCallRecvMsgSize
-	DefaultGRPCBytesLimit = 4 * MegaByte
+	// DefaultGRPCBytesLimit is the same as the default gRPC request size limit of 4MiB.
+	// See: https://pkg.go.dev/google.golang.org/grpc#MaxCallRecvMsgSize and https://github.com/grpc/grpc-go/blob/2997e84fd8d18ddb000ac6736129b48b3c9773ec/clientconn.go#L96
+	DefaultGRPCBytesLimit = 4 * megaByte
 
 	// DefaultGRPCItemsLimit is a 10th of the max.
 	DefaultGRPCItemsLimit = 1000
 
-	// MaxGRPCItems is heuristcally (with Google's RBE) set to 10k.
-	MaxGRPCItems = 10_000
+	// DefaultMaxGRPCItems is heuristcally (with Google's RBE) set to 10k.
+	DefaultMaxGRPCItems = 10_000
 
 	// DefaultRPCTimeout is arbitrarily set to what is reasonable for a large action.
 	DefaultRPCTimeout = time.Minute
@@ -47,9 +46,15 @@ const (
 	// DefaultCompressionSizeThreshold is disabled by default.
 	DefaultCompressionSizeThreshold = math.MaxInt64
 
-	// BufferSize is based on GCS recommendations.
+	// DefaultBufferSize is based on GCS recommendations.
 	// See: https://cloud.google.com/compute/docs/disks/optimizing-pd-performance#io-size
-	BufferSize = 4 * MegaByte
+	DefaultBufferSize = 4 * megaByte
+
+	// DefaultSmallFileSizeThreshold is set to 1MiB.
+	DefaultSmallFileSizeThreshold = megaByte
+
+	// DefaultLargeFileSizeThreshold is set to 256MiB.
+	DefaultLargeFileSizeThreshold = 256 * megaByte
 )
 
 // GRPCConfig specifies the configuration for a gRPC endpoint.
@@ -60,7 +65,7 @@ type GRPCConfig struct {
 
 	// BytesLimit sets the upper bound for the size of each request.
 	// Comparisons against this value may not be exact due to padding and other serialization naunces.
-	// Clients should choose a value that is sufficiently lower than the max size limit for corresponding gRPC connection.
+	// Clients should choose a value that is sufficiently lower than the max size limit for the corresponding gRPC connection.
 	// Must be > 0.
 	// This is defined as int rather than int64 because gRPC uses int for its limit.
 	BytesLimit int
@@ -71,7 +76,7 @@ type GRPCConfig struct {
 
 	// BundleTimeout sets the maximum duration a call is delayed while bundling.
 	// Bundling is used to ammortize the cost of a gRPC call over time. Instead of sending
-	// many requests with few items, bunlding attempt to maximize the number of items sent in a single request.
+	// many requests with few items, bundling attempt to maximize the number of items sent in a single request.
 	// This includes waiting for a bit to see if more items are requested.
 	BundleTimeout time.Duration
 
@@ -82,6 +87,9 @@ type GRPCConfig struct {
 
 	// RetryPolicy sets the retry policy for calls using this config.
 	RetryPolicy retry.BackoffPolicy
+
+	// RetryPredicate is called to determine if the error is retryable. If not set, nothing is retried.
+	RetryPredicate func(error) bool
 }
 
 // IOConfig specifies the configuration for IO operations.
@@ -90,10 +98,6 @@ type IOConfig struct {
 	// This affects the number of concurrent upload requests for the uploader since each one requires a walk.
 	// Must be > 0.
 	ConcurrentWalksLimit int
-
-	// ConcurrentWalkerVisits sets the upper bound of concurrent visits per walk.
-	// Must b > 0.
-	ConcurrentWalkerVisits int
 
 	// OpenFilesLimit sets the upper bound for the number of files being simultanuously processed.
 	// Must be > 0.
@@ -141,13 +145,6 @@ type IOConfig struct {
 	// OptimizeForDiskLocality enables sorting files by path before they are written to disk to optimize for disk locality.
 	// Assuming files under the same directory are located close to each other on disk, then such files are batched together.
 	OptimizeForDiskLocality bool
-
-	// Cache is a read/write cache for digested files.
-	// The key is the file path and the associated exclusion filter.
-	// The value is a a proto message that represents one of repb.SymlinkNode, repb.DirectoryNode, repb.FileNode.
-	// Providing a cache here allows for reusing entries between clients.
-	// Cache entries are never evicted which implies the assumption that the files are never edited during the lifetime of the cache entry.
-	Cache sync.Map
 }
 
 // Stats represents potential metrics reported by various methods.
@@ -159,6 +156,8 @@ type Stats struct {
 
 	// LogicalBytesMoved is the amount of BytesRequested that was processed.
 	// It cannot be larger than BytesRequested, but may be smaller in case of a partial response.
+	// The quantity is more granular for streaming than it is for batching. In streaming, it is an increment of the buffer size.
+	// For batching, it is a sum of the size of items that were batched.
 	LogicalBytesMoved int64
 
 	// TotalBytesMoved is the total number of bytes moved over the wire.
@@ -202,6 +201,7 @@ type Stats struct {
 	CacheMissCount int64
 
 	// DigestCount is the number of processed digests.
+	// The counter is incremened regardless of digestion failures.
 	DigestCount int64
 
 	// BatchedCount is the number of batched files.
@@ -214,6 +214,9 @@ type Stats struct {
 
 // Add mutates the stats by adding all the corresponding fields of the specified instance.
 func (s *Stats) Add(other Stats) {
+	if s == nil {
+		return
+	}
 	s.BytesRequested += other.BytesRequested
 	s.LogicalBytesMoved += other.LogicalBytesMoved
 	s.TotalBytesMoved += other.TotalBytesMoved
@@ -231,6 +234,32 @@ func (s *Stats) Add(other Stats) {
 	s.StreamedCount += other.StreamedCount
 }
 
+// ToCacheHit returns a copy of the stats that represents a cache hit of the original.
+// All "bytes moving" stats are zeroed-out and cache stats are updated based on other values.
+// Everything else remains the same.
+func (s *Stats) ToCacheHit() Stats {
+	if s == nil {
+		return Stats{}
+	}
+	hit := *s
+	hit.LogicalBytesMoved = 0
+	hit.TotalBytesMoved = 0
+	hit.EffectiveBytesMoved = 0
+	hit.LogicalBytesCached = s.BytesRequested
+	hit.LogicalBytesStreamed = 0
+	hit.LogicalBytesBatched = 0
+	// for trees
+	hit.CacheHitCount = hit.DigestCount
+	// for blobs
+	if hit.CacheHitCount == 0 && hit.LogicalBytesCached > 0 {
+		hit.CacheHitCount = 1
+	}
+	hit.CacheMissCount = 0
+	hit.BatchedCount = 0
+	hit.StreamedCount = 0
+	return hit
+}
+
 func validateGrpcConfig(cfg *GRPCConfig) error {
 	if cfg.ConcurrentCallsLimit < 1 || cfg.ItemsLimit < 1 || cfg.BytesLimit < 1 {
 		return ErrZeroOrNegativeLimit
@@ -239,7 +268,7 @@ func validateGrpcConfig(cfg *GRPCConfig) error {
 }
 
 func validateIOConfig(cfg *IOConfig) error {
-	if cfg.ConcurrentWalksLimit < 1 || cfg.ConcurrentWalkerVisits < 1 || cfg.OpenFilesLimit < 1 || cfg.OpenLargeFilesLimit < 1 || cfg.BufferSize < 1 {
+	if cfg.ConcurrentWalksLimit < 1 || cfg.OpenFilesLimit < 1 || cfg.OpenLargeFilesLimit < 1 || cfg.BufferSize < 1 {
 		return ErrZeroOrNegativeLimit
 	}
 	if cfg.SmallFileSizeThreshold < 0 || cfg.LargeFileSizeThreshold < 0 || cfg.CompressionSizeThreshold < 0 {
