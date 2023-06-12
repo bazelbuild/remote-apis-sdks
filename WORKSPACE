@@ -48,10 +48,11 @@ go_repository(
 # Insert go_repostiry rules before this one to override specific deps.
 gazelle_dependencies()
 
-load("//:go_deps.bzl", "go_dependencies")
+load("//:go_deps.bzl", "remote_apis_sdks_go_deps")
 
-# gazelle:repository_macro go_deps.bzl%go_dependencies
-go_dependencies()
+# gazelle:repository_macro go_deps.bzl%remote_apis_sdks_go_deps
+remote_apis_sdks_go_deps()
+
 
 # protobuf.
 http_archive(
@@ -100,4 +101,5 @@ go_repository(
 )
 
 load("@com_github_bazelbuild_remote_apis//:remote_apis_deps.bzl", "remote_apis_go_deps")
+
 remote_apis_go_deps()
