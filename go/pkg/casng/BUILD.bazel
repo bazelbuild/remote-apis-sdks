@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "batching.go",
         "config.go",
+        "throttler.go",
         "uploader.go",
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/casng",

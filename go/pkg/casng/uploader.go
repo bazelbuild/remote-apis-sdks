@@ -79,10 +79,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
 	"github.com/klauspost/compress/zstd"
@@ -121,6 +121,11 @@ func MakeCompressedWriteResourceName(instanceName, hash string, size int64) stri
 	return fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", instanceName, uuid.New(), hash, size)
 }
 
+// IsCompressedWriteResourceName returns true if the name was generated with MakeCompressedWriteResourceName.
+func IsCompressedWriteResourceName(name string) bool {
+	return strings.Contains(name, "compressed-blobs/zstd")
+}
+
 // BatchingUplodaer provides a blocking interface to query and upload to the CAS.
 type BatchingUploader struct {
 	*uploader
@@ -140,6 +145,9 @@ type uploader struct {
 	queryRPCCfg  GRPCConfig
 	batchRPCCfg  GRPCConfig
 	streamRPCCfg GRPCConfig
+
+	// gRPC throttling controls.
+	streamThrottle *throttler // Controls concurrent calls to the byte streaming API.
 
 	// IO controls.
 	ioCfg        IOConfig
@@ -240,6 +248,8 @@ func newUploader(
 		batchRPCCfg:  uploadCfg,
 		streamRPCCfg: streamCfg,
 
+		streamThrottle: newThrottler(int64(streamCfg.ConcurrentCallsLimit)),
+
 		ioCfg: ioCfg,
 		buffers: sync.Pool{
 			New: func() any {
@@ -263,8 +273,4 @@ func newUploader(
 	log.V(1).Infof("[casng] uploader.new: cfg_query=%+v, cfg_batch=%+v, cfg_stream=%+v, cfg_io=%+v", queryCfg, uploadCfg, streamCfg, ioCfg)
 
 	return u, nil
-}
-
-func (u *uploader) withRetry(ctx context.Context, predicate retry.ShouldRetry, policy retry.BackoffPolicy, fn func() error) error {
-	return retry.WithPolicy(ctx, predicate, policy, fn)
 }
