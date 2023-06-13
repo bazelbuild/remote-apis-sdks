@@ -5,6 +5,8 @@ go_library(
     srcs = [
         "batching.go",
         "config.go",
+        "pubsub.go",
+        "streaming_query.go",
         "throttler.go",
         "uploader.go",
     ],
@@ -32,6 +34,8 @@ go_test(
     name = "cas_test",
     srcs = [
         "batching_query_test.go",
+        "batching_write_bytes_test.go",
+        "streaming_query_test.go",
         "uploader_test.go",
     ],
     data = glob(["testdata/**"]),

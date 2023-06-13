@@ -81,6 +81,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -121,7 +122,7 @@ func MakeCompressedWriteResourceName(instanceName, hash string, size int64) stri
 	return fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", instanceName, uuid.New(), hash, size)
 }
 
-// IsCompressedWriteResourceName returns true if the name was generated with MakeCompressedWriteResourceName.
+// IsCompressedWriteResourceName returns true if the name was generated using MakeCompressedWriteResourceName.
 func IsCompressedWriteResourceName(name string) bool {
 	return strings.Contains(name, "compressed-blobs/zstd")
 }
@@ -147,6 +148,7 @@ type uploader struct {
 	streamRPCCfg GRPCConfig
 
 	// gRPC throttling controls.
+	queryThrottler *throttler // Controls concurrent calls to the query API.
 	streamThrottle *throttler // Controls concurrent calls to the byte streaming API.
 
 	// IO controls.
@@ -171,13 +173,15 @@ type uploader struct {
 	uploadRequestItemBaseSize int
 
 	// Concurrency controls.
-	clientSenderWg sync.WaitGroup // Batching API producers.
-	querySenderWg  sync.WaitGroup // Query streaming API producers.
-	uploadSenderWg sync.WaitGroup // Upload streaming API producers.
-	processorWg    sync.WaitGroup // Internal routers.
-	receiverWg     sync.WaitGroup // Consumers.
-	workerWg       sync.WaitGroup // Short-lived intermediate producers/consumers.
-	walkerWg       sync.WaitGroup // Tracks all walkers.
+	clientSenderWg sync.WaitGroup          // Batching API producers.
+	querySenderWg  sync.WaitGroup          // Query streaming API producers.
+	processorWg    sync.WaitGroup          // Internal routers.
+	receiverWg     sync.WaitGroup          // Consumers.
+	workerWg       sync.WaitGroup          // Short-lived intermediate producers/consumers.
+	walkerWg       sync.WaitGroup          // Tracks all walkers.
+	queryCh        chan missingBlobRequest // Fan-in channel for query requests.
+	queryPubSub    *pubsub                 // Fan-out broker for query responses.
+	uploadPubSub   *pubsub                 // Fan-out broker for upload responses.
 
 	// ctx is used to make unified calls and terminate saturated throttlers and in-flight workers.
 	ctx context.Context
@@ -248,6 +252,7 @@ func newUploader(
 		batchRPCCfg:  uploadCfg,
 		streamRPCCfg: streamCfg,
 
+		queryThrottler: newThrottler(int64(queryCfg.ConcurrentCallsLimit)),
 		streamThrottle: newThrottler(int64(streamCfg.ConcurrentCallsLimit)),
 
 		ioCfg: ioCfg,
@@ -266,11 +271,59 @@ func newUploader(
 			},
 		},
 
+		queryCh:     make(chan missingBlobRequest),
+		queryPubSub: newPubSub(time.Second),
+
 		queryRequestBaseSize:      proto.Size(&repb.FindMissingBlobsRequest{InstanceName: instanceName, BlobDigests: []*repb.Digest{}}),
 		uploadRequestBaseSize:     proto.Size(&repb.BatchUpdateBlobsRequest{InstanceName: instanceName, Requests: []*repb.BatchUpdateBlobsRequest_Request{}}),
 		uploadRequestItemBaseSize: proto.Size(&repb.BatchUpdateBlobsRequest_Request{Digest: digest.NewFromBlob([]byte("abc")).ToProto(), Data: []byte{}}),
 	}
 	log.V(1).Infof("[casng] uploader.new: cfg_query=%+v, cfg_batch=%+v, cfg_stream=%+v, cfg_io=%+v", queryCfg, uploadCfg, streamCfg, ioCfg)
 
+	u.processorWg.Add(1)
+	go func() {
+		u.queryProcessor()
+		u.processorWg.Done()
+	}()
+
+	go u.close()
 	return u, nil
+}
+
+func (u *uploader) close() {
+	// The context must be cancelled first.
+	<-u.ctx.Done()
+
+	startTime := time.Now()
+
+	// 1st, batching API senders should stop producing requests.
+	// These senders are terminated by the user.
+	log.V(1).Infof("[casng] uploader: waiting for client senders")
+	u.clientSenderWg.Wait()
+
+	// 2nd, streaming API upload senders should stop producing queries and requests.
+
+	// 3rd, streaming API query senders should stop producing queries.
+	// This propagates from the uploader's pipe, hence, the uploader must stop first.
+	log.V(1).Infof("[casng] uploader: waiting for query senders")
+	u.querySenderWg.Wait()
+	close(u.queryCh) // Terminates the query processor.
+
+	// 4th, internal routres should flush all remaining requests.
+	log.V(1).Infof("[casng] uploader: waiting for processors")
+	u.processorWg.Wait()
+
+	// 5th, internal brokers should flush all remaining messages.
+	log.V(1).Infof("[casng] uploader: waiting for brokers")
+	u.queryPubSub.wait()
+
+	// 6th, receivers should have drained their channels by now.
+	log.V(1).Infof("[casng] uploader: waiting for receivers")
+	u.receiverWg.Wait()
+
+	// 7th, workers should have terminated by now.
+	log.V(1).Infof("[casng] uploader: waiting for workers")
+	u.workerWg.Wait()
+
+	log.V(3).Infof("[casng] upload.close.duration: start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
 }
