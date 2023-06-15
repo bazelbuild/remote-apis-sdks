@@ -311,6 +311,11 @@ type ExecutionOptions struct {
 
 	// Download command stdout and stderr. Defaults to true.
 	DownloadOutErr bool
+
+	// Stream command to stdout and stderr. Defaults to false. If both this and
+	// DownloadOutErr are set, execution will stream stdout and stderr and
+	// fetching a cached result will download stdout and stderr.
+	StreamOutErr bool
 }
 
 // DefaultExecutionOptions returns the recommended ExecutionOptions.
@@ -321,6 +326,7 @@ func DefaultExecutionOptions() *ExecutionOptions {
 		DownloadOutputs:              true,
 		PreserveUnchangedOutputMtime: false,
 		DownloadOutErr:               true,
+		StreamOutErr:                 false,
 	}
 }
 

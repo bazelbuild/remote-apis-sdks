@@ -6,6 +6,7 @@ go_library(
         "ac.go",
         "cas.go",
         "exec.go",
+        "logstreams.go",
         "server.go",
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes",

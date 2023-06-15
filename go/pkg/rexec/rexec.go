@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
@@ -13,6 +14,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -330,14 +332,45 @@ func (ec *Context) ExecuteRemotely() {
 	ec.Metadata.RealBytesUploaded = bytesMoved
 	log.V(1).Infof("%s %s> Executing remotely...\n%s", cmdID, executionID, strings.Join(ec.cmd.Args, " "))
 	ec.Metadata.EventTimes[command.EventExecuteRemotely] = &command.TimeInterval{From: time.Now()}
-	op, err := ec.client.GrpcClient.ExecuteAndWait(ec.ctx, &repb.ExecuteRequest{
+	eg, ctx := errgroup.WithContext(ec.ctx)
+	var streamOut, streamErr sync.Once
+	op, err := ec.client.GrpcClient.ExecuteAndWaitProgress(ctx, &repb.ExecuteRequest{
 		InstanceName:    ec.client.GrpcClient.InstanceName,
 		SkipCacheLookup: !ec.opt.AcceptCached || ec.opt.DoNotCache,
 		ActionDigest:    ec.Metadata.ActionDigest.ToProto(),
+	}, func(md *repb.ExecuteOperationMetadata) {
+		if !ec.opt.StreamOutErr {
+			return
+		}
+		if name := md.GetStdoutStreamName(); name != "" {
+			streamOut.Do(func() {
+				eg.Go(func() error {
+					path := fmt.Sprintf("%s/logstreams/%s", ec.client.GrpcClient.InstanceName, name)
+					log.V(1).Infof("%s %s> Streaming to stdout from %q", cmdID, executionID, path)
+					_, err = ec.client.GrpcClient.ReadResourceTo(ctx, path, outerr.NewOutWriter(ec.oe))
+					return err
+				})
+			})
+		}
+		if name := md.GetStderrStreamName(); name != "" {
+			streamErr.Do(func() {
+				eg.Go(func() error {
+					path := fmt.Sprintf("%s/logstreams/%s", ec.client.GrpcClient.InstanceName, name)
+					log.V(1).Infof("%s %s> Streaming to stdout from %q", cmdID, executionID, path)
+					_, err = ec.client.GrpcClient.ReadResourceTo(ctx, path, outerr.NewErrWriter(ec.oe))
+					return err
+				})
+			})
+		}
 	})
 	ec.Metadata.EventTimes[command.EventExecuteRemotely].To = time.Now()
 	if err != nil {
 		ec.Result = command.NewRemoteErrorResult(err)
+		return
+	}
+
+	if err := eg.Wait(); err != nil {
+		ec.Result = command.NewRemoteErrorResult(fmt.Errorf("failure writing output streams: %v", err))
 		return
 	}
 
@@ -364,7 +397,16 @@ func (ec *Context) ExecuteRemotely() {
 		ec.setOutputMetadata()
 		ec.Result = command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 		if ec.opt.DownloadOutErr {
-			ec.Result = ec.downloadOutErr()
+			streamOut.Do(func() {
+				if err := ec.downloadStream(ec.resPb.StdoutRaw, ec.resPb.StdoutDigest, ec.oe.WriteOut); err != nil {
+					ec.Result = command.NewRemoteErrorResult(err)
+				}
+			})
+			streamErr.Do(func() {
+				if err := ec.downloadStream(ec.resPb.StderrRaw, ec.resPb.StderrDigest, ec.oe.WriteErr); err != nil {
+					ec.Result = command.NewRemoteErrorResult(err)
+				}
+			})
 		}
 		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
 			log.V(1).Infof("%s %s> Downloading outputs...", cmdID, executionID)
