@@ -168,7 +168,7 @@ type Stats struct {
 	// EffectiveBytesMoved is the total number of bytes moved over the wire, excluding retries.
 	// This may not be accurate since a gRPC call may be interrupted in which case this number may be higher than the real one.
 	// For failures, this is reported as 0.
-	// It may be higher than BytesRequested (compression headers), but never higher than BytesMoved.
+	// It may be higher than BytesRequested (compression headers), but never higher than TotalBytesMoved.
 	EffectiveBytesMoved int64
 
 	// LogicalBytesCached is the total number of bytes not moved over the wire due to caching (either remotely or locally).

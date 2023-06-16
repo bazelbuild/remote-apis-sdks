@@ -95,8 +95,8 @@ func (u *BatchingUploader) MissingBlobs(ctx context.Context, digests []digest.Di
 // ctx is used to make and cancel remote calls.
 // This method does not use the uploader's context which means it is safe to call even after that context is cancelled.
 //
-// Compression is turned on based the resource name.
-// size is used to report some stats. It must reflect the actual number of bytes r has to give.
+// Compression is turned on based on the resource name.
+// size is used to report stats. It must reflect the actual number of bytes r has to give.
 // The server is notified to finalize the resource name and subsequent writes may not succeed.
 // The errors returned are either from the context, ErrGRPC, ErrIO, or ErrCompression. More errors may be wrapped inside.
 // If an error was returned, the returned stats may indicate that all the bytes were sent, but that does not guarantee that the server committed all of them.
@@ -214,14 +214,14 @@ func (u *uploader) writeBytes(ctx context.Context, name string, r io.Reader, siz
 			stats.TotalBytesMoved += n64
 			return stream.Send(req)
 		})
-		if errStream != nil && errStream != io.EOF {
-			err = errors.Join(ErrGRPC, errStream, err)
-			break
-		}
-
 		// The server says the content for the specified resource already exists.
 		if errStream == io.EOF {
 			cacheHit = true
+			break
+		}
+
+		if errStream != nil {
+			err = errors.Join(ErrGRPC, errStream, err)
 			break
 		}
 
@@ -260,17 +260,11 @@ func (u *uploader) writeBytes(ctx context.Context, name string, r io.Reader, siz
 		stats.LogicalBytesCached = size
 	}
 	stats.LogicalBytesStreamed = stats.LogicalBytesMoved
-	stats.LogicalBytesBatched = 0
-	stats.InputFileCount = 0
-	stats.InputDirCount = 0
-	stats.InputSymlinkCount = 0
 	if cacheHit {
 		stats.CacheHitCount = 1
 	} else {
 		stats.CacheMissCount = 1
 	}
-	stats.DigestCount = 0
-	stats.BatchedCount = 0
 	if err == nil {
 		stats.StreamedCount = 1
 	}
