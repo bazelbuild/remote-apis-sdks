@@ -23,9 +23,8 @@ import (
 // tree later. It corresponds roughly to a *repb.Directory, but with pointers, not digests, used to
 // refer to other nodes.
 type treeNode struct {
-	files    map[string]*fileNode
-	dirs     map[string]*treeNode
-	symlinks map[string]*symlinkNode
+	leaves   map[string]*fileSysNode
+	children map[string]*treeNode
 }
 
 type fileNode struct {
@@ -327,37 +326,30 @@ func buildTree(files map[string]*fileSysNode) (*treeNode, error) {
 
 		node := root
 		for _, s := range segs {
-			if node.dirs == nil {
-				node.dirs = make(map[string]*treeNode)
+			if node.children == nil {
+				node.children = make(map[string]*treeNode)
 			}
-			child := node.dirs[s]
+			child := node.children[s]
 			if child == nil {
 				child = &treeNode{}
-				node.dirs[s] = child
+				node.children[s] = child
 			}
 			node = child
 		}
 
 		if fn.emptyDirectoryMarker {
-			if node.dirs == nil {
-				node.dirs = make(map[string]*treeNode)
+			if node.children == nil {
+				node.children = make(map[string]*treeNode)
 			}
-			if node.dirs[base] == nil {
-				node.dirs[base] = &treeNode{}
+			if node.children[base] == nil {
+				node.children[base] = &treeNode{}
 			}
 			continue
 		}
-		if fn.file != nil {
-			if node.files == nil {
-				node.files = make(map[string]*fileNode)
-			}
-			node.files[base] = fn.file
-		} else {
-			if node.symlinks == nil {
-				node.symlinks = make(map[string]*symlinkNode)
-			}
-			node.symlinks[base] = fn.symlink
+		if node.leaves == nil {
+			node.leaves = make(map[string]*fileSysNode)
 		}
+		node.leaves[base] = fn
 	}
 	return root, nil
 }
@@ -366,7 +358,7 @@ func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[d
 	dir := &repb.Directory{}
 	blobs = make(map[digest.Digest]*uploadinfo.Entry)
 
-	for name, child := range t.dirs {
+	for name, child := range t.children {
 		dg, childBlobs, err := packageTree(child, stats)
 		if err != nil {
 			return digest.Empty, nil, err
@@ -378,19 +370,21 @@ func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[d
 	}
 	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
 
-	for name, fn := range t.files {
-		dg := fn.ue.Digest
-		dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.isExecutable})
-		blobs[dg] = fn.ue
-		stats.InputFiles++
-		stats.TotalInputBytes += dg.Size
+	for name, n := range t.leaves {
+		if n.file != nil {
+			dg := n.file.ue.Digest
+			dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable})
+			blobs[dg] = n.file.ue
+			stats.InputFiles++
+			stats.TotalInputBytes += dg.Size
+		}
+		if n.symlink != nil {
+			dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target})
+			stats.InputSymlinks++
+		}
 	}
-	sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
 
-	for name, sn := range t.symlinks {
-		dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: sn.target})
-		stats.InputSymlinks++
-	}
+	sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
 	sort.Slice(dir.Symlinks, func(i, j int) bool { return dir.Symlinks[i].Name < dir.Symlinks[j].Name })
 
 	ue, err := uploadinfo.EntryFromProto(dir)
@@ -495,16 +489,16 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Digest]*uploadinfo.Entry, treePb *repb.Tree, err error) {
 	root = &repb.Directory{}
 	files = make(map[digest.Digest]*uploadinfo.Entry)
-	childDirs := make([]string, 0, len(t.dirs))
+	childDirs := make([]string, 0, len(t.children))
 	treePb = &repb.Tree{}
 
-	for name := range t.dirs {
+	for name := range t.children {
 		childDirs = append(childDirs, name)
 	}
 	sort.Strings(childDirs)
 
 	for _, name := range childDirs {
-		child := t.dirs[name]
+		child := t.children[name]
 		chRoot, childFiles, chTree, err := packageDirectories(child)
 		if err != nil {
 			return nil, nil, nil, err
@@ -523,16 +517,17 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 	}
 	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
 
-	for name, fn := range t.files {
-		dg := fn.ue.Digest
-		root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: fn.isExecutable})
-		files[dg] = fn.ue
+	for name, n := range t.leaves {
+		if n.file != nil {
+			dg := n.file.ue.Digest
+			root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable})
+			files[dg] = n.file.ue
+		}
+		if n.symlink != nil {
+			root.Symlinks = append(root.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target})
+		}
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
-
-	for name, sym := range t.symlinks {
-		root.Symlinks = append(root.Symlinks, &repb.SymlinkNode{Name: name, Target: sym.target})
-	}
 	sort.Slice(root.Symlinks, func(i, j int) bool { return root.Symlinks[i].Name < root.Symlinks[j].Name })
 
 	return root, files, treePb, nil
