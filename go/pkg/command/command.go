@@ -112,6 +112,9 @@ type InputSpec struct {
 
 	// SymlinkBehavior represents the way symlinks will be handled.
 	SymlinkBehavior SymlinkBehaviorType
+
+	// Node properties of inputs.
+	InputNodeProperties map[string]*repb.NodeProperties
 }
 
 // String returns the string representation of the VirtualInput.
@@ -585,6 +588,35 @@ func (c *Command) ToREProto(useOutputPathsField bool) *repb.Command {
 	return cmdPb
 }
 
+func FromREProto(cmdPb *repb.Command) *Command {
+	cmd := &Command{
+		InputSpec: &InputSpec{
+			EnvironmentVariables: make(map[string]string),
+			InputNodeProperties:  make(map[string]*repb.NodeProperties),
+		},
+		Identifiers: &Identifiers{},
+		WorkingDir:  cmdPb.WorkingDirectory,
+		OutputFiles: cmdPb.OutputFiles,
+		OutputDirs:  cmdPb.OutputDirectories,
+		Platform:    make(map[string]string),
+		Args:        cmdPb.Arguments,
+	}
+
+	// In v2.1 of the RE API the `output_{files, directories}` fields were
+	// replaced by a single field: `output_paths`.
+	if len(cmdPb.OutputPaths) > 0 {
+		cmd.OutputFiles = cmdPb.OutputPaths
+		cmd.OutputDirs = nil
+	}
+	for _, ev := range cmdPb.EnvironmentVariables {
+		cmd.InputSpec.EnvironmentVariables[ev.Name] = ev.Value
+	}
+	for _, pt := range cmdPb.GetPlatform().GetProperties() {
+		cmd.Platform[pt.Name] = pt.Value
+	}
+	return cmd
+}
+
 // FromProto parses a Command struct from a proto message.
 func FromProto(p *cpb.Command) *Command {
 	ids := &Identifiers{
@@ -635,6 +667,7 @@ func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
 		InputExclusions:      excl,
 		EnvironmentVariables: is.GetEnvironmentVariables(),
 		SymlinkBehavior:      symlinkBehaviorFromProto(is.GetSymlinkBehavior()),
+		InputNodeProperties:  is.GetInputNodeProperties(),
 	}
 }
 
@@ -663,6 +696,7 @@ func inputSpecToProto(is *InputSpec) *cpb.InputSpec {
 		ExcludeInputs:        excl,
 		EnvironmentVariables: is.EnvironmentVariables,
 		SymlinkBehavior:      symlinkBehaviorToProto(is.SymlinkBehavior),
+		InputNodeProperties:  is.InputNodeProperties,
 	}
 }
 

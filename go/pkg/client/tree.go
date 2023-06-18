@@ -40,6 +40,7 @@ type fileSysNode struct {
 	file                 *fileNode
 	emptyDirectoryMarker bool
 	symlink              *symlinkNode
+	nodeProperties       *repb.NodeProperties
 }
 
 // TreeStats contains various stats/metadata of the constructed Merkle tree.
@@ -164,7 +165,7 @@ func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string)
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
-func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts) error {
+func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts, nodeProperties map[string]*repb.NodeProperties) error {
 	if opts == nil {
 		opts = DefaultTreeSymlinkOpts()
 	}
@@ -181,6 +182,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 		if err != nil {
 			return err
 		}
+		np := nodeProperties[remoteNormPath]
 		meta := cache.Get(absPath)
 
 		// An implication of this is that, if a path is a symlink to a
@@ -213,7 +215,8 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 				// an absolute path. Since the remote worker will map the exec root
 				// to a different directory, we must strip away the local exec root.
 				// See https://github.com/bazelbuild/remote-apis-sdks/pull/229#discussion_r524830458
-				symlink: &symlinkNode{target: targetSymDir},
+				symlink:        &symlinkNode{target: targetSymDir},
+				nodeProperties: np,
 			}
 
 			if !meta.Symlink.IsDangling && opts.FollowsTarget {
@@ -248,7 +251,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 
 			if len(files) == 0 {
 				if normPath != "." {
-					fs[remoteNormPath] = &fileSysNode{emptyDirectoryMarker: true}
+					fs[remoteNormPath] = &fileSysNode{emptyDirectoryMarker: true, nodeProperties: np}
 				}
 				continue
 			}
@@ -267,6 +270,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 					ue:           uploadinfo.EntryFromFile(meta.Digest, absPath),
 					isExecutable: meta.IsExecutable,
 				},
+				nodeProperties: np,
 			}
 		}
 	}
@@ -286,9 +290,10 @@ func (c *Client) ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir string
 		if err != nil {
 			return digest.Empty, nil, nil, err
 		}
+		np := is.InputNodeProperties[remoteNormPath]
 		if i.IsEmptyDirectory {
 			if normPath != "." {
-				fs[remoteNormPath] = &fileSysNode{emptyDirectoryMarker: true}
+				fs[remoteNormPath] = &fileSysNode{emptyDirectoryMarker: true, nodeProperties: np}
 			}
 			continue
 		}
@@ -297,9 +302,10 @@ func (c *Client) ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir string
 				ue:           uploadinfo.EntryFromBlob(i.Contents),
 				isExecutable: i.IsExecutable,
 			},
+			nodeProperties: np,
 		}
 	}
-	if err := loadFiles(execRoot, workingDir, remoteWorkingDir, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)); err != nil {
+	if err := loadFiles(execRoot, workingDir, remoteWorkingDir, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior), is.InputNodeProperties); err != nil {
 		return digest.Empty, nil, nil, err
 	}
 	ft, err := buildTree(fs)
@@ -371,17 +377,16 @@ func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[d
 	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
 
 	for name, n := range t.leaves {
-		// A node can have exactly one of file/symlink/emptyDirectoryMarker.
 		if n.file != nil {
 			dg := n.file.ue.Digest
-			dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable})
+			dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: n.nodeProperties})
 			blobs[dg] = n.file.ue
 			stats.InputFiles++
 			stats.TotalInputBytes += dg.Size
 			continue
 		}
 		if n.symlink != nil {
-			dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target})
+			dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target, NodeProperties: n.nodeProperties})
 			stats.InputSymlinks++
 		}
 	}
@@ -407,6 +412,7 @@ type TreeOutput struct {
 	IsExecutable     bool
 	IsEmptyDirectory bool
 	SymlinkTarget    string
+	NodeProperties   *repb.NodeProperties
 }
 
 // FlattenTree takes a Tree message and calculates the relative paths of all the files to
@@ -456,15 +462,17 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 				Path:             flatDir.p,
 				Digest:           digest.Empty,
 				IsEmptyDirectory: true,
+				NodeProperties:   dir.NodeProperties,
 			}
 			continue
 		}
 		// Add files to the set to return
 		for _, file := range dir.Files {
 			out := &TreeOutput{
-				Path:         filepath.Join(flatDir.p, file.Name),
-				Digest:       digest.NewFromProtoUnvalidated(file.Digest),
-				IsExecutable: file.IsExecutable,
+				Path:           filepath.Join(flatDir.p, file.Name),
+				Digest:         digest.NewFromProtoUnvalidated(file.Digest),
+				IsExecutable:   file.IsExecutable,
+				NodeProperties: file.NodeProperties,
 			}
 			flatFiles[out.Path] = out
 		}
@@ -472,8 +480,9 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 		// Add symlinks to the set to return
 		for _, sm := range dir.Symlinks {
 			out := &TreeOutput{
-				Path:          filepath.Join(flatDir.p, sm.Name),
-				SymlinkTarget: sm.Target,
+				Path:           filepath.Join(flatDir.p, sm.Name),
+				SymlinkTarget:  sm.Target,
+				NodeProperties: sm.NodeProperties,
 			}
 			flatFiles[out.Path] = out
 		}
@@ -520,15 +529,14 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
 
 	for name, n := range t.leaves {
-		// A node can have exactly one of file/symlink/emptyDirectoryMarker.
 		if n.file != nil {
 			dg := n.file.ue.Digest
-			root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable})
+			root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: n.nodeProperties})
 			files[dg] = n.file.ue
 			continue
 		}
 		if n.symlink != nil {
-			root.Symlinks = append(root.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target})
+			root.Symlinks = append(root.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target, NodeProperties: n.nodeProperties})
 		}
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
@@ -540,7 +548,7 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 // ComputeOutputsToUpload transforms the provided local output paths into uploadable Chunkers.
 // The paths have to be relative to execRoot.
 // It also populates the remote ActionResult, packaging output directories as trees where required.
-func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []string, cache filemetadata.Cache, sb command.SymlinkBehaviorType) (map[digest.Digest]*uploadinfo.Entry, *repb.ActionResult, error) {
+func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []string, cache filemetadata.Cache, sb command.SymlinkBehaviorType, nodeProperties map[string]*repb.NodeProperties) (map[digest.Digest]*uploadinfo.Entry, *repb.ActionResult, error) {
 	outs := make(map[digest.Digest]*uploadinfo.Entry)
 	resPb := &repb.ActionResult{}
 	for _, path := range paths {
@@ -563,12 +571,12 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 			// A regular file.
 			ue := uploadinfo.EntryFromFile(meta.Digest, absPath)
 			outs[meta.Digest] = ue
-			resPb.OutputFiles = append(resPb.OutputFiles, &repb.OutputFile{Path: normPath, Digest: meta.Digest.ToProto(), IsExecutable: meta.IsExecutable})
+			resPb.OutputFiles = append(resPb.OutputFiles, &repb.OutputFile{Path: normPath, Digest: meta.Digest.ToProto(), IsExecutable: meta.IsExecutable, NodeProperties: nodeProperties[normPath]})
 			continue
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, "", "", nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb)); e != nil {
+		if e := loadFiles(absPath, "", "", nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb), nodeProperties); e != nil {
 			return nil, nil, e
 		}
 		ft, err := buildTree(fs)
