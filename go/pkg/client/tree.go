@@ -42,6 +42,20 @@ type fileSysNode struct {
 	symlink              *symlinkNode
 }
 
+func boolToInt(b bool) uint8 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func (n *fileSysNode) checkValid() error {
+	if boolToInt(n.file != nil)+boolToInt(n.symlink != nil)+boolToInt(n.emptyDirectoryMarker) != 1 {
+		return fmt.Errorf("a fileSysNode must have exactly one of `file`, `symlink`, or `emptyDirectoryMarker` set, got %v", n)
+	}
+	return nil
+}
+
 // TreeStats contains various stats/metadata of the constructed Merkle tree.
 // Note that these stats count the overall input tree, even if some parts of it are not unique.
 // For example, if a file "foo" of 10 bytes occurs 5 times in the tree, it will be counted as 5
@@ -371,6 +385,9 @@ func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[d
 	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
 
 	for name, n := range t.leaves {
+		if err := n.checkValid(); err != nil {
+			return digest.Empty, nil, err
+		}
 		if n.file != nil {
 			dg := n.file.ue.Digest
 			dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable})
@@ -518,6 +535,9 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
 
 	for name, n := range t.leaves {
+		if err := n.checkValid(); err != nil {
+			return nil, nil, nil, err
+		}
 		if n.file != nil {
 			dg := n.file.ue.Digest
 			root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable})
