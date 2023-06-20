@@ -1,3 +1,5 @@
+package casng
+
 // The query processor provides a streaming interface to query the CAS for digests.
 //
 // Multiple concurrent clients can use the same uploader instance at the same time.
@@ -34,7 +36,6 @@
 //
 // The client handler manages the pubsub subscription by waiting until a matching number of responses was received, after which
 // it cancels the subscription.
-package casng
 
 import (
 	"context"

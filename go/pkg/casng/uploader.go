@@ -1,3 +1,9 @@
+// Package casng provides a CAS client implementation with the following incomplete list of features:
+//   - Streaming interface to upload files during the digestion process rather than after.
+//   - Unified uploads and downloads.
+//   - Simplifed public API.
+package casng
+
 // This file includes the implementation for uploading blobs to the CAS.
 //
 // The following diagram illustrates the overview of the design implemented in this package.
@@ -73,7 +79,6 @@
 //		Level 3 is used for internal functions that may be called multiple times per request. Duration logs are also level 3 to avoid the overhead in level 4.
 //	 Level 4 is used for messages with large objects.
 //	 Level 5 is used for messages that require custom processing (extra compute).
-package casng
 
 import (
 	"context"
@@ -128,7 +133,7 @@ func IsCompressedWriteResourceName(name string) bool {
 	return strings.Contains(name, "compressed-blobs/zstd")
 }
 
-// BatchingUplodaer provides a blocking interface to query and upload to the CAS.
+// BatchingUploader provides a blocking interface to query and upload to the CAS.
 type BatchingUploader struct {
 	*uploader
 }
@@ -226,7 +231,7 @@ func newUploader(
 	ctx context.Context, cas repb.ContentAddressableStorageClient, byteStream bsgrpc.ByteStreamClient, instanceName string,
 	queryCfg, uploadCfg, streamCfg GRPCConfig, ioCfg IOConfig,
 ) (*uploader, error) {
-	if cas == nil || byteStream == nil {
+	if cas == repb.ContentAddressableStorageClient(nil) || byteStream == bsgrpc.ByteStreamClient(nil) {
 		return nil, ErrNilClient
 	}
 	if err := validateGrpcConfig(&queryCfg); err != nil {
