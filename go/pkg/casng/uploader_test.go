@@ -9,6 +9,8 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 )
@@ -38,17 +40,17 @@ var (
 )
 
 type fakeByteStreamClient struct {
-	bspb.ByteStreamClient
-	write func(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error)
+	bsgrpc.ByteStreamClient
+	write func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error)
 }
 
 type fakeByteStream_WriteClient struct {
-	bspb.ByteStream_WriteClient
+	bsgrpc.ByteStream_WriteClient
 	send         func(*bspb.WriteRequest) error
 	closeAndRecv func() (*bspb.WriteResponse, error)
 }
 
-func (s *fakeByteStreamClient) Write(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+func (s *fakeByteStreamClient) Write(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 	if s.write != nil {
 		return s.write(ctx, opts...)
 	}
