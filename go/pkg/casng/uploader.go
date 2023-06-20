@@ -266,9 +266,8 @@ func newUploader(
 		ioCfg: ioCfg,
 		buffers: sync.Pool{
 			New: func() any {
-				// Since the buffers are never resized, treating the slice as a pointer-like type for this pool is safe.
 				buf := make([]byte, ioCfg.BufferSize)
-				return buf
+				return &buf
 			},
 		},
 		zstdEncoders: sync.Pool{
