@@ -99,6 +99,11 @@ func (c *Client) ReadBytes(ctx context.Context, name string) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
+// ReadResourceTo writes a resource's contents to a Writer.
+func (c *Client) ReadResourceTo(ctx context.Context, name string, w io.Writer) (int64, error) {
+	return c.readStreamedRetried(ctx, name, 0, 0, w)
+}
+
 // ReadResourceToFile fetches a resource's contents, saving it into a file.
 //
 // The provided resource name must be a child resource of this client's instance,

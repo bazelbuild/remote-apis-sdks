@@ -386,6 +386,150 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 	}
 }
 
+func TestStreamOutErr(t *testing.T) {
+	tests := []struct {
+		name            string
+		cached          bool
+		status          *status.Status
+		exitCode        int32
+		requestStreams  bool
+		hasStdOutStream bool
+		hasStdErrStream bool
+		wantRes         *command.Result
+		wantStdOut      string
+		wantStdErr      string
+	}{
+		{
+			name:            "success",
+			requestStreams:  true,
+			hasStdOutStream: true,
+			hasStdErrStream: true,
+			wantRes:         &command.Result{Status: command.SuccessResultStatus},
+			wantStdOut:      "streaming-stdout",
+			wantStdErr:      "streaming-stderr",
+		},
+		{
+			name:            "not streaming",
+			requestStreams:  false,
+			hasStdOutStream: true,
+			hasStdErrStream: true,
+			wantRes:         &command.Result{Status: command.SuccessResultStatus},
+			wantStdOut:      "stdout-blob",
+			wantStdErr:      "stderr-blob",
+		},
+		{
+			name:            "no stderr stream available",
+			requestStreams:  true,
+			hasStdOutStream: true,
+			hasStdErrStream: false,
+			wantRes:         &command.Result{Status: command.SuccessResultStatus},
+			wantStdOut:      "streaming-stdout",
+			wantStdErr:      "stderr-blob",
+		},
+		{
+			name:            "no stdout stream available",
+			requestStreams:  true,
+			hasStdOutStream: false,
+			hasStdErrStream: true,
+			wantRes:         &command.Result{Status: command.SuccessResultStatus},
+			wantStdOut:      "stdout-blob",
+			wantStdErr:      "streaming-stderr",
+		},
+		{
+			name:            "no streams available",
+			requestStreams:  true,
+			hasStdOutStream: false,
+			hasStdErrStream: false,
+			wantRes:         &command.Result{Status: command.SuccessResultStatus},
+			wantStdOut:      "stdout-blob",
+			wantStdErr:      "stderr-blob",
+		},
+		{
+			name:            "remote exec cache hit",
+			requestStreams:  true,
+			hasStdOutStream: true,
+			hasStdErrStream: true,
+			cached:          true,
+			wantRes:         &command.Result{Status: command.CacheHitResultStatus},
+			wantStdOut:      "streaming-stdout",
+			wantStdErr:      "streaming-stderr",
+		},
+		{
+			name:            "action cache hit",
+			requestStreams:  true,
+			hasStdOutStream: true,
+			hasStdErrStream: true,
+			wantRes:         &command.Result{Status: command.CacheHitResultStatus},
+			wantStdOut:      "stdout-blob",
+			wantStdErr:      "stderr-blob",
+		},
+		{
+			name:            "non zero exit",
+			requestStreams:  true,
+			hasStdOutStream: true,
+			hasStdErrStream: true,
+			exitCode:        11,
+			wantRes:         &command.Result{ExitCode: 11, Status: command.NonZeroExitResultStatus},
+			wantStdOut:      "streaming-stdout",
+			wantStdErr:      "streaming-stderr",
+		},
+		{
+			name:            "remote failure",
+			requestStreams:  true,
+			hasStdOutStream: true,
+			hasStdErrStream: true,
+			status:          status.New(codes.Internal, "problem"),
+			wantRes:         command.NewRemoteErrorResult(status.New(codes.Internal, "problem").Err()),
+			wantStdOut:      "streaming-stdout",
+			wantStdErr:      "streaming-stderr",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e, cleanup := fakes.NewTestEnv(t)
+			defer cleanup()
+			e.Client.GrpcClient.Retrier = nil // Disable retries
+			cmd := &command.Command{
+				Args:        []string{"tool"},
+				OutputFiles: []string{"a/b/out"},
+				ExecRoot:    e.ExecRoot,
+			}
+			execOpts := &command.ExecutionOptions{
+				AcceptCached:    true,
+				DownloadOutputs: false,
+				DownloadOutErr:  true,
+				StreamOutErr:    tc.requestStreams,
+			}
+			opts := []fakes.Option{
+				fakes.StdOut("stdout-blob"),
+				fakes.StdErr("stderr-blob"),
+				&fakes.LogStream{Name: "stdout-stream", Chunks: []string{"streaming", "-", "stdout"}},
+				&fakes.LogStream{Name: "stderr-stream", Chunks: []string{"streaming", "-", "stderr"}},
+				fakes.ExecutionCacheHit(tc.cached),
+			}
+			if tc.hasStdOutStream {
+				opts = append(opts, fakes.StdOutStream("stdout-stream"))
+			}
+			if tc.hasStdErrStream {
+				opts = append(opts, fakes.StdErrStream("stderr-stream"))
+			}
+			e.Set(cmd, execOpts, tc.wantRes, opts...)
+			oe := outerr.NewRecordingOutErr()
+			res, _ := e.Client.Run(context.Background(), cmd, execOpts, oe)
+
+			if diff := cmp.Diff(tc.wantRes, res, cmp.Comparer(proto.Equal), cmp.Comparer(equalError)); diff != "" {
+				t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
+			}
+			if got := oe.Stdout(); !bytes.Equal(got, []byte(tc.wantStdOut)) {
+				t.Errorf("Run() gave stdout diff: want %q, got %q", tc.wantStdOut, string(got))
+			}
+			if got := oe.Stderr(); !bytes.Equal(got, []byte(tc.wantStdErr)) {
+				t.Errorf("Run() gave stderr diff: want %q, got %q", tc.wantStdErr, string(got))
+			}
+		})
+	}
+}
+
 func TestOutputSymlinks(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()

@@ -37,6 +37,10 @@ type Exec struct {
 	Cached bool
 	// Any blobs that will be put in the CAS after the fake execution completes.
 	OutputBlobs [][]byte
+	// Name of the logstream to write stdout to.
+	StdOutStreamName string
+	// Name of the logstream to write stderr to.
+	StdErrStreamName string
 	// Number of Execute calls.
 	numExecCalls int32
 	// Used for errors.
@@ -140,6 +144,18 @@ func (s *Exec) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_Execute
 	if dg != s.adg {
 		s.t.Errorf("unexpected action digest received by fake: expected %v, got %v", s.adg, dg)
 		return status.Error(codes.InvalidArgument, fmt.Sprintf("unexpected digest received: %v", req.ActionDigest))
+	}
+	if s.StdOutStreamName != "" || s.StdErrStreamName != "" {
+		md, err := anypb.New(&repb.ExecuteOperationMetadata{
+			StdoutStreamName: s.StdOutStreamName,
+			StderrStreamName: s.StdErrStreamName,
+		})
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(&oppb.Operation{Name: "fake", Metadata: md}); err != nil {
+			return err
+		}
 	}
 	if op, err := s.fakeExecution(dg, req.SkipCacheLookup); err != nil {
 		return err

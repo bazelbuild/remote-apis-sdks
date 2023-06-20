@@ -58,3 +58,21 @@ func TestSystemOutErr(t *testing.T) {
 		t.Errorf("expected stdout+stderr to equal \"hello world\", got %v", buf.String())
 	}
 }
+
+func TestWriters(t *testing.T) {
+	t.Parallel()
+	oe := NewRecordingOutErr()
+	o, e := NewOutWriter(oe), NewErrWriter(oe)
+	if n, err := o.Write([]byte("hello")); n != 5 || err != nil {
+		t.Errorf("expected o.Write(\"hello\") to return 5, nil; got %d, %v", n, err)
+	}
+	if n, err := e.Write([]byte("world")); n != 5 || err != nil {
+		t.Errorf("expected e.Write(\"world\") to return 5, nil; got %d, %v", n, err)
+	}
+	if got := oe.Stdout(); !bytes.Equal(got, []byte("hello")) {
+		t.Errorf("expected oe.Stdout() to return hello, got %v", got)
+	}
+	if got := oe.Stderr(); !bytes.Equal(got, []byte("world")) {
+		t.Errorf("expected oe.Stderr() to return world, got %v", got)
+	}
+}

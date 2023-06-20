@@ -64,3 +64,37 @@ func (s *RecordingOutErr) Stdout() []byte {
 func (s *RecordingOutErr) Stderr() []byte {
 	return s.err.Bytes()
 }
+
+// outWriter is a Writer that writes to the out stream of an OutErr.
+type outWriter struct {
+	OutErr
+}
+
+// NewOutWriter provides an io.Writer implementation for writing to the out
+// stream of an OutErr.
+func NewOutWriter(oe OutErr) io.Writer {
+	return &outWriter{OutErr: oe}
+}
+
+// Write writes to the out stream of the OutErr. This method always returns len(p), nil.
+func (o *outWriter) Write(p []byte) (int, error) {
+	o.WriteOut(p)
+	return len(p), nil
+}
+
+// errWriter is a Writer that writes to the err stream of an OutErr.
+type errWriter struct {
+	OutErr
+}
+
+// NewErrWriter provides an io.Writer implementation for writing to the err
+// stream of an OutErr.
+func NewErrWriter(oe OutErr) io.Writer {
+	return &errWriter{OutErr: oe}
+}
+
+// Write writes to the stderr stream of the OutErr. This method always returns len(p), nil.
+func (e *errWriter) Write(p []byte) (int, error) {
+	e.WriteErr(p)
+	return len(p), nil
+}

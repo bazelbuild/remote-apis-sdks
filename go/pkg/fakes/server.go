@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
+	bspb "google.golang.org/genproto/googleapis/bytestream"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 	tspb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -33,6 +35,7 @@ import (
 type Server struct {
 	Exec        *Exec
 	CAS         *CAS
+	LogStreams  *LogStreams
 	ActionCache *ActionCache
 	listener    net.Listener
 	srv         *grpc.Server
@@ -41,14 +44,15 @@ type Server struct {
 // NewServer creates a server that is ready to accept requests.
 func NewServer(t testing.TB) (s *Server, err error) {
 	cas := NewCAS()
+	ls := NewLogStreams()
 	ac := NewActionCache()
-	s = &Server{Exec: NewExec(t, ac, cas), CAS: cas, ActionCache: ac}
+	s = &Server{Exec: NewExec(t, ac, cas), CAS: cas, LogStreams: ls, ActionCache: ac}
 	s.listener, err = net.Listen("tcp", ":0")
 	if err != nil {
 		return nil, err
 	}
 	s.srv = grpc.NewServer()
-	bsgrpc.RegisterByteStreamServer(s.srv, s.CAS)
+	bsgrpc.RegisterByteStreamServer(s.srv, s)
 	regrpc.RegisterContentAddressableStorageServer(s.srv, s.CAS)
 	regrpc.RegisterActionCacheServer(s.srv, s.ActionCache)
 	regrpc.RegisterCapabilitiesServer(s.srv, s.Exec)
@@ -60,6 +64,7 @@ func NewServer(t testing.TB) (s *Server, err error) {
 // Clear clears the fake results.
 func (s *Server) Clear() {
 	s.CAS.Clear()
+	s.LogStreams.Clear()
 	s.ActionCache.Clear()
 	s.Exec.Clear()
 }
@@ -87,6 +92,31 @@ func (s *Server) dialParams() rc.DialParams {
 		Service:    s.listener.Addr().String(),
 		NoSecurity: true,
 	}
+}
+
+// Read will serve both logstream and CAS resources, depending on the resource type indicated in the
+// request.
+func (s *Server) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
+	path := strings.Split(req.ResourceName, "/")
+	if len(path) < 2 || path[0] != "instance" {
+		return status.Errorf(codes.InvalidArgument, "test fake expected resource name of the form \"instance/<type>/...\", got %q", req.ResourceName)
+	}
+	if path[1] == "logstreams" {
+		return s.LogStreams.Read(req, stream)
+	} else if path[1] == "blobs" || path[1] == "compressed-blobs" {
+		return s.CAS.Read(req, stream)
+	}
+	return status.Errorf(codes.InvalidArgument, "invalid resource type: %q", path[1])
+}
+
+// Write writes a blob to CAS.
+func (s *Server) Write(stream bsgrpc.ByteStream_WriteServer) error {
+	return s.CAS.Write(stream)
+}
+
+// QueryWriteStatus implements the corresponding RE API function.
+func (*Server) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest) (*bspb.QueryWriteStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "test fake does not implement method")
 }
 
 // TestEnv is a wrapper for convenient integration tests of remote execution.
@@ -137,7 +167,7 @@ func timeToProto(t time.Time) *tspb.Timestamp {
 
 // Set sets up the fake to return the given result on the given command execution.
 // It is not possible to make the fake result in a LocalErrorResultStatus or an InterruptedResultStatus.
-func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...option) (cmdDg, acDg, stderrDg, stdoutDg digest.Digest) {
+func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *command.Result, opts ...Option) (cmdDg, acDg, stderrDg, stdoutDg digest.Digest) {
 	e.t.Helper()
 	cmd.FillDefaultFieldValues()
 	if err := cmd.Validate(); err != nil {
@@ -160,7 +190,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		},
 	}
 	for _, o := range opts {
-		if err := o.Apply(ar, e.Server, e.ExecRoot); err != nil {
+		if err := o.apply(ar, e.Server, e.ExecRoot); err != nil {
 			e.t.Fatalf("error applying option %+v: %v", o, err)
 		}
 	}
@@ -240,8 +270,9 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 	return cmdDg, acDg, stderrDg, stdoutDg
 }
 
-type option interface {
-	Apply(*repb.ActionResult, *Server, string) error
+// Option provides extra configuration for the test environment.
+type Option interface {
+	apply(*repb.ActionResult, *Server, string) error
 }
 
 // InputFile to be made available to the fake action.
@@ -252,7 +283,7 @@ type InputFile struct {
 
 // Apply creates a file in the execroot with the given content
 // and also inserts the file blob into CAS.
-func (f *InputFile) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (f *InputFile) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	bytes := []byte(f.Contents)
 	if err := os.MkdirAll(filepath.Join(execRoot, filepath.Dir(f.Path)), os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create input dir %v: %v", filepath.Dir(f.Path), err)
@@ -272,7 +303,7 @@ type OutputFile struct {
 }
 
 // Apply puts the file in the fake CAS and the given ActionResult.
-func (f *OutputFile) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (f *OutputFile) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	bytes := []byte(f.Contents)
 	s.Exec.OutputBlobs = append(s.Exec.OutputBlobs, bytes)
 	dg := s.CAS.Put(bytes)
@@ -286,7 +317,7 @@ type OutputDir struct {
 }
 
 // Apply puts the file in the fake CAS and the given ActionResult.
-func (d *OutputDir) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (d *OutputDir) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	root, ch, err := BuildDir(d.Path, s, execRoot)
 	if err != nil {
 		return fmt.Errorf("failed to build directory tree: %v", err)
@@ -311,7 +342,7 @@ type OutputSymlink struct {
 }
 
 // Apply puts the file in the fake CAS and the given ActionResult.
-func (l *OutputSymlink) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (l *OutputSymlink) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	ac.OutputFileSymlinks = append(ac.OutputFileSymlinks, &repb.OutputSymlink{Path: l.Path, Target: l.Target})
 	return nil
 }
@@ -349,11 +380,40 @@ func BuildDir(path string, s *Server, execRoot string) (root *repb.Directory, ch
 	return res, ch, nil
 }
 
+// LogStream adds a new logstream that may be served from the bytestream API.
+type LogStream struct {
+	// Name is the name of the stream. The stream may be downloaded by fetching the resource named
+	// instance/logstreams/<name> from bytestream.
+	Name string
+	// Chunks is a list of the chunks that will be sent by bytestream.
+	Chunks []string
+}
+
+func (l *LogStream) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+	return s.LogStreams.Put(l.Name, l.Chunks...)
+}
+
+// StdOutStream causes the fake action to indicate this as the name of the stdout logstream.
+type StdOutStream string
+
+func (o StdOutStream) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+	s.Exec.StdOutStreamName = string(o)
+	return nil
+}
+
+// StdErrStream causes the fake action to indicate this as the name of the stderr logstream.
+type StdErrStream string
+
+func (e StdErrStream) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+	s.Exec.StdErrStreamName = string(e)
+	return nil
+}
+
 // StdOut is to be added as an output of the fake action.
 type StdOut string
 
 // Apply puts the action stdout in the fake CAS and the given ActionResult.
-func (o StdOut) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (o StdOut) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	bytes := []byte(o)
 	s.Exec.OutputBlobs = append(s.Exec.OutputBlobs, bytes)
 	dg := s.CAS.Put(bytes)
@@ -365,7 +425,7 @@ func (o StdOut) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 type StdOutRaw string
 
 // Apply puts the action stdout as raw bytes in the given ActionResult.
-func (o StdOutRaw) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (o StdOutRaw) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	ac.StdoutRaw = []byte(o)
 	return nil
 }
@@ -374,7 +434,7 @@ func (o StdOutRaw) Apply(ac *repb.ActionResult, s *Server, execRoot string) erro
 type StdErr string
 
 // Apply puts the action stderr in the fake CAS and the given ActionResult.
-func (o StdErr) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (o StdErr) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	bytes := []byte(o)
 	s.Exec.OutputBlobs = append(s.Exec.OutputBlobs, bytes)
 	dg := s.CAS.Put(bytes)
@@ -386,7 +446,7 @@ func (o StdErr) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 type StdErrRaw string
 
 // Apply puts the action stderr as raw bytes in the given ActionResult.
-func (o StdErrRaw) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (o StdErrRaw) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	ac.StderrRaw = []byte(o)
 	return nil
 }
@@ -396,7 +456,7 @@ func (o StdErrRaw) Apply(ac *repb.ActionResult, s *Server, execRoot string) erro
 type ExecutionCacheHit bool
 
 // Apply on true will cause the ActionResult to be returned as a cache hit during fake execution.
-func (c ExecutionCacheHit) Apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+func (c ExecutionCacheHit) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
 	s.Exec.Cached = bool(c)
 	return nil
 }

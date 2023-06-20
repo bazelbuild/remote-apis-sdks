@@ -309,8 +309,18 @@ type ExecutionOptions struct {
 	// Preserve mtimes for unchanged outputs when downloading. Defaults to false.
 	PreserveUnchangedOutputMtime bool
 
-	// Download command stdout and stderr. Defaults to true.
+	// Download command stdout and stderr. Defaults to true. If StreamOutErr is also set, this value
+	// is ignored for uncached actions if the server provides log streams for both stdout and stderr.
+	// For cached action results, or if the server does not provide log streams for stdout or stderr,
+	// this value will determine whether stdout and stderr is downloaded.
 	DownloadOutErr bool
+
+	// Request that stdout and stderr be streamed back to the client while the action is running.
+	// Defaults to false. If either stream is not provided by the server, the client will fall back to
+	// downloading the corresponding streams after the action has completed, provided DownloadOutErr
+	// is also set. The client may expect a delay in this scenario as the streams are downloaded after
+	// the fact.
+	StreamOutErr bool
 }
 
 // DefaultExecutionOptions returns the recommended ExecutionOptions.
@@ -321,6 +331,7 @@ func DefaultExecutionOptions() *ExecutionOptions {
 		DownloadOutputs:              true,
 		PreserveUnchangedOutputMtime: false,
 		DownloadOutErr:               true,
+		StreamOutErr:                 false,
 	}
 }
 
