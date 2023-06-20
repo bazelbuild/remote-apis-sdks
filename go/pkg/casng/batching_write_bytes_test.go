@@ -12,6 +12,8 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/errors"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/google/go-cmp/cmp"
+	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -35,7 +37,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "no_compression",
 			bs: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					bytesSent := int64(0)
 					return &fakeByteStream_WriteClient{
 						send: func(wr *bspb.WriteRequest) error {
@@ -63,7 +65,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "compression",
 			bs: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStream_WriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return nil
@@ -89,7 +91,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "write_call_error",
 			bs: &fakeByteStreamClient{
-				write: func(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return nil, errWrite
 				},
 			},
@@ -100,7 +102,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "cache_hit",
 			bs: &fakeByteStreamClient{
-				write: func(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStream_WriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return io.EOF
@@ -127,7 +129,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "send_error",
 			bs: &fakeByteStreamClient{
-				write: func(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStream_WriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return errWrite
@@ -153,7 +155,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "send_retry_timeout",
 			bs: &fakeByteStreamClient{
-				write: func(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStream_WriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return status.Error(codes.DeadlineExceeded, "error")
@@ -180,7 +182,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "stream_close_error",
 			bs: &fakeByteStreamClient{
-				write: func(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStream_WriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return nil
@@ -206,7 +208,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "arbitrary_offset",
 			bs: &fakeByteStreamClient{
-				write: func(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStream_WriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							if wr.WriteOffset < 5 {
@@ -235,7 +237,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 		{
 			name: "finish_write",
 			bs: &fakeByteStreamClient{
-				write: func(ctx context.Context, opts ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStream_WriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							if len(wr.Data) == 0 && !wr.FinishWrite {

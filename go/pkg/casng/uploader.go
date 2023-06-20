@@ -88,7 +88,8 @@ import (
 	log "github.com/golang/glog"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pborman/uuid"
-	bspb "google.golang.org/genproto/googleapis/bytestream"
+	// Alias should not be changed because it's used as is for the google3 mirror.
+	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -140,7 +141,7 @@ type StreamingUploader struct {
 // uploader represents the state of an uploader implementation.
 type uploader struct {
 	cas          repb.ContentAddressableStorageClient
-	byteStream   bspb.ByteStreamClient
+	byteStream   bsgrpc.ByteStreamClient
 	instanceName string
 
 	queryRPCCfg  GRPCConfig
@@ -194,7 +195,7 @@ type uploader struct {
 // ctx must be cancelled after all batching calls have returned to properly shutdown the uploader. It is only used for cancellation (not used with remote calls).
 // gRPC timeouts are multiplied by retries. Batched RPCs are retried per batch. Streaming PRCs are retried per chunk.
 func NewBatchingUploader(
-	ctx context.Context, cas repb.ContentAddressableStorageClient, byteStream bspb.ByteStreamClient, instanceName string,
+	ctx context.Context, cas repb.ContentAddressableStorageClient, byteStream bsgrpc.ByteStreamClient, instanceName string,
 	queryCfg, batchCfg, streamCfg GRPCConfig, ioCfg IOConfig,
 ) (*BatchingUploader, error) {
 	uploader, err := newUploader(ctx, cas, byteStream, instanceName, queryCfg, batchCfg, streamCfg, ioCfg)
@@ -211,7 +212,7 @@ func NewBatchingUploader(
 // ctx must be cancelled after all response channels have been closed to properly shutdown the uploader. It is only used for cancellation (not used with remote calls).
 // gRPC timeouts are multiplied by retries. Batched RPCs are retried per batch. Streaming PRCs are retried per chunk.
 func NewStreamingUploader(
-	ctx context.Context, cas repb.ContentAddressableStorageClient, byteStream bspb.ByteStreamClient, instanceName string,
+	ctx context.Context, cas repb.ContentAddressableStorageClient, byteStream bsgrpc.ByteStreamClient, instanceName string,
 	queryCfg, batchCfg, streamCfg GRPCConfig, ioCfg IOConfig,
 ) (*StreamingUploader, error) {
 	uploader, err := newUploader(ctx, cas, byteStream, instanceName, queryCfg, batchCfg, streamCfg, ioCfg)
@@ -222,7 +223,7 @@ func NewStreamingUploader(
 }
 
 func newUploader(
-	ctx context.Context, cas repb.ContentAddressableStorageClient, byteStream bspb.ByteStreamClient, instanceName string,
+	ctx context.Context, cas repb.ContentAddressableStorageClient, byteStream bsgrpc.ByteStreamClient, instanceName string,
 	queryCfg, uploadCfg, streamCfg GRPCConfig, ioCfg IOConfig,
 ) (*uploader, error) {
 	if cas == nil || byteStream == nil {
