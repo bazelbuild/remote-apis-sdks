@@ -378,7 +378,9 @@ func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[d
 			blobs[dg] = n.file.ue
 			stats.InputFiles++
 			stats.TotalInputBytes += dg.Size
-		} else if n.symlink != nil {
+			continue
+		}
+		if n.symlink != nil {
 			dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target})
 			stats.InputSymlinks++
 		}
@@ -523,7 +525,9 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 			dg := n.file.ue.Digest
 			root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable})
 			files[dg] = n.file.ue
-		} else if n.symlink != nil {
+			continue
+		}
+		if n.symlink != nil {
 			root.Symlinks = append(root.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target})
 		}
 	}
