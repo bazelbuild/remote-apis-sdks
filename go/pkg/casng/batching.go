@@ -176,9 +176,8 @@ func (u *uploader) writeBytes(ctx context.Context, name string, r io.Reader, siz
 		return stats, errors.Join(ErrGRPC, errStream)
 	}
 
-	// buf slice is never resliced which makes it safe to use a pointer-like type.
-	buf := u.buffers.Get().([]byte)
-	defer u.buffers.Put(buf)
+	buf := *(u.buffers.Get().(*[]byte))
+	defer u.buffers.Put(&buf)
 
 	cacheHit := false
 	var err error

@@ -8,8 +8,9 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
-	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
@@ -44,7 +45,7 @@ type fakeByteStreamClient struct {
 	write func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error)
 }
 
-type fakeByteStream_WriteClient struct {
+type fakeByteStreamWriteClient struct {
 	bsgrpc.ByteStream_WriteClient
 	send         func(*bspb.WriteRequest) error
 	closeAndRecv func() (*bspb.WriteResponse, error)
@@ -54,17 +55,17 @@ func (s *fakeByteStreamClient) Write(ctx context.Context, opts ...grpc.CallOptio
 	if s.write != nil {
 		return s.write(ctx, opts...)
 	}
-	return &fakeByteStream_WriteClient{}, nil
+	return &fakeByteStreamWriteClient{}, nil
 }
 
-func (s *fakeByteStream_WriteClient) Send(wr *bspb.WriteRequest) error {
+func (s *fakeByteStreamWriteClient) Send(wr *bspb.WriteRequest) error {
 	if s.send != nil {
 		return s.send(wr)
 	}
 	return nil
 }
 
-func (s *fakeByteStream_WriteClient) CloseAndRecv() (*bspb.WriteResponse, error) {
+func (s *fakeByteStreamWriteClient) CloseAndRecv() (*bspb.WriteResponse, error) {
 	if s.closeAndRecv != nil {
 		return s.closeAndRecv()
 	}
@@ -72,7 +73,7 @@ func (s *fakeByteStream_WriteClient) CloseAndRecv() (*bspb.WriteResponse, error)
 }
 
 type fakeCAS struct {
-	repb.ContentAddressableStorageClient
+	regrpc.ContentAddressableStorageClient
 	findMissingBlobs func(ctx context.Context, in *repb.FindMissingBlobsRequest, opts ...grpc.CallOption) (*repb.FindMissingBlobsResponse, error)
 	batchUpdateBlobs func(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error)
 }

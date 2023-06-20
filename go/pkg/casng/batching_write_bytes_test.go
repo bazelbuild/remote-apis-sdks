@@ -39,7 +39,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 			bs: &fakeByteStreamClient{
 				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					bytesSent := int64(0)
-					return &fakeByteStream_WriteClient{
+					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							bytesSent += int64(len(wr.Data))
 							return nil
@@ -66,7 +66,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 			name: "compression",
 			bs: &fakeByteStreamClient{
 				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
-					return &fakeByteStream_WriteClient{
+					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return nil
 						},
@@ -103,7 +103,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 			name: "cache_hit",
 			bs: &fakeByteStreamClient{
 				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
-					return &fakeByteStream_WriteClient{
+					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return io.EOF
 						},
@@ -130,7 +130,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 			name: "send_error",
 			bs: &fakeByteStreamClient{
 				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
-					return &fakeByteStream_WriteClient{
+					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return errWrite
 						},
@@ -156,7 +156,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 			name: "send_retry_timeout",
 			bs: &fakeByteStreamClient{
 				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
-					return &fakeByteStream_WriteClient{
+					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return status.Error(codes.DeadlineExceeded, "error")
 						},
@@ -183,7 +183,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 			name: "stream_close_error",
 			bs: &fakeByteStreamClient{
 				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
-					return &fakeByteStream_WriteClient{
+					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return nil
 						},
@@ -209,7 +209,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 			name: "arbitrary_offset",
 			bs: &fakeByteStreamClient{
 				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
-					return &fakeByteStream_WriteClient{
+					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							if wr.WriteOffset < 5 {
 								return fmt.Errorf("mismatched offset: want 5, got %d", wr.WriteOffset)
@@ -238,7 +238,7 @@ func TestUpload_WriteBytes(t *testing.T) {
 			name: "finish_write",
 			bs: &fakeByteStreamClient{
 				write: func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
-					return &fakeByteStream_WriteClient{
+					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							if len(wr.Data) == 0 && !wr.FinishWrite {
 								return fmt.Errorf("finish write was not set")
@@ -269,11 +269,11 @@ func TestUpload_WriteBytes(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			testRpcCfg := defaultRPCCfg
+			testRPCCfg := defaultRPCCfg
 			if test.retryPolicy != nil {
-				testRpcCfg.RetryPolicy = *test.retryPolicy
+				testRPCCfg.RetryPolicy = *test.retryPolicy
 			}
-			u, err := casng.NewBatchingUploader(context.Background(), &fakeCAS{}, test.bs, "", testRpcCfg, testRpcCfg, testRpcCfg, defaultIOCfg)
+			u, err := casng.NewBatchingUploader(context.Background(), &fakeCAS{}, test.bs, "", testRPCCfg, testRPCCfg, testRPCCfg, defaultIOCfg)
 			if err != nil {
 				t.Fatalf("error creating batching uploader: %v", err)
 			}

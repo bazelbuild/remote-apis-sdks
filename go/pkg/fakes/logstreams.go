@@ -23,7 +23,7 @@ func NewLogStreams() *LogStreams {
 	return &LogStreams{streams: make(map[string][][]byte)}
 }
 
-// Clear() removes all logstreams.
+// Clear removes all logstreams.
 func (l *LogStreams) Clear() {
 	l.streams = make(map[string][][]byte)
 }

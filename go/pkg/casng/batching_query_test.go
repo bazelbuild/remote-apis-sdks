@@ -98,5 +98,4 @@ func TestQuery_Batching(t *testing.T) {
 			}
 		})
 	}
-	log.Flush()
 }
