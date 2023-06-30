@@ -439,6 +439,8 @@ func (c *Client) ExecuteAction(ctx context.Context, actionDigest, actionRoot, ou
 	fmt.Printf("---------------\n")
 	fmt.Printf("Action digest: %v\n", ec.Metadata.ActionDigest.String())
 	fmt.Printf("Command digest: %v\n", ec.Metadata.CommandDigest.String())
+	fmt.Printf("Stdout digest: %v\n", ec.Metadata.StdoutDigest.String())
+	fmt.Printf("Stderr digest: %v\n", ec.Metadata.StderrDigest.String())
 	fmt.Printf("Number of Input Files: %v\n", ec.Metadata.InputFiles)
 	fmt.Printf("Number of Input Dirs: %v\n", ec.Metadata.InputDirectories)
 	fmt.Printf("Number of Output Files: %v\n", ec.Metadata.OutputFiles)

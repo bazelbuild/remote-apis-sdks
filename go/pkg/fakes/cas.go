@@ -29,8 +29,10 @@ import (
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
 
-var zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
-var zstdDecoder, _ = zstd.NewReader(nil)
+var (
+	zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
+	zstdDecoder, _ = zstd.NewReader(nil)
+)
 
 // Reader implements ByteStream's Read interface, returning one blob.
 type Reader struct {
@@ -684,8 +686,11 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 
 // Read implements the corresponding RE API function.
 func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
-	if req.ReadOffset != 0 || req.ReadLimit != 0 {
-		return status.Error(codes.Unimplemented, "test fake does not implement read_offset or limit")
+	if req.ReadOffset < 0 {
+		return status.Error(codes.InvalidArgument, "test fake expected a positive value for offset")
+	}
+	if req.ReadLimit != 0 {
+		return status.Error(codes.Unimplemented, "test fake does not implement limit")
 	}
 
 	path := strings.Split(req.ResourceName, "/")
@@ -726,12 +731,25 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 	}
 
 	resp := &bspb.ReadResponse{}
+	var offset int64
 	for ch.HasNext() {
 		chunk, err := ch.Next()
-		resp.Data = chunk.Data
 		if err != nil {
 			return err
 		}
+		// Seek to req.ReadOffset.
+		offset += int64(len(chunk.Data))
+		if offset < req.ReadOffset {
+			continue
+		}
+		// Scale the offset to the chunk.
+		offset = offset - req.ReadOffset         // The chunk tail that we want.
+		offset = int64(len(chunk.Data)) - offset // The chunk head that we don't want.
+		if offset < 0 {
+			// The chunk is past the offset.
+			offset = 0
+		}
+		resp.Data = chunk.Data[int(offset):]
 		err = stream.Send(resp)
 		if err != nil {
 			return err

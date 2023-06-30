@@ -395,6 +395,10 @@ func TestStreamOutErr(t *testing.T) {
 		requestStreams  bool
 		hasStdOutStream bool
 		hasStdErrStream bool
+		outChunks       []string
+		errChunks       []string
+		outContent      string
+		errContent      string
 		wantRes         *command.Result
 		wantStdOut      string
 		wantStdErr      string
@@ -413,6 +417,8 @@ func TestStreamOutErr(t *testing.T) {
 			requestStreams:  false,
 			hasStdOutStream: true,
 			hasStdErrStream: true,
+			outContent:      "stdout-blob",
+			errContent:      "stderr-blob",
 			wantRes:         &command.Result{Status: command.SuccessResultStatus},
 			wantStdOut:      "stdout-blob",
 			wantStdErr:      "stderr-blob",
@@ -422,6 +428,7 @@ func TestStreamOutErr(t *testing.T) {
 			requestStreams:  true,
 			hasStdOutStream: true,
 			hasStdErrStream: false,
+			errContent:      "stderr-blob",
 			wantRes:         &command.Result{Status: command.SuccessResultStatus},
 			wantStdOut:      "streaming-stdout",
 			wantStdErr:      "stderr-blob",
@@ -431,6 +438,7 @@ func TestStreamOutErr(t *testing.T) {
 			requestStreams:  true,
 			hasStdOutStream: false,
 			hasStdErrStream: true,
+			outContent:      "stdout-blob",
 			wantRes:         &command.Result{Status: command.SuccessResultStatus},
 			wantStdOut:      "stdout-blob",
 			wantStdErr:      "streaming-stderr",
@@ -440,6 +448,8 @@ func TestStreamOutErr(t *testing.T) {
 			requestStreams:  true,
 			hasStdOutStream: false,
 			hasStdErrStream: false,
+			outContent:      "stdout-blob",
+			errContent:      "stderr-blob",
 			wantRes:         &command.Result{Status: command.SuccessResultStatus},
 			wantStdOut:      "stdout-blob",
 			wantStdErr:      "stderr-blob",
@@ -459,6 +469,8 @@ func TestStreamOutErr(t *testing.T) {
 			requestStreams:  true,
 			hasStdOutStream: true,
 			hasStdErrStream: true,
+			outContent:      "stdout-blob",
+			errContent:      "stderr-blob",
 			wantRes:         &command.Result{Status: command.CacheHitResultStatus},
 			wantStdOut:      "stdout-blob",
 			wantStdErr:      "stderr-blob",
@@ -483,6 +495,20 @@ func TestStreamOutErr(t *testing.T) {
 			wantStdOut:      "streaming-stdout",
 			wantStdErr:      "streaming-stderr",
 		},
+		{
+			name:            "remote failure partial stream",
+			requestStreams:  true,
+			hasStdOutStream: true,
+			hasStdErrStream: true,
+			outChunks:       []string{"streaming"},
+			errChunks:       []string{"streaming"},
+			outContent:      "streaming-stdout",
+			errContent:      "streaming-stderr",
+			status:          status.New(codes.Internal, "problem"),
+			wantRes:         command.NewRemoteErrorResult(status.New(codes.Internal, "problem").Err()),
+			wantStdOut:      "streaming-stdout",
+			wantStdErr:      "streaming-stderr",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -500,11 +526,27 @@ func TestStreamOutErr(t *testing.T) {
 				DownloadOutErr:  true,
 				StreamOutErr:    tc.requestStreams,
 			}
+			outChunks := tc.outChunks
+			if outChunks == nil {
+				outChunks = []string{"streaming", "-", "stdout"}
+			}
+			errChunks := tc.errChunks
+			if errChunks == nil {
+				errChunks = []string{"streaming", "-", "stderr"}
+			}
+			outContent := tc.outContent
+			if outContent == "" {
+				outContent = "streaming-stdout"
+			}
+			errContent := tc.errContent
+			if errContent == "" {
+				errContent = "streaming-stderr"
+			}
 			opts := []fakes.Option{
-				fakes.StdOut("stdout-blob"),
-				fakes.StdErr("stderr-blob"),
-				&fakes.LogStream{Name: "stdout-stream", Chunks: []string{"streaming", "-", "stdout"}},
-				&fakes.LogStream{Name: "stderr-stream", Chunks: []string{"streaming", "-", "stderr"}},
+				fakes.StdOut(outContent),
+				fakes.StdErr(errContent),
+				&fakes.LogStream{Name: "stdout-stream", Chunks: outChunks},
+				&fakes.LogStream{Name: "stderr-stream", Chunks: errChunks},
 				fakes.ExecutionCacheHit(tc.cached),
 			}
 			if tc.hasStdOutStream {
