@@ -83,8 +83,8 @@ Platform
 
 Inputs
 ======
-[Root directory digest: e23e10be0d14b5b2b1b7af32de78dea554a74df5bb22b31ae6c49583c1a8aa0e/75]
-a/b/input.txt: [File digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/0]
+[Root directory digest: 1b1d5b9e3eb97866805deca901299fcdde98b5747e147f35187e12c16e120186/75]
+a/b/input.txt: [File digest: c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86803d8891675e76fd992c20/5]
 
 ------------------------------------------------------------------------
 Action Result
