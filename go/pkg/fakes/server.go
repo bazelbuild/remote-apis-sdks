@@ -288,7 +288,7 @@ func (f *InputFile) apply(ac *repb.ActionResult, s *Server, execRoot string) err
 	if err := os.MkdirAll(filepath.Join(execRoot, filepath.Dir(f.Path)), os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create input dir %v: %v", filepath.Dir(f.Path), err)
 	}
-	err := os.WriteFile(filepath.Join(execRoot, f.Path), nil, 0755)
+	err := os.WriteFile(filepath.Join(execRoot, f.Path), bytes, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to setup file %v under temp exec root %v: %v", f.Path, execRoot, err)
 	}
