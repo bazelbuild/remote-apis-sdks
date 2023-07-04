@@ -371,15 +371,14 @@ func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, err
 	if err != nil {
 		return "", err
 	}
-	cmdProto := &repb.Command{}
-	if err := prototext.Unmarshal(cmdTxt, cmdProto); err != nil {
+	cmdPb := &repb.Command{}
+	if err := prototext.Unmarshal(cmdTxt, cmdPb); err != nil {
 		return "", err
 	}
-	cmdPb, err := proto.Marshal(cmdProto)
+	ue, err := uploadinfo.EntryFromProto(cmdPb)
 	if err != nil {
 		return "", err
 	}
-	ue := uploadinfo.EntryFromBlob(cmdPb)
 	if _, _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
 		return "", err
 	}
@@ -387,20 +386,27 @@ func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, err
 	if err != nil {
 		return "", err
 	}
-	actionProto := &repb.Action{}
-	if err := prototext.Unmarshal(ac, actionProto); err != nil {
+	acPb := &repb.Action{}
+	if err := prototext.Unmarshal(ac, acPb); err != nil {
 		return "", err
 	}
-	actionProto.CommandDigest = digest.NewFromBlob(cmdPb).ToProto()
-	acPb, err := proto.Marshal(actionProto)
+	dg, err := digest.NewFromMessage(cmdPb)
 	if err != nil {
 		return "", err
 	}
-	ue = uploadinfo.EntryFromBlob(acPb)
+	acPb.CommandDigest = dg.ToProto()
+	ue, err = uploadinfo.EntryFromProto(acPb)
+	if err != nil {
+		return "", err
+	}
 	if _, _, err := c.GrpcClient.UploadIfMissing(ctx, ue); err != nil {
 		return "", err
 	}
-	return digest.NewFromBlob(acPb).String(), nil
+	dg, err = digest.NewFromMessage(acPb)
+	if err != nil {
+		return "", err
+	}
+	return dg.String(), nil
 }
 
 // ExecuteAction executes an action in a canonical structure remotely.
