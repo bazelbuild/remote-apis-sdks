@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -81,7 +82,7 @@ func TestTool_ShowAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShowAction(%v) failed: %v", acDg.String(), err)
 	}
-	want := `Command
+	want := fmt.Sprintf(`Command
 =======
 Command Digest: 76a608e419da9ed3673f59b8b903f21dbf7cc3178281029151a090cac02d9e4d/15
 	tool
@@ -93,7 +94,7 @@ Inputs
 ======
 [Root directory digest: 456e94a43b31b158fa7b3fe8d3a8cd6f0b66ef8a6a05ab8350e03df83b9740b6/75]
 a/b/input.txt: [File digest: c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86803d8891675e76fd992c20/5]
-a/b/input2.txt: [File digest: 124d8541ff3d7a18b95432bdfbecd86816b86c8265bff44ef629765afb25f06b/6] [Node properties: properties:{name:"fooName" value:"fooValue"}]
+a/b/input2.txt: [File digest: 124d8541ff3d7a18b95432bdfbecd86816b86c8265bff44ef629765afb25f06b/6] [Node properties: %s]
 
 ------------------------------------------------------------------------
 Action Result
@@ -108,7 +109,7 @@ a/b/out, digest: e0ee8bb50685e05fa0f47ed04203ae953fdfd055f5bd2892ea186504254f8c3
 
 Output Files From Directories
 =============================
-`
+`, prototext.MarshalOptions{Multiline: false}.Format(fooProperties))
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("ShowAction(%v) returned diff (-want +got): %v\n\ngot: %v\n\nwant: %v\n", acDg.String(), diff, got, want)
 	}
