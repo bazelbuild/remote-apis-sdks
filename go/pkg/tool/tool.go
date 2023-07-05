@@ -126,18 +126,17 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 		inputRoot = filepath.Join(actionRoot, "input")
 		npPath := filepath.Join(actionRoot, "input_node_properties.textproto")
 		if _, err := os.Stat(npPath); err == nil {
-			// Read node properties from file.
 			inTxt, err := os.ReadFile(npPath)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("error reading input node properties from file: %v", err)
 			}
 			ipb := &cpb.InputSpec{}
 			if err := prototext.Unmarshal(inTxt, ipb); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("error unmarshalling input node properties from file %s: %v", npPath, err)
 			}
 			nodeProperties = ipb.InputNodeProperties
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
+			return nil, fmt.Errorf("error accessing input node properties file: %v", err)
 		}
 	}
 	contents, err := os.ReadDir(inputRoot)
@@ -375,7 +374,7 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 	is := &cpb.InputSpec{InputNodeProperties: make(map[string]*repb.NodeProperties)}
 	ts, _, err := c.GrpcClient.DownloadDirectory(ctx, rDg, rootPath, filemetadata.NewNoopCache())
 	if err != nil {
-		return err
+		return fmt.Errorf("error fetching input tree: %v", err)
 	}
 	for path, t := range ts {
 		if t.NodeProperties != nil {

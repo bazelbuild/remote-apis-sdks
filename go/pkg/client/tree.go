@@ -377,6 +377,7 @@ func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[d
 	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
 
 	for name, n := range t.leaves {
+		// A node can have exactly one of file/symlink/emptyDirectoryMarker.
 		if n.file != nil {
 			dg := n.file.ue.Digest
 			dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: n.nodeProperties})
@@ -529,6 +530,7 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 	sort.Slice(root.Directories, func(i, j int) bool { return root.Directories[i].Name < root.Directories[j].Name })
 
 	for name, n := range t.leaves {
+		// A node can have exactly one of file/symlink/emptyDirectoryMarker.
 		if n.file != nil {
 			dg := n.file.ue.Digest
 			root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: n.nodeProperties})
