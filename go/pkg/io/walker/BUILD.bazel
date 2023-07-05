@@ -15,7 +15,6 @@ go_library(
 go_test(
     name = "walker_test",
     srcs = [
-        "filter_test.go",
         "walker_test.go",
     ],
     deps = [

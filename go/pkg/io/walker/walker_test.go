@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -96,7 +95,7 @@ func TestWalker(t *testing.T) {
 		{
 			name:          "skip_file_by_path",
 			paths:         []string{"foo.c"},
-			filter:        walker.Filter{Regexp: regexp.MustCompile("foo.c")},
+			filter:        walker.Filter{Path: func(path string) bool { return strings.HasSuffix(path, "foo.c") }},
 			wantRealCount: pathCount{},
 		},
 		{

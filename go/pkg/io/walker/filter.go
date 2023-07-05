@@ -1,79 +1,40 @@
 package walker
 
-import (
-	"fmt"
-	"io/fs"
-	"path/filepath"
-	"regexp"
-)
+import "io/fs"
 
-// Filter specifies a filter for paths during traversal.
-// The zero value matches nothing.
+// Filter defines an interface for matching paths during traversal.
+// The matching semantics, whether matches are included or excluded, is defined by the consumer.
 type Filter struct {
-	// Regexp specifies what paths should match with this filter.
-	//
-	// The file separator must be the forwrad slash. All paths will have
-	// their separators converted to forward slash before matching with this regexp.
-	//
-	// If nil, any path will match.
-	Regexp *regexp.Regexp
-
-	// Mode is matched using the equality operator.
-	Mode fs.FileMode
+	// Path accepts a path, absolute or relative, and returns true if it's a match.
+	Path func(path string) bool
+	// File accepts a path, absolute or relative, and a mode and returns true if it's a match.
+	File func(path string, mode fs.FileMode) bool
+	// ID returns a unique identifier for this filter.
+	// The identifier may be used by consumers to deduplicate filters so it must be unique within the consumers scope.
+	ID func() string
 }
 
-// Path is used when the filter is a regexp only.
-//
-// If the filter's mode is set (not zero), false is returned regardless of the regexp value.
-// If the regexp is nil, false is returned.
-// If path matches the regexp, true is returned.
-func (f Filter) Path(path string) bool {
-	if f.Regexp == nil || f.Mode != 0 {
+// MatchPath delegates to Path if set. Otherwise, returns false.
+func (f *Filter) MatchPath(path string) bool {
+	if f == nil || f.Path == nil {
 		return false
 	}
-	return f.match(path, f.Mode)
+	return f.Path(path)
 }
 
-// File matches path and mode.
-//
-// If either of the filter's regexp or mode is not set, false is returned.
-// Only if both path and mode match the filter's, true is returned.
-func (f Filter) File(path string, mode fs.FileMode) bool {
-	if f.Regexp == nil || f.Mode == 0 {
+// MatchFile delegates to File if set. Otherwise, returns false.
+func (f *Filter) MatchFile(path string, mode fs.FileMode) bool {
+	if f == nil || f.File == nil {
 		return false
 	}
-	return f.match(path, mode)
+	return f.File(path, mode)
 }
 
-func (f Filter) match(path string, mode fs.FileMode) bool {
-	return mode == f.Mode && f.Regexp.MatchString(filepath.ToSlash(path))
-}
-
-// String returns a string representation of the filter.
-//
-// If this is a zero or a nil filter, the empty string is returned.
-// A zero filter has regexp compiled from the empty string and 0 mode.
-//
-// It can be used as a stable identifier. However, keep in mind that
-// multiple regular expressions may yield the same automaton. I.e. even
-// if two filters have different identifiers, they may still yield the same
-// traversal result.
+// String delegates to ID if set. Otherwise, returns the empty string.
 func (f Filter) String() string {
-	// zero filter: ""
-	// regexp only: "<regexp>"
-	// mode only: ";<mode>"
-	// both: "<regexp>;<mode>"
-
-	if f.Regexp == nil && f.Mode == 0 {
+	// Value receiver is used to ensure the method is called on both a pointer and value receiver.
+	if f.ID == nil {
 		return ""
 	}
-
-	reStr := ""
-	if f.Regexp != nil {
-		reStr = f.Regexp.String()
-	}
-	if f.Mode == 0 {
-		return reStr
-	}
-	return fmt.Sprintf("%s;%d", reStr, f.Mode)
+	return f.ID()
 }
