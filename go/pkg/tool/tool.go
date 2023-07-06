@@ -147,21 +147,21 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 }
 
 func readNodePropertiesFromFile(path string) (nps map[string]*repb.NodeProperties, err error) {
-	if _, err = os.Stat(path); err == nil {
-		inTxt, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("error reading input node properties from file: %v", err)
+	if _, err = os.Stat(path); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("error accessing input node properties file: %v", err)
 		}
-		ipb := &cpb.InputSpec{}
-		if err := prototext.Unmarshal(inTxt, ipb); err != nil {
-			return nil, fmt.Errorf("error unmarshalling input node properties from file %s: %v", path, err)
-		}
-		return ipb.InputNodeProperties, nil
+		return nil, nil
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("error accessing input node properties file: %v", err)
+	inTxt, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("error reading input node properties from file: %v", err)
 	}
-	return nil, nil
+	ipb := &cpb.InputSpec{}
+	if err := prototext.Unmarshal(inTxt, ipb); err != nil {
+		return nil, fmt.Errorf("error unmarshalling input node properties from file %s: %v", path, err)
+	}
+	return ipb.InputNodeProperties, nil
 }
 
 // DownloadActionResult downloads the action result of the given action digest
