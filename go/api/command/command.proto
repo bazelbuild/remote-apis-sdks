@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package cmd;
 
+import "build/bazel/remote/execution/v2/remote_execution.proto";
 import "google/protobuf/timestamp.proto";
 
 // A command to execute locally or remotely.
@@ -123,6 +124,9 @@ message InputSpec {
 
   // Determines how symlinks should be treated when constructing the input tree.
   SymlinkBehaviorType.Value symlink_behavior = 6;
+
+  // Node properties of inputs.
+  map<string,build.bazel.remote.execution.v2.NodeProperties> input_node_properties = 7;
 }
 
 message OutputSpec {

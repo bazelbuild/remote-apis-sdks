@@ -277,7 +277,7 @@ func (ec *Context) UpdateCachedResult() {
 	if !ec.client.GrpcClient.LegacyExecRootRelativeOutputs {
 		wd = ec.cmd.WorkingDir
 	}
-	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, wd, outPaths, ec.client.FileMetadataCache, ec.cmd.InputSpec.SymlinkBehavior)
+	blobs, resPb, err := ec.client.GrpcClient.ComputeOutputsToUpload(ec.cmd.ExecRoot, wd, outPaths, ec.client.FileMetadataCache, ec.cmd.InputSpec.SymlinkBehavior, ec.cmd.InputSpec.InputNodeProperties)
 	if err != nil {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
