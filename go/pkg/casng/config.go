@@ -66,6 +66,7 @@ type GRPCConfig struct {
 	// BytesLimit sets the upper bound for the size of each request.
 	// Comparisons against this value may not be exact due to padding and other serialization naunces.
 	// Clients should choose a value that is sufficiently lower than the max size limit for the corresponding gRPC connection.
+	// Any blob that does not fit in a batching request based on this value will be streamed using the ByteStream API.
 	// Must be > 0.
 	// This is defined as int rather than int64 because gRPC uses int for its limit.
 	BytesLimit int
@@ -237,6 +238,7 @@ func (s *Stats) Add(other Stats) {
 // ToCacheHit returns a copy of the stats that represents a cache hit of the original.
 // All "bytes moving" stats are zeroed-out and cache stats are updated based on other values.
 // Everything else remains the same.
+// A pointer receiver allows this method to work on nil values of this type.
 func (s *Stats) ToCacheHit() Stats {
 	if s == nil {
 		return Stats{}

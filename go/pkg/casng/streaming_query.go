@@ -47,6 +47,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
+	"github.com/pborman/uuid"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -62,13 +63,10 @@ type MissingBlobsResponse struct {
 // missingBlobRequest associates a digest with its requester's context.
 type missingBlobRequest struct {
 	digest digest.Digest
-	tag    tag
+	id     string
+	tag    string
 	ctx    context.Context
 }
-
-// missingBlobRequestBundle is a set of digests, each is associated with multiple tags (requesters).
-// It is used for unified requests when multiple concurrent requesters share seats in the same bundle.
-type missingBlobRequestBundle = map[digest.Digest][]tag
 
 // MissingBlobs is a non-blocking call that queries the CAS for incoming digests.
 //
@@ -94,7 +92,7 @@ func (u *StreamingUploader) MissingBlobs(ctx context.Context, in <-chan digest.D
 		defer u.clientSenderWg.Done()
 		defer close(pipeIn)
 		for d := range in {
-			pipeIn <- missingBlobRequest{digest: d, ctx: ctx}
+			pipeIn <- missingBlobRequest{digest: d, ctx: ctx, id: uuid.New()}
 		}
 	}()
 	return out
@@ -185,12 +183,17 @@ func (u *uploader) missingBlobsPipe(in <-chan missingBlobRequest) <-chan Missing
 	return ch
 }
 
+// digestStrings is used to bundle up (unify) concurrent requests for the same digest from different requesters (tags).
+// It's also used to associate digests with request IDs for loggging purposes.
+type digestStrings map[digest.Digest][]string
+
 // queryProcessor is the fan-in handler that manages the bundling and dispatching of incoming requests.
 func (u *uploader) queryProcessor() {
 	log.V(1).Info("[casng] query.processor.start")
 	defer log.V(1).Info("[casng] query.processor.stop")
 
-	bundle := make(missingBlobRequestBundle)
+	bundle := make(digestStrings)
+	reqs := make(digestStrings)
 	ctx := u.ctx // context with unified metadata.
 	bundleSize := u.queryRequestBaseSize
 
@@ -208,18 +211,20 @@ func (u *uploader) queryProcessor() {
 					Err:    u.ctx.Err(),
 				}, bundle[d]...)
 			}
+			log.V(3).Infof("[casng] query.cancel")
 			return
 		}
-		log.V(3).Infof("[casng] query.throttle.duration: start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+		log.V(3).Infof("[casng] query.throttle.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
 
 		u.workerWg.Add(1)
-		go func(ctx context.Context, b missingBlobRequestBundle) {
+		go func(ctx context.Context, b, r digestStrings) {
 			defer u.workerWg.Done()
 			defer u.queryThrottler.release()
-			u.callMissingBlobs(ctx, b)
-		}(ctx, bundle)
+			u.callMissingBlobs(ctx, b, r)
+		}(ctx, bundle, reqs)
 
-		bundle = make(missingBlobRequestBundle)
+		bundle = make(digestStrings)
+		reqs = make(digestStrings)
 		bundleSize = u.queryRequestBaseSize
 		ctx = u.ctx
 	}
@@ -234,7 +239,7 @@ func (u *uploader) queryProcessor() {
 			}
 			startTime := time.Now()
 
-			log.V(3).Infof("[casng] query.processor.req: digest=%s, tag=%s, bundle=%d", req.digest, req.tag, len(bundle))
+			log.V(3).Infof("[casng] query.processor.req; digest=%s, req=%s, tag=%s, bundle=%d", req.digest, req.id, req.tag, len(bundle))
 			dSize := proto.Size(req.digest.ToProto())
 
 			// Check oversized items.
@@ -244,7 +249,7 @@ func (u *uploader) queryProcessor() {
 					Err:    ErrOversizedItem,
 				}, req.tag)
 				// Covers waiting on subscribers.
-				log.V(3).Infof("[casng] query.pub.duration: start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+				log.V(3).Infof("[casng] query.pub.duration; start=%d, end=%d, req=%s, tag=%s", startTime.UnixNano(), time.Now().UnixNano(), req.id, req.tag)
 				continue
 			}
 
@@ -269,10 +274,10 @@ func (u *uploader) queryProcessor() {
 }
 
 // callMissingBlobs calls the gRPC endpoint and notifies requesters of the results.
-// It assumes ownership of the bundle argument.
-func (u *uploader) callMissingBlobs(ctx context.Context, bundle missingBlobRequestBundle) {
-	digests := make([]*repb.Digest, 0, len(bundle))
-	for d := range bundle {
+// It assumes ownership of its arguments. digestTags is the primary one. digestReqs is used for logging purposes.
+func (u *uploader) callMissingBlobs(ctx context.Context, digestTags, digestReqs digestStrings) {
+	digests := make([]*repb.Digest, 0, len(digestTags))
+	for d := range digestTags {
 		digests = append(digests, d.ToProto())
 	}
 
@@ -290,7 +295,7 @@ func (u *uploader) callMissingBlobs(ctx context.Context, bundle missingBlobReque
 		res, err = u.cas.FindMissingBlobs(ctx, req)
 		return err
 	})
-	log.V(3).Infof("[casng] query.grpc.duration: start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+	log.V(3).Infof("[casng] query.grpc.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
 
 	var missing []*repb.Digest
 	if res != nil {
@@ -309,16 +314,16 @@ func (u *uploader) callMissingBlobs(ctx context.Context, bundle missingBlobReque
 			Digest:  d,
 			Missing: err == nil,
 			Err:     err,
-		}, bundle[d]...)
-		delete(bundle, d)
+		}, digestTags[d]...)
+		delete(digestTags, d)
 	}
 
 	// Report non-missing.
-	for d := range bundle {
+	for d := range digestTags {
 		u.queryPubSub.pub(MissingBlobsResponse{
 			Digest:  d,
 			Missing: false,
-		}, bundle[d]...)
+		}, digestTags[d]...)
 	}
-	log.V(3).Infof("[casng] query.pub.duration: start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+	log.V(3).Infof("[casng] query.pub.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
 }

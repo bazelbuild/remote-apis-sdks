@@ -27,7 +27,7 @@ import (
 // In other words, if an error is returned, any digest that is not in the returned slice is not missing.
 // If no error is returned, the returned slice contains all the missing digests.
 func (u *BatchingUploader) MissingBlobs(ctx context.Context, digests []digest.Digest) ([]digest.Digest, error) {
-	contextmd.Infof(ctx, log.Level(1), "[casng] batch.query: len=%d", len(digests))
+	contextmd.Infof(ctx, log.Level(1), "[casng] batch.query; len=%d", len(digests))
 	if len(digests) == 0 {
 		return nil, nil
 	}
@@ -53,7 +53,7 @@ func (u *BatchingUploader) MissingBlobs(ctx context.Context, digests []digest.Di
 	if len(batches) == 0 {
 		return nil, nil
 	}
-	contextmd.Infof(ctx, log.Level(1), "[casng] batch.query.deduped: len=%d", len(dgSet))
+	contextmd.Infof(ctx, log.Level(1), "[casng] batch.query.deduped; len=%d", len(dgSet))
 
 	// Call remote.
 	missing := make([]digest.Digest, 0, len(dgSet))
@@ -80,7 +80,7 @@ func (u *BatchingUploader) MissingBlobs(ctx context.Context, digests []digest.Di
 			missing = append(missing, digest.NewFromProtoUnvalidated(d))
 		}
 	}
-	contextmd.Infof(ctx, log.Level(1), "[casng] batch.query.done: missing=%d", len(missing))
+	contextmd.Infof(ctx, log.Level(1), "[casng] batch.query.done; missing=%d", len(missing))
 
 	if err != nil {
 		err = errors.Join(ErrGRPC, err)
@@ -101,29 +101,33 @@ func (u *BatchingUploader) MissingBlobs(ctx context.Context, digests []digest.Di
 // The errors returned are either from the context, ErrGRPC, ErrIO, or ErrCompression. More errors may be wrapped inside.
 // If an error was returned, the returned stats may indicate that all the bytes were sent, but that does not guarantee that the server committed all of them.
 func (u *BatchingUploader) WriteBytes(ctx context.Context, name string, r io.Reader, size, offset int64) (Stats, error) {
+	startTime := time.Now()
 	if !u.streamThrottle.acquire(ctx) {
 		return Stats{}, ctx.Err()
 	}
 	defer u.streamThrottle.release()
+	log.V(3).Infof("[casng] upload.write_bytes.throttle.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
 	return u.writeBytes(ctx, name, r, size, offset, true)
 }
 
 // WriteBytesPartial is the same as WriteBytes, but does not notify the server to finalize the resource name.
 func (u *BatchingUploader) WriteBytesPartial(ctx context.Context, name string, r io.Reader, size, offset int64) (Stats, error) {
+	startTime := time.Now()
 	if !u.streamThrottle.acquire(ctx) {
 		return Stats{}, ctx.Err()
 	}
 	defer u.streamThrottle.release()
+	log.V(3).Infof("[casng] upload.write_bytes.throttle.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
 	return u.writeBytes(ctx, name, r, size, offset, false)
 }
 
 func (u *uploader) writeBytes(ctx context.Context, name string, r io.Reader, size, offset int64, finish bool) (Stats, error) {
-	contextmd.Infof(ctx, log.Level(1), "[casng] upload.write_bytes: name=%s, size=%d, offset=%d, finish=%t", name, size, offset, finish)
-	defer contextmd.Infof(ctx, log.Level(1), "[casng] upload.write_bytes.done: name=%s, size=%d, offset=%d, finish=%t", name, size, offset, finish)
+	contextmd.Infof(ctx, log.Level(1), "[casng] upload.write_bytes; name=%s, size=%d, offset=%d, finish=%t", name, size, offset, finish)
+	defer contextmd.Infof(ctx, log.Level(1), "[casng] upload.write_bytes.done; name=%s, size=%d, offset=%d, finish=%t", name, size, offset, finish)
 	if log.V(3) {
 		startTime := time.Now()
 		defer func() {
-			log.Infof("[casng] upload.write_bytes.duration: start=%d, end=%d, name=%s, size=%d, chunk_size=%d", startTime.UnixNano(), time.Now().UnixNano(), name, size, u.ioCfg.BufferSize)
+			log.Infof("[casng] upload.write_bytes.duration; start=%d, end=%d, name=%s, size=%d, chunk_size=%d", startTime.UnixNano(), time.Now().UnixNano(), name, size, u.ioCfg.BufferSize)
 		}()
 	}
 
@@ -137,7 +141,7 @@ func (u *uploader) writeBytes(ctx context.Context, name string, r io.Reader, siz
 	var encWg sync.WaitGroup
 	var withCompression bool // Used later to ensure the pipe is closed.
 	if IsCompressedWriteResourceName(name) {
-		contextmd.Infof(ctx, log.Level(1), "[casng] upload.write_bytes.compressing: name=%s, size=%d", name, size)
+		contextmd.Infof(ctx, log.Level(1), "[casng] upload.write_bytes.compressing; name=%s, size=%d", name, size)
 		withCompression = true
 		pr, pw := io.Pipe()
 		// Closing pr always returns a nil error, but also sends ErrClosedPipe to pw.
@@ -193,7 +197,6 @@ func (u *uploader) writeBytes(ctx context.Context, name string, r io.Reader, siz
 		}
 
 		n64 := int64(n)
-		stats.LogicalBytesMoved += n64 // This may be adjusted later to exclude compression. See below.
 		stats.EffectiveBytesMoved += n64
 
 		req.Data = buf[:n]
@@ -250,8 +253,8 @@ func (u *uploader) writeBytes(ctx context.Context, name string, r io.Reader, siz
 
 	// Capture stats before processing errors.
 	stats.BytesRequested = size
-	if nRawBytes > 0 {
-		// Compression was turned on.
+	stats.LogicalBytesMoved = stats.EffectiveBytesMoved
+	if withCompression {
 		// nRawBytes may be smaller than compressed bytes (additional headers without effective compression).
 		stats.LogicalBytesMoved = nRawBytes
 	}
