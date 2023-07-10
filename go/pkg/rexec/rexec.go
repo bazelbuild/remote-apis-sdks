@@ -418,12 +418,12 @@ func (ec *Context) ExecuteRemotely() {
 		ec.setOutputMetadata()
 		ec.Result = command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 		if ec.opt.DownloadOutErr {
-			if ec.resPb.StdoutDigest == nil || ec.resPb.StdoutDigest.SizeBytes > nOutStreamed {
+			if nOutStreamed < int64(len(ec.resPb.StdoutRaw)) || nOutStreamed < ec.resPb.GetStdoutDigest().GetSizeBytes() {
 				if err := ec.downloadStream(ec.resPb.StdoutRaw, ec.resPb.StdoutDigest, nOutStreamed, ec.oe.WriteOut); err != nil {
 					ec.Result = command.NewRemoteErrorResult(err)
 				}
 			}
-			if ec.resPb.StderrDigest == nil || ec.resPb.StderrDigest.SizeBytes > nErrStreamed {
+			if nErrStreamed < int64(len(ec.resPb.StderrRaw)) || nErrStreamed < ec.resPb.GetStderrDigest().GetSizeBytes() {
 				if err := ec.downloadStream(ec.resPb.StderrRaw, ec.resPb.StderrDigest, nErrStreamed, ec.oe.WriteErr); err != nil {
 					ec.Result = command.NewRemoteErrorResult(err)
 				}
