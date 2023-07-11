@@ -1,7 +1,6 @@
 package casng
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -69,13 +68,13 @@ func (ps *pubsub) unsub(t tag) {
 // Returns when all active subscribers have received their copies or timed out.
 // Inactive subscribers (expired by cancelling their context) are skipped (their copies are dropped).
 //
-// A busy subscriber does not block others from receiving their copies, but will delay this call by up to the specified timeout on the broker.
-//
-// A pool of workers of the same size of tags is used. Each worker attempts to deliver the message to the corresponding subscriber.
-// The pool size is a function of the client's concurrency.
-// E.g. if 500 workers are publishing messages, with an average of 10 clients per message, the pool size will be 5,000.
-// The maximum theoretical pool size for n publishers publishing every message to m subscribers is nm.
-// However, the expected average case is few clients per message so the pool size should be close to the concurrency limit.
+// A busy subscriber does not block others from receiving their copies. It is instead
+// rescheduled for another attempt once all others get a chance to receive.
+// To prevent a temporarily infinite round-robin loop from consuming too much CPU, each subscriber
+// gets at most 10ms to receive before getting rescheduled.
+// Blocking 10ms for every subscriber amortizes much better than blocking 10ms for every
+// iteration on the subscribers, even though both have the same worst-case cost.
+// For example, if out of 10 subscribers 5 were busy for 1ms, the attempt will cost ~5ms instead of 10ms.
 func (ps *pubsub) pub(m any, tags ...tag) {
 	_ = ps.pubN(m, len(tags), tags...)
 }
@@ -118,59 +117,47 @@ func (ps *pubsub) pubN(m any, n int, tags ...tag) []tag {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 
-	log.V(4).Infof("[casng] pubsub.pub.msg: type=%[1]T, value=%[1]v", m)
-	ctx, ctxCancel := context.WithTimeout(context.Background(), ps.timeout)
-	defer ctxCancel()
+	log.V(4).Infof("[casng] pubsub.pub.msg; type=%[1]T, value=%[1]v", m)
 
-	// Optimize for the usual case of a single receiver.
-	if len(tags) == 1 {
-		t := tags[0]
-		s := ps.subs[t]
-		select {
-		case s <- m:
-		case <-ctx.Done():
-			log.Errorf("pubsub timeout for %s", t)
-			return nil
-		}
-		return tags
-	}
+	var toRetry []tag
+	var received []tag
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 
-	wg := sync.WaitGroup{}
-	received := make([]tag, 0, len(tags))
-	r := make(chan tag)
-	go func() {
-		for t := range r {
-			received = append(received, t)
-		}
-		wg.Done()
-	}()
-	for _, t := range tags {
-		s := ps.subs[t]
-		wg.Add(1)
-		go func(t tag) {
-			defer wg.Done()
-			select {
-			case s <- m:
-				r <- t
-			case <-ctx.Done():
-				log.Errorf("pubsub timeout for %s", t)
+	for {
+		for _, t := range tags {
+			subscriber, ok := ps.subs[t]
+			if !ok {
+				log.V(3).Infof("[casng] pubsub.pub.drop: tag=%s", t)
+				continue
 			}
-		}(t)
+			// Send now or reschedule if the subscriber is not ready.
+			select {
+			case subscriber <- m:
+				log.V(3).Infof("[casng] pubsub.pub.send: tag=%s", t)
+				received = append(received, t)
+				if len(received) >= n {
+					return received
+				}
+			case <-ticker.C:
+				toRetry = append(toRetry, t)
+			}
+		}
+		if len(toRetry) == 0 {
+			break
+		}
+		// Reuse the underlying arrays by swapping slices and resetting one of them.
+		tags, toRetry = toRetry, tags
+		toRetry = toRetry[:0]
 	}
-
-	// Wait for subscribers.
-	wg.Wait()
-
-	// Wait for the aggregator.
-	wg.Add(1)
-	close(r)
-	wg.Wait()
 	return received
 }
 
 // wait blocks until all existing subscribers unsubscribe.
 // The signal is a snapshot. The broker my get more subscribers after returning from this call.
 func (ps *pubsub) wait() {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
 	<-ps.done
 }
 
@@ -195,15 +182,17 @@ func excludeTag(tags []tag, et tag) []tag {
 	if len(tags) == 0 {
 		return []tag{}
 	}
-	ts := make([]tag, 0, len(tags)-1)
-	// Only exclude the tag once.
-	excluded := false
-	for _, t := range tags {
-		if !excluded && t == et {
-			excluded = true
-			continue
+	// Remove the first instance by replacing it with the last item then reslicing to exclude the last (now redundant) item.
+	index := -1
+	for i, t := range tags {
+		if t == et {
+			index = i
+			break
 		}
-		ts = append(ts, t)
 	}
-	return ts
+	if index < 0 {
+		return tags
+	}
+	tags[index] = tags[len(tags)-1]
+	return tags[:len(tags)-1]
 }
