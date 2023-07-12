@@ -1,4 +1,3 @@
-// Using a different package name to strictly exclude types defined here from the original package.
 package casng_test
 
 import (
@@ -8,6 +7,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
+
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"

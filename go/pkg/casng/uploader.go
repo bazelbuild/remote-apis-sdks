@@ -71,14 +71,22 @@ package casng
 //   the batcher and the streamer terminate.
 //   user waits for the termination signal: return from batching uploader or response channel closed from streaming uploader.
 //       this ensures the whole pipeline is drained properly.
-
-// A note about logging:
 //
-//		Level 1 is used for top-level functions, typically called once during the lifetime of the process or initiated by the user.
-//		Level 2 is used for internal functions that may be called per request.
-//		Level 3 is used for internal functions that may be called multiple times per request. Duration logs are also level 3 to avoid the overhead in level 4.
-//	 Level 4 is used for messages with large objects.
-//	 Level 5 is used for messages that require custom processing (extra compute).
+// A note about logging:
+//	Level 1 is used for top-level functions, typically called once during the lifetime of the process or initiated by the user.
+//	Level 2 is used for internal functions that may be called per request.
+//	Level 3 is used for internal functions that may be called multiple times per request. Duration logs are also level 3 to avoid the overhead in level 4.
+//  Level 4 is used for messages with large objects.
+//  Level 5 is used for messages that require custom processing (extra compute).
+//
+// Log messages are formatted to be grep-friendly. You can do things like:
+//   grep info.log -e 'casng'
+//   grep info.log -e 'upload.digester'
+//   grep info.log -e 'req=request_id'
+//   grep info.log -e 'tag=requester_id'
+//
+// To get a csv file of durations, enable verbosity level 3 and use the command:
+//   grep info.log -e 'casng.*duration:' | cut -d ' ' -f 6-8 | sed -e 's/: start=/,/' -e 's/, end=/,/' -e 's/,$//' > /tmp/durations.csv
 
 import (
 	"context"
@@ -95,6 +103,7 @@ import (
 	log "github.com/golang/glog"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pborman/uuid"
+
 	// Alias should not be changed because it's used as is for the google3 mirror.
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/protobuf/proto"
@@ -229,6 +238,7 @@ func NewStreamingUploader(
 	return &StreamingUploader{uploader: uploader}, nil
 }
 
+// TODO: support uploading repb.Tree.
 func newUploader(
 	ctx context.Context, cas regrpc.ContentAddressableStorageClient, byteStream bsgrpc.ByteStreamClient, instanceName string,
 	queryCfg, uploadCfg, streamCfg GRPCConfig, ioCfg IOConfig,
@@ -285,7 +295,7 @@ func newUploader(
 		uploadRequestBaseSize:     proto.Size(&repb.BatchUpdateBlobsRequest{InstanceName: instanceName, Requests: []*repb.BatchUpdateBlobsRequest_Request{}}),
 		uploadRequestItemBaseSize: proto.Size(&repb.BatchUpdateBlobsRequest_Request{Digest: digest.NewFromBlob([]byte("abc")).ToProto(), Data: []byte{}}),
 	}
-	log.V(1).Infof("[casng] uploader.new: cfg_query=%+v, cfg_batch=%+v, cfg_stream=%+v, cfg_io=%+v", queryCfg, uploadCfg, streamCfg, ioCfg)
+	log.V(1).Infof("[casng] uploader.new; cfg_query=%+v, cfg_batch=%+v, cfg_stream=%+v, cfg_io=%+v", queryCfg, uploadCfg, streamCfg, ioCfg)
 
 	u.processorWg.Add(1)
 	go func() {
@@ -314,7 +324,7 @@ func (u *uploader) close() {
 	// This propagates from the uploader's pipe, hence, the uploader must stop first.
 	log.V(1).Infof("[casng] uploader: waiting for query senders")
 	u.querySenderWg.Wait()
-	close(u.queryCh) // Terminates the query processor.
+	close(u.queryCh) // Terminate the query processor.
 
 	// 4th, internal routres should flush all remaining requests.
 	log.V(1).Infof("[casng] uploader: waiting for processors")

@@ -30,9 +30,9 @@ func TestUpload_WriteBytes(t *testing.T) {
 		b           []byte
 		offset      int64
 		finish      bool
-		wantErr     error
-		wantStats   casng.Stats
 		retryPolicy *retry.BackoffPolicy
+		wantStats   casng.Stats
+		wantErr     error
 	}{
 		{
 			name: "no_compression",
@@ -277,13 +277,13 @@ func TestUpload_WriteBytes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("error creating batching uploader: %v", err)
 			}
-			var stats casng.Stats
 			var name string
 			if len(test.b) >= int(defaultIOCfg.CompressionSizeThreshold) {
 				name = casng.MakeCompressedWriteResourceName("instance", "hash", 0)
 			} else {
 				name = casng.MakeWriteResourceName("instance", "hash", 0)
 			}
+			var stats casng.Stats
 			if test.finish {
 				stats, err = u.WriteBytes(context.Background(), name, bytes.NewReader(test.b), int64(len(test.b)), test.offset)
 			} else {
