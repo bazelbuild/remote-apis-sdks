@@ -99,12 +99,14 @@ func TestComputeFilesWithXattr(t *testing.T) {
 				return []byte(mockedHash), nil
 			}
 
-			before := time.Now().Truncate(time.Second)
+			// Compare unix seconds rather than instants because Truncate operates on durations
+			// which means the returned instant is not always as expected.
+			before := time.Now().Unix()
 			filename, err := testutil.CreateFile(t, tc.executable, tc.contents)
 			if err != nil {
 				t.Fatalf("Failed to create tmp file for testing digests: %v", err)
 			}
-			after := time.Now().Truncate(time.Second).Add(time.Second)
+			after := time.Now().Add(time.Second).Unix()
 			t.Cleanup(func() { os.RemoveAll(filename) })
 			got := Compute(filename)
 			if got.Err != nil {
@@ -121,8 +123,9 @@ func TestComputeFilesWithXattr(t *testing.T) {
 			if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
 				t.Errorf("Compute(%v) returned diff. (-want +got)\n%s", filename, diff)
 			}
-			if got.MTime.Before(before) || got.MTime.After(after) {
-				t.Errorf("Compute(%v) returned MTime %v, want time in (%v, %v).", filename, got.MTime, before, after)
+			gotMT := got.MTime.Unix()
+			if gotMT < before || gotMT > after {
+				t.Errorf("Compute(%v) returned MTime %v, want time between (%v, %v).", filename, gotMT, before, after)
 			}
 		})
 	}
