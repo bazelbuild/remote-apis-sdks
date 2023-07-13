@@ -39,8 +39,7 @@ const (
 	// Follow indicates that the walker should follow the symlink.
 	Follow SymlinkAction = aRead
 
-	// Replace indicates that the walker should follow the target of a symlink, but reports every path from that sub-traversal
-	// as a descendant path of the symlink's path.
+	// Replace indicates that the walker should follow the symlink, but report every path from that sub-traversal as a descendant path of the symlink's path.
 	//
 	// For example: if /foo/bar was a symlink to /a/b, the walker would report the path of b as /foo/bar, and the path of a/b/c.d as /foo/bar/c.d.
 	// This behavior is equivalent to copying the entire tree of the target in place of the symlink.
@@ -174,7 +173,7 @@ func DepthFirst(root impath.Absolute, exclude Filter, cb Callback) {
 //	int is an action that is one of aRead, aDefer, aSkip, or aCancel.
 func visit(e elem, exclude Filter, cb Callback) (*elem, int) {
 	// If the filter applies to the path only, use it here.
-	if exclude.Path(e.path.String()) {
+	if exclude.MatchPath(e.path.String()) {
 		return nil, aSkip
 	}
 
@@ -195,7 +194,7 @@ func visit(e elem, exclude Filter, cb Callback) (*elem, int) {
 		}
 
 		// If the filter applies to path and mode, use it here.
-		if exclude.File(e.path.String(), info.Mode()) {
+		if exclude.MatchFile(e.path.String(), info.Mode()) {
 			return nil, aSkip
 		}
 
@@ -231,14 +230,17 @@ func visit(e elem, exclude Filter, cb Callback) (*elem, int) {
 	}
 
 	// If the symlink content is a relative path, append it to the symlink's directory to make it absolute.
-	target, errIm := impath.Abs(content)
+	realTarget, errIm := impath.Abs(content)
+	target := realTarget
 	if errIm != nil {
-		target = e.realPath.Dir().Append(impath.MustRel(content))
+		rel := impath.MustRel(content)
+		realTarget = e.realPath.Dir().Append(rel)
+		target = e.path.Dir().Append(rel)
 	}
 
-	deferredElem := &elem{realPath: target, path: target}
+	deferredElem := &elem{realPath: realTarget, path: target}
 	if action == Replace {
-		deferredElem.path = e.realPath
+		deferredElem.path = e.path
 	}
 
 	return deferredElem, aRead
@@ -305,5 +307,33 @@ func processDir(dirElem elem, exclude Filter, cb Callback) ([]any, int) {
 		if errRead == io.EOF {
 			return deferred, aRead
 		}
+	}
+}
+
+// String return a textual version of the action.
+func (s PreAction) String() string {
+	switch s {
+	case Access:
+		return "Access"
+	case SkipPath:
+		return "Skip"
+	case Defer:
+		return "Defer"
+	default:
+		return "Unknown"
+	}
+}
+
+// String return a textual version of the action.
+func (a SymlinkAction) String() string {
+	switch a {
+	case Follow:
+		return "Follow"
+	case Replace:
+		return "Replace"
+	case SkipSymlink:
+		return "Skip"
+	default:
+		return "Unknown"
 	}
 }
