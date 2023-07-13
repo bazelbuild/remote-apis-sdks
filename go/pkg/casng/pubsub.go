@@ -1,6 +1,7 @@
 package casng
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -10,9 +11,8 @@ import (
 
 // pubsub provides a simple pubsub implementation to route messages and wait for them.
 type pubsub struct {
-	subs    map[string]chan any
-	mu      sync.RWMutex
-	timeout time.Duration
+	subs map[string]chan any
+	mu   sync.RWMutex
 	// A signalling channel that gets a message everytime the broker hits 0 subscriptions.
 	// Unlike sync.WaitGroup, this allows the broker to accept more subs while a client is waiting for signal.
 	done chan struct{}
@@ -38,25 +38,37 @@ func (ps *pubsub) sub() (string, <-chan any) {
 	subscriber := make(chan any)
 	ps.subs[tag] = subscriber
 
-	log.V(3).Infof("[casng] pubsub.sub; tag=%s", tag)
+	log.V(2).Infof("[casng] pubsub.sub; tag=%s", tag)
 	return tag, subscriber
 }
 
-// unsub removes the subscription for tag, if any, and closes the corresponding channel.
+// unsub schedules the subscription to be removed as soon as in-flight pubs are done.
+// The subscriber must continue draining the channel until it's closed.
+// It is an error to publish more messages for tag after this call.
 func (ps *pubsub) unsub(tag string) {
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	subscriber, ok := ps.subs[tag]
-	if !ok {
-		return
-	}
-	delete(ps.subs, tag)
-	close(subscriber)
-	if len(ps.subs) == 0 {
-		close(ps.done)
-		ps.done = make(chan struct{})
-	}
-	log.V(3).Infof("[casng] pubsub.unsub; tag=%s", tag)
+	log.V(2).Infof("[casng] pubsub.unsub.sched; tag=%s", tag)
+	// If unsub is called from the same goroutine that is listening on the subscription
+	// channel, a deadlock might occur.
+	// pub would be holding a read lock while this call wants to hold a write lock that must
+	// wait for all reads to finish. However, that read will never finish because the corresponding goroutine
+	// is blocked on this call.
+	// Ideally, the user should call unsub after confirming all pub calls have returned. However, this
+	// relieves the user from that burden with minimal overhead.
+	go func() {
+		ps.mu.Lock()
+		defer ps.mu.Unlock()
+		subscriber, ok := ps.subs[tag]
+		if !ok {
+			return
+		}
+		delete(ps.subs, tag)
+		close(subscriber)
+		if len(ps.subs) == 0 {
+			close(ps.done)
+			ps.done = make(chan struct{})
+		}
+		log.V(2).Infof("[casng] pubsub.unsub.done; tag=%s", tag)
+	}()
 }
 
 // pub is a blocking call that fans-out a response to all specified (by tag) subscribers concurrently.
@@ -120,17 +132,18 @@ func (ps *pubsub) pubN(m any, n int, tags ...string) []string {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 
+	retryCount := 0
 	for {
 		for _, t := range tags {
 			subscriber, ok := ps.subs[t]
 			if !ok {
-				log.V(3).Infof("[casng] pubsub.pub.drop: tag=%s", t)
+				log.Warningf("[casng] pubsub.pub.drop: tag=%s", t)
 				continue
 			}
 			// Send now or reschedule if the subscriber is not ready.
 			select {
 			case subscriber <- m:
-				log.V(3).Infof("[casng] pubsub.pub.send: tag=%s", t)
+				log.V(3).Infof("[casng] pubsub.pub.sent: tag=%s", t)
 				received = append(received, t)
 				if len(received) >= n {
 					return received
@@ -142,6 +155,9 @@ func (ps *pubsub) pubN(m any, n int, tags ...string) []string {
 		if len(toRetry) == 0 {
 			break
 		}
+		retryCount++
+		log.V(3).Infof("[casng] pubsub.pub.retry; retry=%d, tag=%s", retryCount, strings.Join(toRetry, "|"))
+
 		// Reuse the underlying arrays by swapping slices and resetting one of them.
 		tags, toRetry = toRetry, tags
 		toRetry = toRetry[:0]
@@ -153,8 +169,9 @@ func (ps *pubsub) pubN(m any, n int, tags ...string) []string {
 // The signal is a snapshot. The broker my get more subscribers after returning from this call.
 func (ps *pubsub) wait() {
 	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-	<-ps.done
+	done := ps.done
+	ps.mu.RUnlock()
+	<-done
 }
 
 // len returns the number of active subscribers.
@@ -165,11 +182,10 @@ func (ps *pubsub) len() int {
 }
 
 // newPubSub initializes a new instance where subscribers must receive messages within timeout.
-func newPubSub(timeout time.Duration) *pubsub {
+func newPubSub() *pubsub {
 	return &pubsub{
-		subs:    make(map[string]chan any),
-		timeout: timeout,
-		done:    make(chan struct{}),
+		subs: make(map[string]chan any),
+		done: make(chan struct{}),
 	}
 }
 
@@ -178,17 +194,20 @@ func excludeTag(tags []string, et string) []string {
 	if len(tags) == 0 {
 		return []string{}
 	}
-	// Remove the first instance by replacing it with the last item then reslicing to exclude the last (now redundant) item.
-	index := -1
-	for i, t := range tags {
+	// Remove by swapping the item with the last one and then excluding the last index.
+	// This approach avoids allocating a new underlying array without losing any items
+	// in the original unsorted array.
+	i := -1
+	for index, t := range tags {
 		if t == et {
-			index = i
+			i = index
 			break
 		}
 	}
-	if index < 0 {
+	if i < 0 {
 		return tags
 	}
-	tags[index] = tags[len(tags)-1]
-	return tags[:len(tags)-1]
+	j := len(tags) - 1
+	tags[i], tags[j] = tags[j], tags[i]
+	return tags[:j]
 }

@@ -73,9 +73,9 @@ package casng
 //       this ensures the whole pipeline is drained properly.
 //
 // A note about logging:
-//	Level 1 is used for top-level functions, typically called once during the lifetime of the process or initiated by the user.
-//	Level 2 is used for internal functions that may be called per request.
-//	Level 3 is used for internal functions that may be called multiple times per request. Duration logs are also level 3 to avoid the overhead in level 4.
+//  Level 1 is used for top-level functions, typically called once during the lifetime of the process or initiated by the user.
+//  Level 2 is used for internal functions that may be called per request.
+//  Level 3 is used for internal functions that may be called multiple times per request. Duration logs are also level 3 to avoid the overhead in level 4.
 //  Level 4 is used for messages with large objects.
 //  Level 5 is used for messages that require custom processing (extra compute).
 //
@@ -86,7 +86,7 @@ package casng
 //   grep info.log -e 'tag=requester_id'
 //
 // To get a csv file of durations, enable verbosity level 3 and use the command:
-//   grep info.log -e 'casng.*duration:' | cut -d ' ' -f 6-8 | sed -e 's/: start=/,/' -e 's/, end=/,/' -e 's/,$//' > /tmp/durations.csv
+//   grep info.log -e 'casng.*duration;' | cut -d ' ' -f 6-8 | sed -e 's/; start=/,/' -e 's/, end=/,/' -e 's/,$//' > /tmp/durations.csv
 
 import (
 	"context"
@@ -239,6 +239,7 @@ func NewStreamingUploader(
 }
 
 // TODO: support uploading repb.Tree.
+// TODO: support node properties as in https://github.com/bazelbuild/remote-apis-sdks/pull/475
 func newUploader(
 	ctx context.Context, cas regrpc.ContentAddressableStorageClient, byteStream bsgrpc.ByteStreamClient, instanceName string,
 	queryCfg, uploadCfg, streamCfg GRPCConfig, ioCfg IOConfig,
@@ -289,7 +290,7 @@ func newUploader(
 		},
 
 		queryCh:     make(chan missingBlobRequest),
-		queryPubSub: newPubSub(time.Second),
+		queryPubSub: newPubSub(),
 
 		queryRequestBaseSize:      proto.Size(&repb.FindMissingBlobsRequest{InstanceName: instanceName, BlobDigests: []*repb.Digest{}}),
 		uploadRequestBaseSize:     proto.Size(&repb.BatchUpdateBlobsRequest{InstanceName: instanceName, Requests: []*repb.BatchUpdateBlobsRequest_Request{}}),
