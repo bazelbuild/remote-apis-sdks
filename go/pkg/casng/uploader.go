@@ -92,6 +92,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"sync"
 	"time"
@@ -165,13 +166,17 @@ type uploader struct {
 	streamRPCCfg GRPCConfig
 
 	// gRPC throttling controls.
-	queryThrottler *throttler // Controls concurrent calls to the query API.
-	streamThrottle *throttler // Controls concurrent calls to the byte streaming API.
+	queryThrottler  *throttler // Controls concurrent calls to the query API.
+	uploadThrottler *throttler // Controls concurrent calls to the batch API.
+	streamThrottle  *throttler // Controls concurrent calls to the byte streaming API.
 
 	// IO controls.
-	ioCfg        IOConfig
-	buffers      sync.Pool
-	zstdEncoders sync.Pool
+	ioCfg            IOConfig
+	buffers          sync.Pool
+	zstdEncoders     sync.Pool
+	walkThrottler    *throttler // Controls concurrent file system walks.
+	ioThrottler      *throttler // Controls total number of open files.
+	ioLargeThrottler *throttler // Controls total number of open large files.
 	// nodeCache allows digesting each path only once.
 	// Concurrent walkers claim a path by storing a sync.WaitGroup reference, which allows other walkers to defer
 	// digesting that path until the first walker stores the digest once it's computed.
@@ -184,24 +189,53 @@ type uploader struct {
 	// It also ensures that nodeCache does not have duplicate nodes for identical files.
 	// In other words, nodeCache might hold different views of the same directory node, but fileNodeCache will always hold the canonical file node for the corresponding real path.
 	// Since nodes are pointer-like references, the shared memory cost between the two caches is limited to keys and addresses.
-	fileNodeCache             sync.Map
+	fileNodeCache sync.Map
+	// dirChildren is shared between all callers. However, since a directory is owned by a single
+	// walker at a time, there is no concurrent read/write to this map, but there might be concurrent reads.
+	dirChildren               nodeSliceMap
 	queryRequestBaseSize      int
 	uploadRequestBaseSize     int
 	uploadRequestItemBaseSize int
 
 	// Concurrency controls.
-	clientSenderWg sync.WaitGroup          // Batching API producers.
-	querySenderWg  sync.WaitGroup          // Query streaming API producers.
-	processorWg    sync.WaitGroup          // Internal routers.
-	receiverWg     sync.WaitGroup          // Consumers.
-	workerWg       sync.WaitGroup          // Short-lived intermediate producers/consumers.
-	walkerWg       sync.WaitGroup          // Tracks all walkers.
-	queryCh        chan missingBlobRequest // Fan-in channel for query requests.
-	queryPubSub    *pubsub                 // Fan-out broker for query responses.
-	uploadPubSub   *pubsub                 // Fan-out broker for upload responses.
+	clientSenderWg   sync.WaitGroup          // Batching API producers.
+	querySenderWg    sync.WaitGroup          // Query streaming API producers.
+	uploadSenderWg   sync.WaitGroup          // Upload streaming API producers.
+	processorWg      sync.WaitGroup          // Internal routers.
+	receiverWg       sync.WaitGroup          // Consumers.
+	workerWg         sync.WaitGroup          // Short-lived intermediate producers/consumers.
+	walkerWg         sync.WaitGroup          // Tracks all walkers.
+	queryCh          chan missingBlobRequest // Fan-in channel for query requests.
+	digesterCh       chan UploadRequest      // Fan-in channel for upload requests.
+	dispatcherReqCh  chan UploadRequest      // Fan-in channel for dispatched requests.
+	dispatcherPipeCh chan UploadRequest      // A pipe channel for presence checking before uploading.
+	dispatcherResCh  chan UploadResponse     // Fan-in channel for responses.
+	batcherCh        chan UploadRequest      // Fan-in channel for unified requests to the batching API.
+	streamerCh       chan UploadRequest      // Fan-in channel for unified requests to the byte streaming API.
+	queryPubSub      *pubsub                 // Fan-out broker for query responses.
+	uploadPubSub     *pubsub                 // Fan-out broker for upload responses.
 
 	// ctx is used to make unified calls and terminate saturated throttlers and in-flight workers.
 	ctx context.Context
+
+	logBeatDoneCh chan struct{}
+}
+
+// Node looks up a node from the node cache which is populated during digestion.
+// The node is either an repb.FileNode, repb.DirectoryNode, or repb.SymlinkNode.
+//
+// Returns nil if no node corresponds to req.
+func (u *uploader) Node(req UploadRequest) proto.Message {
+	key := req.Path.String() + req.Exclude.String()
+	n, ok := u.nodeCache.Load(key)
+	if !ok {
+		return nil
+	}
+	node, ok := n.(proto.Message)
+	if !ok {
+		return nil
+	}
+	return node
 }
 
 // NewBatchingUploader creates a new instance of the batching uploader.
@@ -271,8 +305,9 @@ func newUploader(
 		batchRPCCfg:  uploadCfg,
 		streamRPCCfg: streamCfg,
 
-		queryThrottler: newThrottler(int64(queryCfg.ConcurrentCallsLimit)),
-		streamThrottle: newThrottler(int64(streamCfg.ConcurrentCallsLimit)),
+		queryThrottler:  newThrottler(int64(queryCfg.ConcurrentCallsLimit)),
+		uploadThrottler: newThrottler(int64(uploadCfg.ConcurrentCallsLimit)),
+		streamThrottle:  newThrottler(int64(streamCfg.ConcurrentCallsLimit)),
 
 		ioCfg: ioCfg,
 		buffers: sync.Pool{
@@ -288,13 +323,26 @@ func newUploader(
 				return enc
 			},
 		},
+		walkThrottler:    newThrottler(int64(ioCfg.ConcurrentWalksLimit)),
+		ioThrottler:      newThrottler(int64(ioCfg.OpenFilesLimit)),
+		ioLargeThrottler: newThrottler(int64(ioCfg.OpenLargeFilesLimit)),
+		dirChildren:      nodeSliceMap{store: make(map[string][]proto.Message)},
 
-		queryCh:     make(chan missingBlobRequest),
-		queryPubSub: newPubSub(),
+		queryCh:          make(chan missingBlobRequest),
+		queryPubSub:      newPubSub(),
+		digesterCh:       make(chan UploadRequest),
+		dispatcherReqCh:  make(chan UploadRequest),
+		dispatcherPipeCh: make(chan UploadRequest),
+		dispatcherResCh:  make(chan UploadResponse),
+		batcherCh:        make(chan UploadRequest),
+		streamerCh:       make(chan UploadRequest),
+		uploadPubSub:     newPubSub(),
 
 		queryRequestBaseSize:      proto.Size(&repb.FindMissingBlobsRequest{InstanceName: instanceName, BlobDigests: []*repb.Digest{}}),
 		uploadRequestBaseSize:     proto.Size(&repb.BatchUpdateBlobsRequest{InstanceName: instanceName, Requests: []*repb.BatchUpdateBlobsRequest_Request{}}),
 		uploadRequestItemBaseSize: proto.Size(&repb.BatchUpdateBlobsRequest_Request{Digest: digest.NewFromBlob([]byte("abc")).ToProto(), Data: []byte{}}),
+
+		logBeatDoneCh: make(chan struct{}),
 	}
 	log.V(1).Infof("[casng] uploader.new; cfg_query=%+v, cfg_batch=%+v, cfg_stream=%+v, cfg_io=%+v", queryCfg, uploadCfg, streamCfg, ioCfg)
 
@@ -304,7 +352,35 @@ func newUploader(
 		u.processorWg.Done()
 	}()
 
+	u.processorWg.Add(1)
+	go func() {
+		u.digester()
+		u.processorWg.Done()
+	}()
+
+	// Initializing the query streamer here to ensure wait groups are initialized before returning from this constructor call.
+	queryCh := make(chan missingBlobRequest)
+	queryResCh := u.missingBlobsPipe(queryCh)
+	u.processorWg.Add(1)
+	go func() {
+		u.dispatcher(queryCh, queryResCh)
+		u.processorWg.Done()
+	}()
+
+	u.processorWg.Add(1)
+	go func() {
+		u.batcher()
+		u.processorWg.Done()
+	}()
+
+	u.processorWg.Add(1)
+	go func() {
+		u.streamer()
+		u.processorWg.Done()
+	}()
+
 	go u.close()
+	go u.logBeat()
 	return u, nil
 }
 
@@ -320,6 +396,10 @@ func (u *uploader) close() {
 	u.clientSenderWg.Wait()
 
 	// 2nd, streaming API upload senders should stop producing queries and requests.
+	// These senders are terminated by the user.
+	log.V(1).Infof("[casng] uploader: waiting for upload senders")
+	u.uploadSenderWg.Wait()
+	close(u.digesterCh) // The digester will propagate the termination signal.
 
 	// 3rd, streaming API query senders should stop producing queries.
 	// This propagates from the uploader's pipe, hence, the uploader must stop first.
@@ -334,6 +414,7 @@ func (u *uploader) close() {
 	// 5th, internal brokers should flush all remaining messages.
 	log.V(1).Infof("[casng] uploader: waiting for brokers")
 	u.queryPubSub.wait()
+	u.uploadPubSub.wait()
 
 	// 6th, receivers should have drained their channels by now.
 	log.V(1).Infof("[casng] uploader: waiting for receivers")
@@ -343,5 +424,40 @@ func (u *uploader) close() {
 	log.V(1).Infof("[casng] uploader: waiting for workers")
 	u.workerWg.Wait()
 
+	close(u.logBeatDoneCh)
 	log.V(3).Infof("[casng] upload.close.duration: start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+}
+
+func (u *uploader) logBeat() {
+	var interval time.Duration
+	if log.V(3) {
+		interval = time.Second
+	} else if log.V(2) {
+		interval = 30 * time.Second
+	} else if log.V(1) {
+		interval = time.Minute
+	} else {
+		return
+	}
+
+	log.Infof("[casng] beat.start; interval=%v", interval)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	i := 0
+	for {
+		select {
+		case <-u.logBeatDoneCh:
+			log.Infof("[casng] beat.stop; interval=%v, count=%d", interval, i)
+			return
+		case <-ticker.C:
+		}
+
+		i++
+		log.Infof("[casng] beat; #%d, upload_subs=%d, query_subs=%d, walkers=%d, batching=%d, streaming=%d, querying=%d, open_files=%d, large_open_files=%d",
+			i, u.uploadPubSub.len(), u.queryPubSub.len(), u.walkThrottler.len(), u.uploadThrottler.len(), u.streamThrottle.len(), u.queryThrottler.len(), u.ioThrottler.len(), u.ioLargeThrottler.len())
+	}
+}
+
+func isExec(mode fs.FileMode) bool {
+	return mode&0100 != 0
 }

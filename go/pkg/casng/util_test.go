@@ -2,6 +2,10 @@ package casng_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
@@ -40,9 +44,40 @@ var (
 	}
 )
 
+// makeFs creates a temp dir, populates it with files, and returns the path of the temp dir.
+func makeFs(t *testing.T, paths map[string][]byte) string {
+	t.Helper()
+
+	if len(paths) == 0 {
+		t.Fatalf("paths cannot be empty")
+	}
+
+	tmp := t.TempDir()
+
+	for p, b := range paths {
+		// Check for suffix before joining since filepath.Join removes trailing slashes.
+		d := p
+		if !strings.HasSuffix(p, "/") {
+			d = filepath.Dir(p)
+		}
+		if err := os.MkdirAll(filepath.Join(tmp, d), 0766); err != nil {
+			t.Fatalf("io error: %v", err)
+		}
+		if p == d {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(tmp, p), b, 0666); err != nil {
+			t.Fatalf("io error: %v", err)
+		}
+	}
+
+	return tmp
+}
+
 type fakeByteStreamClient struct {
 	bsgrpc.ByteStreamClient
 	write func(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error)
+	read  func(ctx context.Context, in *bspb.ReadRequest, opts ...grpc.CallOption) (bsgrpc.ByteStream_ReadClient, error)
 }
 
 type fakeByteStreamWriteClient struct {
@@ -51,11 +86,23 @@ type fakeByteStreamWriteClient struct {
 	closeAndRecv func() (*bspb.WriteResponse, error)
 }
 
+type fakeByteStreamClientReadClient struct {
+	bspb.ByteStream_ReadClient
+	recv func() (*bspb.ReadResponse, error)
+}
+
 func (s *fakeByteStreamClient) Write(ctx context.Context, opts ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 	if s.write != nil {
 		return s.write(ctx, opts...)
 	}
 	return &fakeByteStreamWriteClient{}, nil
+}
+
+func (s *fakeByteStreamClient) Read(ctx context.Context, in *bspb.ReadRequest, opts ...grpc.CallOption) (bspb.ByteStream_ReadClient, error) {
+	if s.read != nil {
+		return s.read(ctx, in, opts...)
+	}
+	return &fakeByteStreamClientReadClient{}, nil
 }
 
 func (s *fakeByteStreamWriteClient) Send(wr *bspb.WriteRequest) error {
@@ -70,6 +117,13 @@ func (s *fakeByteStreamWriteClient) CloseAndRecv() (*bspb.WriteResponse, error) 
 		return s.closeAndRecv()
 	}
 	return &bspb.WriteResponse{}, nil
+}
+
+func (s *fakeByteStreamClientReadClient) Recv() (*bspb.ReadResponse, error) {
+	if s.recv != nil {
+		return s.recv()
+	}
+	return &bspb.ReadResponse{}, nil
 }
 
 type fakeCAS struct {
