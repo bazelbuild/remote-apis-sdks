@@ -10,12 +10,21 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/errors"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/walker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/symlinkopts"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
 	"github.com/klauspost/compress/zstd"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 )
+
+// namedDigest is used to conveniently extract the base name and its digest from repb.FileNode, repb.DirectoryNode and repb.SymlinkNode.
+type namedDigest interface {
+	GetName() string
+	GetDigest() *repb.Digest
+}
 
 // MissingBlobs queries the CAS for digests and returns a slice of the missing ones.
 //
@@ -282,4 +291,43 @@ func (u *uploader) writeBytes(ctx context.Context, name string, r io.Reader, siz
 	}
 
 	return stats, err
+}
+
+// Upload processes reqs for upload.
+//
+// Blobs that already exist in the CAS are not uploaded.
+// Any path that is not a regular file, a directory or a symlink file is skipped (e.g. sockets and pipes).
+//
+// Cancelling ctx gracefully aborts the upload process.
+//
+// Requests are unified across a window of time defined by the BundleTimeout value of the gRPC configuration.
+// The unification is affected by the order of the requests, bundle limits (length, size, timeout) and the upload speed.
+// With infinite speed and limits, every blob will be uploaded exactly once. On the other extreme, every blob is uploaded
+// alone and no unification takes place.
+// In the average case, blobs that make it into the same bundle will be unified (deduplicated).
+//
+// Returns a slice of the digests of the blobs that were uploaded (did not exist in the CAS).
+// If the returned error is nil, any digest that is not in the returned slice was already in the CAS.
+// If the returned error is not nil, the returned slice may be incomplete (fatal error) and every digest
+// in it may or may not have been successfully uploaded (individual errors).
+// The returned error wraps a number of errors proportional to the length of the specified slice.
+//
+// This method must not be called after cancelling the uploader's context.
+func (u *BatchingUploader) Upload(ctx context.Context, reqs ...UploadRequest) ([]digest.Digest, Stats, error) {
+	panic("not yet implemented")
+}
+
+// DigestTree returns the digest of the merkle tree for root.
+func (u *BatchingUploader) DigestTree(ctx context.Context, root impath.Absolute, slo symlinkopts.Options, exclude walker.Filter) (digest.Digest, Stats, error) {
+	panic("not yet implemented")
+}
+
+// UploadTree is a convenient method to upload a tree described with multiple requests.
+//
+// This is useful when the list of paths is known and the root might have too many descendants such that traversing and filtering might add a significant overhead.
+//
+// All requests must share the same filter. Digest fields on the requests are ignored to ensure proper hierarchy caching via the internal digestion process.
+// remoteWorkingDir replaces workingDir inside the merkle tree such that the server is only aware of remoteWorkingDir.
+func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absolute, workingDir, remoteWorkingDir impath.Relative, reqs ...UploadRequest) (rootDigest digest.Digest, uploaded []digest.Digest, stats Stats, err error) {
+	panic("not yet implemented")
 }
