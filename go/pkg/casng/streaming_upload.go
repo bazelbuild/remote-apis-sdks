@@ -5,14 +5,15 @@ import (
 	"io"
 	"io/fs"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/walker"
+	"github.com/pborman/uuid"
 
-	// "github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	slo "github.com/bazelbuild/remote-apis-sdks/go/pkg/symlinkopts"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	// "google.golang.org/grpc/status"
+	log "github.com/golang/glog"
 )
 
 // UploadRequest represents a path to start uploading from.
@@ -128,7 +129,61 @@ func (u *StreamingUploader) Upload(ctx context.Context, in <-chan UploadRequest)
 // streamPipe is used by both the streaming and the batching interfaces.
 // Each request will be enriched with internal fields for control and logging purposes.
 func (u *uploader) streamPipe(ctx context.Context, in <-chan UploadRequest) <-chan UploadResponse {
-	panic("not yet implemented")
+	ch := make(chan UploadResponse)
+
+	// If this was called after the the uploader was terminated, short the circuit and return.
+	select {
+	case <-u.ctx.Done():
+		go func() {
+			defer close(ch)
+			r := UploadResponse{Err: ErrTerminatedUploader}
+			for range in {
+				ch <- r
+			}
+		}()
+		return ch
+	default:
+	}
+
+	// Register a new requester with the internal processor.
+	// This broker should not remove the subscription until the sender tells it to.
+	tag, resChan := u.uploadPubSub.sub()
+
+	// Forward the requests to the internal processor.
+	u.uploadSenderWg.Add(1)
+	go func() {
+		contextmd.Infof(ctx, log.Level(1), "[casng] upload.stream_pipe.sender.start; tag=%s", tag)
+		defer contextmd.Infof(ctx, log.Level(1), "[casng] upload.stream_pipe.sender.stop; tag=%s", tag)
+		defer u.uploadSenderWg.Done()
+		for r := range in {
+			r.tag = tag
+			r.ctx = ctx
+			r.id = uuid.New()
+			u.digesterCh <- r
+		}
+		// Let the processor know that no further requests are expected.
+		u.digesterCh <- UploadRequest{tag: tag, done: true}
+	}()
+
+	// Receive responses from the internal processor.
+	// Once the sender above sends a done-tagged request, the processor will send a done-tagged response.
+	u.receiverWg.Add(1)
+	go func() {
+		contextmd.Infof(ctx, log.Level(1), "[casng] upload.stream_pipe.receiver.start; tag=%s", tag)
+		defer contextmd.Infof(ctx, log.Level(1), "[casng] upload.stream_pipe.receiver.stop; tag=%s", tag)
+		defer u.receiverWg.Done()
+		defer close(ch)
+		for rawR := range resChan {
+			r := rawR.(UploadResponse)
+			if r.done {
+				u.uploadPubSub.unsub(tag)
+				continue
+			}
+			ch <- r
+		}
+	}()
+
+	return ch
 }
 
 // uploadBatcher handles files that can fit into a batching request.

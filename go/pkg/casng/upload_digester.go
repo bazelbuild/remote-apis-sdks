@@ -3,11 +3,15 @@ package casng
 import (
 	"io"
 	"io/fs"
+	"sync"
+	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/walker"
 	slo "github.com/bazelbuild/remote-apis-sdks/go/pkg/symlinkopts"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	log "github.com/golang/glog"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -22,6 +26,105 @@ type blob struct {
 // If the request is for an already digested blob, it is forwarded to the dispatcher.
 // The number of concurrent requests is limited to the number of concurrent file system walks.
 func (u *uploader) digester() {
+	log.V(1).Info("[casng] upload.digester.start")
+	defer log.V(1).Info("[casng] upload.digester.stop")
+
+	// The digester receives requests from a stream pipe, and sends digested blobs to the dispatcher.
+	//
+	// Once the digester receives a done-tagged request from a requester, it will send a done-tagged blob to the dispatcher
+	// after all related walks are done.
+	//
+	// Once the uploader's context is cancelled, the digester will terminate after all the pending walks are done (implies all requesters are notified).
+
+	defer func() {
+		u.walkerWg.Wait()
+		// Let the dispatcher know that the digester has terminated by sending an untagged done blob.
+		u.dispatcherReqCh <- UploadRequest{done: true}
+	}()
+
+	requesterWalkWg := make(map[string]*sync.WaitGroup)
+	for req := range u.digesterCh {
+		startTime := time.Now()
+		// If the requester will not be sending any further requests, wait for in-flight walks from previous requests
+		// then tell the dispatcher to forward the signal once all dispatched blobs are done.
+		if req.done {
+			log.V(2).Infof("[casng] upload.digester.req.done; tag=%s", req.tag)
+			wg := requesterWalkWg[req.tag]
+			if wg == nil {
+				log.V(2).Infof("[casng] upload.digester.req.done: no more pending walks; tag=%s", req.tag)
+				// Let the dispatcher know that this requester is done.
+				u.dispatcherReqCh <- req
+				// Covers waiting on the dispatcher.
+				log.V(3).Infof("[casng] upload.digester.req.duration; start=%d, end=%d, tag=%s", startTime.UnixNano(), time.Now().UnixNano(), req.tag)
+				continue
+			}
+			// Remove the wg to ensure a new one is used if the requester decides to send more requests.
+			// Otherwise, races on the wg might happen.
+			requesterWalkWg[req.tag] = nil
+			u.workerWg.Add(1)
+			// Wait for the walkers to finish dispatching blobs then tell the dispatcher that no further blobs are expected from this requester.
+			go func(tag string) {
+				defer u.workerWg.Done()
+				log.V(2).Infof("[casng] upload.digester.walk.wait.start; tag=%s", tag)
+				wg.Wait()
+				log.V(2).Infof("[casng] upload.digester.walk.wait.done; tag=%s", tag)
+				u.dispatcherReqCh <- UploadRequest{tag: tag, done: true}
+			}(req.tag)
+			continue
+		}
+
+		// If it's a bytes request, do not traverse the path.
+		if req.Bytes != nil {
+			if req.Digest.Hash == "" {
+				req.Digest = digest.NewFromBlob(req.Bytes)
+			}
+			// If path is set, construct and cache the corresponding node.
+			if req.Path.String() != impath.Root {
+				name := req.Path.Base().String()
+				digest := req.Digest.ToProto()
+				var node proto.Message
+				if req.BytesFileMode&fs.ModeDir != 0 {
+					node = &repb.DirectoryNode{Digest: digest, Name: name}
+				} else {
+					node = &repb.FileNode{Digest: digest, Name: name, IsExecutable: isExec(req.BytesFileMode)}
+				}
+				key := req.Path.String() + req.Exclude.String()
+				u.nodeCache.Store(key, node)
+				// This node cannot be added to the u.dirChildren cache because the cache is owned by the walker callback.
+				// Parent nodes may have already been generated and cached in u.nodeCache; updating the u.dirChildren cache will not regenerate them.
+			}
+			log.V(3).Infof("[casng] upload.digester.req; bytes=%d, path=%s, req=%s, tag=%s", len(req.Bytes), req.Path, req.id, req.tag)
+		}
+
+		if req.Digest.Hash != "" {
+			u.dispatcherReqCh <- req
+			// Covers waiting on the node cache and waiting on the dispatcher.
+			log.V(3).Infof("[casng] upload.digester.req.duration; start=%d, end=%d, req=%s, tag=%s", startTime.UnixNano(), time.Now().UnixNano(), req.id, req.tag)
+			continue
+		}
+
+		log.V(3).Infof("[casng] upload.digester.req; path=%s, filter=%s, slo=%s, req=%s, tag=%s", req.Path, req.Exclude, req.SymlinkOptions, req.id, req.tag)
+		// Wait if too many walks are in-flight.
+		startTimeThrottle := time.Now()
+		if !u.walkThrottler.acquire(req.ctx) {
+			log.V(3).Infof("[casng] upload.digester.walk.throttle.duration; start=%d, end=%d, req=%s, tag=%s", startTimeThrottle.UnixNano(), time.Now().UnixNano(), req.id, req.tag)
+			continue
+		}
+		log.V(3).Infof("[casng] upload.digester.walk.throttle.duration; start=%d, end=%d, req=%s, tag=%s", startTimeThrottle.UnixNano(), time.Now().UnixNano(), req.id, req.tag)
+		wg := requesterWalkWg[req.tag]
+		if wg == nil {
+			wg = &sync.WaitGroup{}
+			requesterWalkWg[req.tag] = wg
+		}
+		wg.Add(1)
+		u.walkerWg.Add(1)
+		go func(r UploadRequest) {
+			defer u.walkerWg.Done()
+			defer wg.Done()
+			defer u.walkThrottler.release()
+			u.digest(r)
+		}(req)
+	}
 }
 
 // digest initiates a file system walk to digest files and dispatch them for uploading.
