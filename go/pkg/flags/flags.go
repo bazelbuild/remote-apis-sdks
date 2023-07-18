@@ -9,6 +9,10 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
+	log "github.com/golang/glog"
 )
 
 var (
@@ -64,6 +68,12 @@ var (
 	StartupCapabilities = flag.Bool("startup_capabilities", true, "Whether to self-configure based on remote server capabilities on startup.")
 	// RPCTimeouts stores the per-RPC timeout values.
 	RPCTimeouts map[string]string
+	// KeepAliveTime specifies gRPCs keepalive time parameter.
+	KeepAliveTime = flag.Duration("grpc_keepalive_time", 0*time.Second, "After a duration of this time if the client doesn't see any activity it pings the server to see if the transport is still alive. If zero or not set, the mechanism is off.")
+	// KeepAliveTimeout specifies gRPCs keepalive timeout parameter.
+	KeepAliveTimeout = flag.Duration("grpc_keepalive_timeout", 20*time.Second, "After having pinged for keepalive check, the client waits for a duration of Timeout and if no activity is seen even after that the connection is closed. Default is 20s.")
+	// KeepAlivePermitWithoutStream specifies gRPCs keepalive permitWithoutStream parameter.
+	KeepAlivePermitWithoutStream = flag.Bool("grpc_keepalive_permit_without_stream", true, "If true, client sends keepalive pings even with no active RPCs; otherwise, doesn't send pings even if time and timeout are set. Default is true.")
 )
 
 func init() {
@@ -103,12 +113,23 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 	}
 
+	dialOpts := make([]grpc.DialOption, 0)
+	if *KeepAliveTime > 0*time.Second {
+		params := keepalive.ClientParameters{
+			Time:                *KeepAliveTime,
+			Timeout:             *KeepAliveTimeout,
+			PermitWithoutStream: *KeepAlivePermitWithoutStream,
+		}
+		log.V(1).Infof("KeepAlive params = %v", params)
+		dialOpts = append(dialOpts, grpc.WithKeepaliveParams(params))
+	}
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
 		NoSecurity:            *ServiceNoSecurity,
 		NoAuth:                *ServiceNoAuth,
 		CASService:            *CASService,
 		CredFile:              *CredFile,
+		DialOpts:              dialOpts,
 		UseApplicationDefault: *UseApplicationDefaultCreds,
 		UseComputeEngine:      *UseGCECredentials,
 		UseExternalAuthToken:  *UseExternalAuthToken,
