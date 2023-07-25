@@ -2,14 +2,21 @@ package casng
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/errors"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/walker"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/pborman/uuid"
+	"google.golang.org/grpc/status"
 
 	slo "github.com/bazelbuild/remote-apis-sdks/go/pkg/symlinkopts"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -188,10 +195,281 @@ func (u *uploader) streamPipe(ctx context.Context, in <-chan UploadRequest) <-ch
 
 // uploadBatcher handles files that can fit into a batching request.
 func (u *uploader) batcher() {
+	log.V(1).Info("[casng] upload.batcher.start")
+	defer log.V(1).Info("[casng] uploader.batcher.stop")
+
+	bundle := make(uploadRequestBundle)
+	bundleSize := u.uploadRequestBaseSize
+	ctx := u.ctx // context with unified metadata.
+
+	// handle is a closure that shares read/write access to the bundle variables with its parent.
+	// This allows resetting the bundle and associated variables in one call rather than having to repeat the reset
+	// code after every call to this function.
+	handle := func() {
+		if len(bundle) < 1 {
+			return
+		}
+		// Block the batcher if the concurrency limit is reached.
+		startTime := time.Now()
+		if !u.uploadThrottler.acquire(u.ctx) {
+			// Ensure responses are dispatched before aborting.
+			for d, item := range bundle {
+				u.dispatcherResCh <- UploadResponse{
+					Digest: d,
+					Stats:  Stats{BytesRequested: d.Size},
+					Err:    context.Canceled,
+					tags:   item.tags,
+					reqs:   item.reqs,
+				}
+			}
+			return
+		}
+		log.V(3).Infof("[casng] upload.batcher.throttle.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+
+		u.workerWg.Add(1)
+		go func(ctx context.Context, b uploadRequestBundle) {
+			defer u.workerWg.Done()
+			defer u.uploadThrottler.release()
+			// TODO: cancel ctx if all requesters have cancelled their contexts.
+			u.callBatchUpload(ctx, b)
+		}(ctx, bundle)
+
+		bundle = make(uploadRequestBundle)
+		bundleSize = u.uploadRequestBaseSize
+		ctx = u.ctx
+	}
+
+	bundleTicker := time.NewTicker(u.batchRPCCfg.BundleTimeout)
+	defer bundleTicker.Stop()
+	for {
+		select {
+		// The dispatcher guarantees that the dispatched blob is not oversized.
+		case req, ok := <-u.batcherCh:
+			if !ok {
+				return
+			}
+			log.V(3).Infof("[casng] upload.batcher.req; digest=%s, req=%s, tag=%s", req.Digest, req.id, req.tag)
+
+			// Unify.
+			item, ok := bundle[req.Digest]
+			if ok {
+				// Duplicate tags are allowed to ensure the requester can match the number of responses to the number of requests.
+				item.tags = append(item.tags, req.tag)
+				item.reqs = append(item.reqs, req.id)
+				bundle[req.Digest] = item
+				log.V(3).Infof("[casng] upload.batcher.unified; digest=%s, bundle=%d, req=%s, tag=%s", req.Digest, len(item.tags), req.id, req.tag)
+				continue
+			}
+
+			// It's possible for files to be considered medium and large, but still fit into a batch request.
+			// Load the bytes without blocking the batcher by deferring the blob.
+			if len(req.Bytes) == 0 {
+				log.V(3).Infof("[casng] upload.batcher.file; digest=%s, path=%s, req=%s, tag=%s", req.Digest, req.Path, req.id, req.tag)
+				u.workerWg.Add(1)
+				go func(req UploadRequest) (err error) {
+					defer u.workerWg.Done()
+					defer func() {
+						if err != nil {
+							u.dispatcherResCh <- UploadResponse{
+								Digest: req.Digest,
+								Err:    err,
+								tags:   []string{req.tag},
+								reqs:   []string{req.id},
+							}
+							return
+						}
+						// Send after releasing resources.
+						u.batcherCh <- req
+					}()
+					r := req.reader
+					if r == nil {
+						startTime := time.Now()
+						if !u.ioThrottler.acquire(req.ctx) {
+							return req.ctx.Err()
+						}
+						log.V(3).Infof("[casng] upload.batcher.io_throttle.duration; start=%d, end=%d, req=%s, tag=%s", startTime.UnixNano(), time.Now().UnixNano(), req.id, req.tag)
+						defer u.ioThrottler.release()
+						f, err := os.Open(req.Path.String())
+						if err != nil {
+							return errors.Join(ErrIO, err)
+						}
+						r = f
+					} else {
+						// If this blob was from a large file, ensure IO holds are released.
+						defer u.ioThrottler.release()
+						defer u.ioLargeThrottler.release()
+					}
+					defer func() {
+						if errClose := r.Close(); err != nil {
+							err = errors.Join(ErrIO, errClose, err)
+						}
+					}()
+					bytes, err := io.ReadAll(r)
+					if err != nil {
+						return errors.Join(ErrIO, err)
+					}
+					req.Bytes = bytes
+					return nil
+				}(req)
+				continue
+			}
+
+			// If the blob doesn't fit in the current bundle, cycle it.
+			rSize := u.uploadRequestItemBaseSize + len(req.Bytes)
+			if bundleSize+rSize >= u.batchRPCCfg.BytesLimit {
+				log.V(3).Infof("[casng] upload.batcher.bundle.size; bytes=%d, excess=%d", bundleSize, rSize)
+				handle()
+			}
+
+			item.tags = append(item.tags, req.tag)
+			item.req = &repb.BatchUpdateBlobsRequest_Request{
+				Digest: req.Digest.ToProto(),
+				Data:   req.Bytes, // TODO: add compression support as in https://github.com/bazelbuild/remote-apis-sdks/pull/443/files
+			}
+			bundle[req.Digest] = item
+			bundleSize += rSize
+			ctx, _ = contextmd.FromContexts(ctx, req.ctx) // ignore non-essential error.
+
+			// If the bundle is full, cycle it.
+			if len(bundle) >= u.batchRPCCfg.ItemsLimit {
+				log.V(3).Infof("[casng] upload.batcher.bundle.full; count=%d", len(bundle))
+				handle()
+			}
+		case <-bundleTicker.C:
+			if len(bundle) > 0 {
+				log.V(3).Infof("[casng] upload.batcher.bundle.timeout; count=%d", len(bundle))
+			}
+			handle()
+		}
+	}
 }
 
 func (u *uploader) callBatchUpload(ctx context.Context, bundle uploadRequestBundle) {
-	panic("not yet implemented")
+	req := &repb.BatchUpdateBlobsRequest{InstanceName: u.instanceName}
+	req.Requests = make([]*repb.BatchUpdateBlobsRequest_Request, 0, len(bundle))
+	for _, item := range bundle {
+		req.Requests = append(req.Requests, item.req)
+	}
+
+	var uploaded []digest.Digest
+	failed := make(map[digest.Digest]error)
+	digestRetryCount := make(map[digest.Digest]int64)
+
+	startTime := time.Now()
+	err := retry.WithPolicy(ctx, u.batchRPCCfg.RetryPredicate, u.batchRPCCfg.RetryPolicy, func() error {
+		// This call can have partial failures. Only retry retryable failed requests.
+		ctx, ctxCancel := context.WithTimeout(ctx, u.batchRPCCfg.Timeout)
+		defer ctxCancel()
+		res, errCall := u.cas.BatchUpdateBlobs(ctx, req)
+		reqErr := errCall // return this error if nothing is retryable.
+		req.Requests = nil
+		for _, r := range res.Responses {
+			if errItem := status.FromProto(r.Status).Err(); errItem != nil {
+				if retry.TransientOnly(errItem) {
+					d := digest.NewFromProtoUnvalidated(r.Digest)
+					req.Requests = append(req.Requests, bundle[d].req)
+					digestRetryCount[d]++
+					reqErr = errItem // return any retryable error if there is one.
+					continue
+				}
+				// Permanent error.
+				failed[digest.NewFromProtoUnvalidated(r.Digest)] = errItem
+				continue
+			}
+			uploaded = append(uploaded, digest.NewFromProtoUnvalidated(r.Digest))
+		}
+		if l := len(req.Requests); l > 0 {
+			log.V(3).Infof("[casng] upload.batcher.call.retry; len=%d", l)
+		}
+		return reqErr
+	})
+	log.V(3).Infof("[casng] upload.batcher.grpc.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+	log.V(3).Infof("[casng] upload.batcher.call.result; uploaded=%d, failed=%d, req_failed=%d", len(uploaded), len(failed), len(bundle)-len(uploaded)-len(failed))
+
+	// Report uploaded.
+	for _, d := range uploaded {
+		s := Stats{
+			BytesRequested:      d.Size,
+			LogicalBytesMoved:   d.Size,
+			TotalBytesMoved:     d.Size,
+			EffectiveBytesMoved: d.Size,
+			LogicalBytesBatched: d.Size,
+			CacheMissCount:      1,
+			BatchedCount:        1,
+		}
+		if r := digestRetryCount[d]; r > 0 {
+			s.TotalBytesMoved = d.Size * (r + 1)
+		}
+		u.dispatcherResCh <- UploadResponse{
+			Digest: d,
+			Stats:  s,
+			tags:   bundle[d].tags,
+			reqs:   bundle[d].reqs,
+		}
+		if log.V(3) {
+			log.Infof("[casng] upload.batcher.res.uploaded; digest=%s, req=%s, tag=%s", d, strings.Join(bundle[d].reqs, "|"), strings.Join(bundle[d].tags, "|"))
+		}
+		delete(bundle, d)
+	}
+
+	// Report individually failed requests.
+	for d, dErr := range failed {
+		s := Stats{
+			BytesRequested:    d.Size,
+			LogicalBytesMoved: d.Size,
+			TotalBytesMoved:   d.Size,
+			CacheMissCount:    1,
+			BatchedCount:      1,
+		}
+		if r := digestRetryCount[d]; r > 0 {
+			s.TotalBytesMoved = d.Size * (r + 1)
+		}
+		u.dispatcherResCh <- UploadResponse{
+			Digest: d,
+			Stats:  s,
+			Err:    errors.Join(ErrGRPC, dErr),
+			tags:   bundle[d].tags,
+			reqs:   bundle[d].reqs,
+		}
+		if log.V(3) {
+			log.Infof("[casng] upload.batcher.res.failed; digest=%s, req=%s, tag=%s", d, strings.Join(bundle[d].reqs, "|"), strings.Join(bundle[d].tags, "|"))
+		}
+		delete(bundle, d)
+	}
+
+	if len(bundle) == 0 {
+		log.V(3).Infof("[casng] upload.batcher.pub.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+		return
+	}
+
+	if err == nil {
+		err = fmt.Errorf("[casng] server did not return a response for %d requests", len(bundle))
+	}
+	err = errors.Join(ErrGRPC, err)
+
+	// Report failed requests due to call failure.
+	for d, item := range bundle {
+		s := Stats{
+			BytesRequested:  d.Size,
+			TotalBytesMoved: d.Size,
+			CacheMissCount:  1,
+			BatchedCount:    1,
+		}
+		if r := digestRetryCount[d]; r > 0 {
+			s.TotalBytesMoved = d.Size * (r + 1)
+		}
+		u.dispatcherResCh <- UploadResponse{
+			Digest: d,
+			Stats:  s,
+			Err:    err,
+			tags:   item.tags,
+			reqs:   item.reqs,
+		}
+		if log.V(3) {
+			log.Infof("[casng] upload.batcher.res.failed.call; digest=%s, req=%s, tag=%s", d, strings.Join(bundle[d].reqs, "|"), strings.Join(bundle[d].tags, "|"))
+		}
+	}
+	log.V(3).Infof("[casng] upload.batcher.pub.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
 }
 
 // uploadStreamer handles files that do not fit into a batching request.
