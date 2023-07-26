@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path"
@@ -229,5 +230,56 @@ func TestNewClientFromConnection(t *testing.T) {
 	_, err = NewClientFromConnection(ctx, instance, conn, nil, StartupCapabilities(false))
 	if err == nil {
 		t.Fatalf("Expected error got nil")
+	}
+}
+
+func TestResourceName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		instanceName string
+		segments     []string
+		wantName     string
+		wantErr      error
+	}{
+		{
+			name:         "valid",
+			segments:     []string{"uploads", "uuid", "blobs", "abc", "1", "meta"},
+			instanceName: "the/instance",
+			wantName:     "the/instance/uploads/uuid/blobs/abc/1/meta",
+		},
+		{
+			name:         "empty_instance_name",
+			segments:     []string{"uploads", "uuid", "blobs", "abc", "1", "meta"},
+			instanceName: "",
+			wantName:     "uploads/uuid/blobs/abc/1/meta",
+		},
+		{
+			name:         "empty_instance_name_no_segments",
+			segments:     []string{},
+			instanceName: "",
+			wantName:     "",
+		},
+		{
+			name:         "empty_segment",
+			segments:     []string{"uploads", "", "uuid", "blobs", "abc", "1", "meta"},
+			instanceName: "the/instance",
+			wantName:     "",
+			wantErr:      ErrEmptySegment,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c := Client{InstanceName: test.instanceName}
+			name, err := c.ResourceName(test.segments...)
+			if !errors.Is(test.wantErr, err) {
+				t.Errorf("unexpected error; want %v, got %v", test.wantErr, err)
+			}
+			if name != test.wantName {
+				t.Errorf("name mismatch; want %q, got %q", test.wantName, name)
+			}
+		})
 	}
 }

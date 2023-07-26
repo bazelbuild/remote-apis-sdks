@@ -356,7 +356,7 @@ func (ec *Context) ExecuteRemotely() {
 				streamWg.Add(1)
 				go func() {
 					defer streamWg.Done()
-					path := fmt.Sprintf("%s/logstreams/%s", ec.client.GrpcClient.InstanceName, name)
+					path, _ := ec.client.GrpcClient.ResourceName("logstreams", name)
 					log.V(1).Infof("%s %s> Streaming to stdout from %q", cmdID, executionID, path)
 					// Ignoring the error here since the net result is downloading the full stream after the fact.
 					n, err := ec.client.GrpcClient.ReadResourceTo(ec.ctx, path, outerr.NewOutWriter(ec.oe))
@@ -372,7 +372,7 @@ func (ec *Context) ExecuteRemotely() {
 				streamWg.Add(1)
 				go func() {
 					defer streamWg.Done()
-					path := fmt.Sprintf("%s/logstreams/%s", ec.client.GrpcClient.InstanceName, name)
+					path, _ := ec.client.GrpcClient.ResourceName("logstreams", name)
 					log.V(1).Infof("%s %s> Streaming to stdout from %q", cmdID, executionID, path)
 					// Ignoring the error here since the net result is downloading the full stream after the fact.
 					n, err := ec.client.GrpcClient.ReadResourceTo(ec.ctx, path, outerr.NewErrWriter(ec.oe))

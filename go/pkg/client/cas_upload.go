@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -201,14 +202,16 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 
 // ResourceNameWrite generates a valid write resource name.
 func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
-	return fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
+	rname, _ := c.ResourceName("uploads", uuid.New(), "blobs", hash, strconv.FormatInt(sizeBytes, 10))
+	return rname
 }
 
 // ResourceNameCompressedWrite generates a valid write resource name.
 // TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
 // that gets merged in.
 func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) string {
-	return fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
+	rname, _ := c.ResourceName("uploads", uuid.New(), "compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
+	return rname
 }
 
 func (c *Client) writeRscName(ue *uploadinfo.Entry) string {
