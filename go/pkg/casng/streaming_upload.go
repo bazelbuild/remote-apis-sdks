@@ -1,6 +1,7 @@
 package casng
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -478,8 +479,133 @@ func (u *uploader) callBatchUpload(ctx context.Context, bundle uploadRequestBund
 // For files above the large threshold, this call assumes the io and large io holds are already acquired and will release them accordingly.
 // For other files, only an io hold is acquired and released in this call.
 func (u *uploader) streamer() {
+	log.V(1).Info("[casng] upload.streamer.start")
+	defer log.V(1).Info("[casng] upload.streamer.stop")
+
+	// Unify duplicate requests.
+	digestTags := make(map[digest.Digest][]string)
+	digestReqs := make(map[digest.Digest][]string)
+	streamResCh := make(chan UploadResponse)
+	pending := 0
+	for {
+		select {
+		// The dispatcher closes this channel when it's done dispatching, which happens after the streamer
+		// had sent all pending responses.
+		case req, ok := <-u.streamerCh:
+			if !ok {
+				return
+			}
+			isLargeFile := req.reader != nil
+			log.V(3).Infof("[casng] upload.streamer.req; digest=%s, large=%t, req=%s, tag=%s, pending=%d", req.Digest, isLargeFile, req.id, req.tag, pending)
+
+			reqs := digestReqs[req.Digest]
+			reqs = append(reqs, req.id)
+			digestReqs[req.Digest] = reqs
+			tags := digestTags[req.Digest]
+			tags = append(tags, req.tag)
+			digestTags[req.Digest] = tags
+			if len(tags) > 1 {
+				// Already in-flight. Release duplicate resources if it's a large file.
+				log.V(3).Infof("[casng] upload.streamer.unified; digest=%s, req=%s, tag=%s, bundle=%d", req.Digest, req.id, req.tag, len(tags))
+				if isLargeFile {
+					u.ioThrottler.release()
+					u.ioLargeThrottler.release()
+				}
+				continue
+			}
+
+			var name string
+			if req.Digest.Size >= u.ioCfg.CompressionSizeThreshold {
+				log.V(3).Infof("[casng] upload.streamer.compress; digest=%s, req=%s, tag=%s", req.Digest, req.id, req.tag)
+				name = MakeCompressedWriteResourceName(u.instanceName, req.Digest.Hash, req.Digest.Size)
+			} else {
+				name = MakeWriteResourceName(u.instanceName, req.Digest.Hash, req.Digest.Size)
+			}
+
+			pending += 1
+			// Block the streamer if the gRPC call is being throttled.
+			startTime := time.Now()
+			if !u.streamThrottle.acquire(u.ctx) {
+				if isLargeFile {
+					u.ioThrottler.release()
+					u.ioLargeThrottler.release()
+				}
+				// Ensure the response is dispatched before aborting.
+				u.workerWg.Add(1)
+				go func(req UploadRequest) {
+					defer u.workerWg.Done()
+					streamResCh <- UploadResponse{Digest: req.Digest, Stats: Stats{BytesRequested: req.Digest.Size}, Err: context.Canceled}
+				}(req)
+				continue
+			}
+			log.V(3).Infof("[casng] upload.streamer.throttle.duration; start=%d, end=%d, tag=%s", startTime.UnixNano(), time.Now().UnixNano(), req.tag)
+			u.workerWg.Add(1)
+			go func(req UploadRequest) {
+				defer u.workerWg.Done()
+				s, err := u.callStream(req.ctx, name, req)
+				// Release before sending on the channel to avoid blocking without actually using the gRPC resources.
+				u.streamThrottle.release()
+				streamResCh <- UploadResponse{Digest: req.Digest, Stats: s, Err: err}
+			}(req)
+		case r := <-streamResCh:
+			startTime := time.Now()
+			r.tags = digestTags[r.Digest]
+			delete(digestTags, r.Digest)
+			r.reqs = digestReqs[r.Digest]
+			delete(digestReqs, r.Digest)
+			u.dispatcherResCh <- r
+			pending -= 1
+			if log.V(3) {
+				log.Infof("[casng] upload.streamer.res; digest=%s, req=%s, tag=%s, pending=%d", r.Digest, strings.Join(r.reqs, "|"), strings.Join(r.tags, "|"), pending)
+			}
+			// Covers waiting on the dispatcher.
+			log.V(3).Infof("[casng] upload.streamer.pub.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
+		}
+	}
 }
 
 func (u *uploader) callStream(ctx context.Context, name string, req UploadRequest) (stats Stats, err error) {
-	panic("not yet implemented")
+	var reader io.Reader
+
+	// In the off chance that the blob is mis-constructed (more than one content field is set), start
+	// with b.reader to ensure any held locks are released.
+	switch {
+	// Large file.
+	case req.reader != nil:
+		reader = req.reader
+		defer func() {
+			if errClose := req.reader.Close(); err != nil {
+				err = errors.Join(ErrIO, errClose, err)
+			}
+			// IO holds were acquired during digestion for large files and are expected to be released here.
+			u.ioThrottler.release()
+			u.ioLargeThrottler.release()
+		}()
+
+	// Small file, a proto message (node), or an empty file.
+	case len(req.Bytes) > 0:
+		reader = bytes.NewReader(req.Bytes)
+
+	// Medium file.
+	default:
+		startTime := time.Now()
+		if !u.ioThrottler.acquire(ctx) {
+			return
+		}
+		log.V(3).Infof("[casng] upload.streamer.io_throttle.duration; start=%d, end=%d, req=%s, tag=%s", startTime.UnixNano(), time.Now().UnixNano(), req.id, req.tag)
+		defer u.ioThrottler.release()
+
+		f, errOpen := os.Open(req.Path.String())
+		if errOpen != nil {
+			return Stats{BytesRequested: req.Digest.Size}, errors.Join(ErrIO, errOpen)
+		}
+		defer func() {
+			if errClose := f.Close(); errClose != nil {
+				err = errors.Join(ErrIO, errClose, err)
+			}
+		}()
+		reader = f
+	}
+
+	return u.writeBytes(ctx, name, reader, req.Digest.Size, 0, true)
 }
