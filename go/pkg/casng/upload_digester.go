@@ -258,8 +258,8 @@ func (u *uploader) digest(req UploadRequest) {
 
 			switch {
 			case info.Mode().IsDir():
-				stats.DigestCount += 1
-				stats.InputDirCount += 1
+				stats.DigestCount++
+				stats.InputDirCount++
 				// All the descendants have already been visited (DFS).
 				node, b, errDigest := digestDirectory(path, u.dirChildren.load(key))
 				if errDigest != nil {
@@ -273,8 +273,8 @@ func (u *uploader) digest(req UploadRequest) {
 				return true
 
 			case info.Mode().IsRegular():
-				stats.DigestCount += 1
-				stats.InputFileCount += 1
+				stats.DigestCount++
+				stats.InputFileCount++
 				node, blb, errDigest := u.digestFile(realPath, info, req.digestOnly, req.id, req.tag, walkID)
 				if errDigest != nil {
 					err = errors.Join(errDigest, err)
@@ -329,8 +329,8 @@ func (u *uploader) digest(req UploadRequest) {
 				wg.(*sync.WaitGroup).Done()
 			}()
 
-			stats.DigestCount += 1
-			stats.InputSymlinkCount += 1
+			stats.DigestCount++
+			stats.InputSymlinkCount++
 			node, nextStep, errDigest := digestSymlink(req.Path, realPath, req.SymlinkOptions)
 			if errDigest != nil {
 				err = errors.Join(errDigest, err)

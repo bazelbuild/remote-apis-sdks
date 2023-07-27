@@ -355,8 +355,8 @@ func (u *BatchingUploader) Upload(ctx context.Context, reqs ...UploadRequest) ([
 	for d := range digested {
 		stats.BytesRequested += d.Size
 		stats.LogicalBytesCached += d.Size
-		stats.CacheHitCount += 1
-		stats.DigestCount += 1
+		stats.CacheHitCount++
+		stats.DigestCount++
 	}
 	if len(reqs) == 0 {
 		contextmd.Infof(ctx, log.Level(1), "[casng] upload: nothing is missing")
