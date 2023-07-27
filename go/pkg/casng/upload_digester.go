@@ -1,6 +1,7 @@
 package casng
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -34,7 +35,7 @@ type blob struct {
 // For each request, a file system walk is started concurrently to digest and forward blobs to the dispatcher.
 // If the request is for an already digested blob, it is forwarded to the dispatcher.
 // The number of concurrent requests is limited to the number of concurrent file system walks.
-func (u *uploader) digester() {
+func (u *uploader) digester(ctx context.Context) {
 	log.V(1).Info("[casng] upload.digester.start")
 	defer log.V(1).Info("[casng] upload.digester.stop")
 
@@ -131,13 +132,13 @@ func (u *uploader) digester() {
 			defer u.walkerWg.Done()
 			defer wg.Done()
 			defer u.walkThrottler.release()
-			u.digest(r)
+			u.digest(ctx, r)
 		}(req)
 	}
 }
 
 // digest initiates a file system walk to digest files and dispatch them for uploading.
-func (u *uploader) digest(req UploadRequest) {
+func (u *uploader) digest(ctx context.Context, req UploadRequest) {
 	walkID := uuid.New()
 	if log.V(3) {
 		startTime := time.Now()
@@ -164,7 +165,7 @@ func (u *uploader) digest(req UploadRequest) {
 				log.V(3).Infof("upload.digester.req.cancel; tag=%s, walk=%s", req.tag, walkID)
 				return walker.SkipPath, false
 			// This is intended to short-circuit a cancelled uploader. It is not intended to abort by cancelling the uploader's context.
-			case <-u.ctx.Done():
+			case <-ctx.Done():
 				log.V(3).Infof("upload.digester.cancel; tag=%s, walk=%s", req.tag, walkID)
 				return walker.SkipPath, false
 			default:
@@ -232,7 +233,7 @@ func (u *uploader) digest(req UploadRequest) {
 				log.V(3).Infof("upload.digester.req.cancel; req=%s, tag=%s, walk=%s", req.id, req.tag, walkID)
 				return false
 			// This is intended to short-circuit a cancelled uploader. It is not intended to abort by cancelling the uploader's context.
-			case <-u.ctx.Done():
+			case <-ctx.Done():
 				log.V(3).Infof("upload.digester.cancel; req=%s, tag=%s, walk=%s", req.id, req.tag, walkID)
 				return false
 			default:
@@ -275,7 +276,7 @@ func (u *uploader) digest(req UploadRequest) {
 			case info.Mode().IsRegular():
 				stats.DigestCount++
 				stats.InputFileCount++
-				node, blb, errDigest := u.digestFile(realPath, info, req.digestOnly, req.id, req.tag, walkID)
+				node, blb, errDigest := u.digestFile(ctx, realPath, info, req.digestOnly, req.id, req.tag, walkID)
 				if errDigest != nil {
 					err = errors.Join(errDigest, err)
 					return false
@@ -305,7 +306,7 @@ func (u *uploader) digest(req UploadRequest) {
 				log.V(3).Infof("upload.digester.req.cancel; req=%s, tag=%s, walk=%s", req.id, req.tag, walkID)
 				return walker.SkipSymlink, false
 			// This is intended to short-circuit a cancelled uploader. It is not intended to abort by cancelling the uploader's context.
-			case <-u.ctx.Done():
+			case <-ctx.Done():
 				log.V(3).Infof("upload.digester.cancel; req=%s, tag=%s, walk=%s", req.id, req.tag, walkID)
 				return walker.SkipSymlink, false
 			default:
@@ -462,7 +463,7 @@ func digestDirectory(path impath.Absolute, children []proto.Message) (*repb.Dire
 // The caller must assume ownership of that token and release it.
 //
 // If the returned err is not nil, both tokens are released before returning.
-func (u *uploader) digestFile(path impath.Absolute, info fs.FileInfo, closeLargeFile bool, reqID string, tag string, walkID string) (node *repb.FileNode, blb *blob, err error) {
+func (u *uploader) digestFile(ctx context.Context, path impath.Absolute, info fs.FileInfo, closeLargeFile bool, reqID string, tag string, walkID string) (node *repb.FileNode, blb *blob, err error) {
 	// Always return a clone to ensure the cached version remains owned by the cache.
 	defer func() {
 		if node != nil {
@@ -530,8 +531,8 @@ func (u *uploader) digestFile(path impath.Absolute, info fs.FileInfo, closeLarge
 	// This assumes ioThrottler has more tokens than ioLargeThrottler.
 	if info.Size() > u.ioCfg.LargeFileSizeThreshold {
 		startTime := time.Now()
-		if !u.ioLargeThrottler.acquire(u.ctx) {
-			return nil, nil, u.ctx.Err()
+		if !u.ioLargeThrottler.acquire(ctx) {
+			return nil, nil, ctx.Err()
 		}
 		log.V(3).Infof("[casng] upload.digester.io_large_throttle.duration; start=%d, end=%d, req=%s, tag=%s, walk=%s", startTime.UnixNano(), time.Now().UnixNano(), reqID, tag, walkID)
 		defer func() {
@@ -543,8 +544,8 @@ func (u *uploader) digestFile(path impath.Absolute, info fs.FileInfo, closeLarge
 	}
 
 	startTime := time.Now()
-	if !u.ioThrottler.acquire(u.ctx) {
-		return nil, nil, u.ctx.Err()
+	if !u.ioThrottler.acquire(ctx) {
+		return nil, nil, ctx.Err()
 	}
 	log.V(3).Infof("[casng] upload.digester.io_throttle.duration; start=%d, end=%d, req=%s, tag=%s, walk=%s", startTime.UnixNano(), time.Now().UnixNano(), reqID, tag, walkID)
 	defer func() {

@@ -103,8 +103,7 @@ func (u *uploader) missingBlobsPipe(in <-chan missingBlobRequest) <-chan Missing
 	ch := make(chan MissingBlobsResponse)
 
 	// If this was called after the the uploader was terminated, short the circuit and return.
-	select {
-	case <-u.ctx.Done():
+	if u.done {
 		go func() {
 			defer close(ch)
 			res := MissingBlobsResponse{Err: ErrTerminatedUploader}
@@ -114,7 +113,6 @@ func (u *uploader) missingBlobsPipe(in <-chan missingBlobRequest) <-chan Missing
 			}
 		}()
 		return ch
-	default:
 	}
 
 	tag, resCh := u.queryPubSub.sub()
@@ -188,13 +186,13 @@ func (u *uploader) missingBlobsPipe(in <-chan missingBlobRequest) <-chan Missing
 type digestStrings map[digest.Digest][]string
 
 // queryProcessor is the fan-in handler that manages the bundling and dispatching of incoming requests.
-func (u *uploader) queryProcessor() {
+func (u *uploader) queryProcessor(ctx context.Context) {
 	log.V(1).Info("[casng] query.processor.start")
 	defer log.V(1).Info("[casng] query.processor.stop")
 
 	bundle := make(digestStrings)
 	reqs := make(digestStrings)
-	ctx := u.ctx // context with unified metadata.
+	bundleCtx := ctx // context with unified metadata.
 	bundleSize := u.queryRequestBaseSize
 
 	handle := func() {
@@ -203,12 +201,12 @@ func (u *uploader) queryProcessor() {
 		}
 		// Block the entire processor if the concurrency limit is reached.
 		startTime := time.Now()
-		if !u.queryThrottler.acquire(u.ctx) {
+		if !u.queryThrottler.acquire(ctx) {
 			// Ensure responses are dispatched before aborting.
 			for d := range bundle {
 				u.queryPubSub.pub(MissingBlobsResponse{
 					Digest: d,
-					Err:    u.ctx.Err(),
+					Err:    ctx.Err(),
 				}, bundle[d]...)
 			}
 			log.V(3).Infof("[casng] query.cancel")
@@ -221,12 +219,12 @@ func (u *uploader) queryProcessor() {
 			defer u.workerWg.Done()
 			defer u.queryThrottler.release()
 			u.callMissingBlobs(ctx, b, r)
-		}(ctx, bundle, reqs)
+		}(bundleCtx, bundle, reqs)
 
 		bundle = make(digestStrings)
 		reqs = make(digestStrings)
 		bundleSize = u.queryRequestBaseSize
-		ctx = u.ctx
+		bundleCtx = ctx
 	}
 
 	bundleTicker := time.NewTicker(u.queryRPCCfg.BundleTimeout)
@@ -262,7 +260,7 @@ func (u *uploader) queryProcessor() {
 			// Duplicate tags are allowed to ensure the requester can match the number of responses to the number of requests.
 			bundle[req.digest] = append(bundle[req.digest], req.tag)
 			bundleSize += dSize
-			ctx, _ = contextmd.FromContexts(ctx, req.ctx) // ignore non-essential error.
+			bundleCtx, _ = contextmd.FromContexts(bundleCtx, req.ctx) // ignore non-essential error.
 
 			// Check length threshold.
 			if len(bundle) >= u.queryRPCCfg.ItemsLimit {

@@ -378,7 +378,7 @@ func (u *BatchingUploader) Upload(ctx context.Context, reqs ...UploadRequest) ([
 		for _, r := range reqs {
 			select {
 			case ch <- r:
-			case <-u.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}

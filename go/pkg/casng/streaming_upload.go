@@ -140,8 +140,7 @@ func (u *uploader) streamPipe(ctx context.Context, in <-chan UploadRequest) <-ch
 	ch := make(chan UploadResponse)
 
 	// If this was called after the the uploader was terminated, short the circuit and return.
-	select {
-	case <-u.ctx.Done():
+	if u.done {
 		go func() {
 			defer close(ch)
 			r := UploadResponse{Err: ErrTerminatedUploader}
@@ -150,7 +149,6 @@ func (u *uploader) streamPipe(ctx context.Context, in <-chan UploadRequest) <-ch
 			}
 		}()
 		return ch
-	default:
 	}
 
 	// Register a new requester with the internal processor.
@@ -195,13 +193,13 @@ func (u *uploader) streamPipe(ctx context.Context, in <-chan UploadRequest) <-ch
 }
 
 // uploadBatcher handles files that can fit into a batching request.
-func (u *uploader) batcher() {
+func (u *uploader) batcher(ctx context.Context) {
 	log.V(1).Info("[casng] upload.batcher.start")
 	defer log.V(1).Info("[casng] uploader.batcher.stop")
 
 	bundle := make(uploadRequestBundle)
 	bundleSize := u.uploadRequestBaseSize
-	ctx := u.ctx // context with unified metadata.
+	bundleCtx := ctx // context with unified metadata.
 
 	// handle is a closure that shares read/write access to the bundle variables with its parent.
 	// This allows resetting the bundle and associated variables in one call rather than having to repeat the reset
@@ -212,7 +210,7 @@ func (u *uploader) batcher() {
 		}
 		// Block the batcher if the concurrency limit is reached.
 		startTime := time.Now()
-		if !u.uploadThrottler.acquire(u.ctx) {
+		if !u.uploadThrottler.acquire(ctx) {
 			// Ensure responses are dispatched before aborting.
 			for d, item := range bundle {
 				u.dispatcherResCh <- UploadResponse{
@@ -233,11 +231,11 @@ func (u *uploader) batcher() {
 			defer u.uploadThrottler.release()
 			// TODO: cancel ctx if all requesters have cancelled their contexts.
 			u.callBatchUpload(ctx, b)
-		}(ctx, bundle)
+		}(bundleCtx, bundle)
 
 		bundle = make(uploadRequestBundle)
 		bundleSize = u.uploadRequestBaseSize
-		ctx = u.ctx
+		bundleCtx = ctx
 	}
 
 	bundleTicker := time.NewTicker(u.batchRPCCfg.BundleTimeout)
@@ -297,8 +295,7 @@ func (u *uploader) batcher() {
 						r = f
 					} else {
 						// If this blob was from a large file, ensure IO holds are released.
-						defer u.ioThrottler.release()
-						defer u.ioLargeThrottler.release()
+						defer u.releaseIOTokens()
 					}
 					defer func() {
 						if errClose := r.Close(); err != nil {
@@ -329,7 +326,7 @@ func (u *uploader) batcher() {
 			}
 			bundle[req.Digest] = item
 			bundleSize += rSize
-			ctx, _ = contextmd.FromContexts(ctx, req.ctx) // ignore non-essential error.
+			bundleCtx, _ = contextmd.FromContexts(bundleCtx, req.ctx) // ignore non-essential error.
 
 			// If the bundle is full, cycle it.
 			if len(bundle) >= u.batchRPCCfg.ItemsLimit {
@@ -473,12 +470,12 @@ func (u *uploader) callBatchUpload(ctx context.Context, bundle uploadRequestBund
 	log.V(3).Infof("[casng] upload.batcher.pub.duration; start=%d, end=%d", startTime.UnixNano(), time.Now().UnixNano())
 }
 
-// uploadStreamer handles files that do not fit into a batching request.
+// streamer handles files that do not fit into a batching request.
 // Unlike the batched call, querying the CAS is not required because the API handles this automatically.
 // See https://github.com/bazelbuild/remote-apis/blob/0cd22f7b466ced15d7803e8845d08d3e8d2c51bc/build/bazel/remote/execution/v2/remote_execution.proto#L250-L254
 // For files above the large threshold, this call assumes the io and large io holds are already acquired and will release them accordingly.
 // For other files, only an io hold is acquired and released in this call.
-func (u *uploader) streamer() {
+func (u *uploader) streamer(ctx context.Context) {
 	log.V(1).Info("[casng] upload.streamer.start")
 	defer log.V(1).Info("[casng] upload.streamer.stop")
 
@@ -495,21 +492,18 @@ func (u *uploader) streamer() {
 			if !ok {
 				return
 			}
-			isLargeFile := req.reader != nil
-			log.V(3).Infof("[casng] upload.streamer.req; digest=%s, large=%t, req=%s, tag=%s, pending=%d", req.Digest, isLargeFile, req.id, req.tag, pending)
+			shouldReleaseIOTokens := req.reader != nil
+			log.V(3).Infof("[casng] upload.streamer.req; digest=%s, large=%t, req=%s, tag=%s, pending=%d", req.Digest, shouldReleaseIOTokens, req.id, req.tag, pending)
 
-			reqs := digestReqs[req.Digest]
-			reqs = append(reqs, req.id)
-			digestReqs[req.Digest] = reqs
+			digestReqs[req.Digest] = append(digestReqs[req.Digest], req.id)
 			tags := digestTags[req.Digest]
 			tags = append(tags, req.tag)
 			digestTags[req.Digest] = tags
 			if len(tags) > 1 {
 				// Already in-flight. Release duplicate resources if it's a large file.
 				log.V(3).Infof("[casng] upload.streamer.unified; digest=%s, req=%s, tag=%s, bundle=%d", req.Digest, req.id, req.tag, len(tags))
-				if isLargeFile {
-					u.ioThrottler.release()
-					u.ioLargeThrottler.release()
+				if shouldReleaseIOTokens {
+					u.releaseIOTokens()
 				}
 				continue
 			}
@@ -522,19 +516,18 @@ func (u *uploader) streamer() {
 				name = MakeWriteResourceName(u.instanceName, req.Digest.Hash, req.Digest.Size)
 			}
 
-			pending += 1
+			pending++
 			// Block the streamer if the gRPC call is being throttled.
 			startTime := time.Now()
-			if !u.streamThrottle.acquire(u.ctx) {
-				if isLargeFile {
-					u.ioThrottler.release()
-					u.ioLargeThrottler.release()
+			if !u.streamThrottle.acquire(ctx) {
+				if shouldReleaseIOTokens {
+					u.releaseIOTokens()
 				}
 				// Ensure the response is dispatched before aborting.
 				u.workerWg.Add(1)
 				go func(req UploadRequest) {
 					defer u.workerWg.Done()
-					streamResCh <- UploadResponse{Digest: req.Digest, Stats: Stats{BytesRequested: req.Digest.Size}, Err: context.Canceled}
+					streamResCh <- UploadResponse{Digest: req.Digest, Stats: Stats{BytesRequested: req.Digest.Size}, Err: ctx.Err()}
 				}(req)
 				continue
 			}
@@ -554,7 +547,7 @@ func (u *uploader) streamer() {
 			r.reqs = digestReqs[r.Digest]
 			delete(digestReqs, r.Digest)
 			u.dispatcherResCh <- r
-			pending -= 1
+			pending--
 			if log.V(3) {
 				log.Infof("[casng] upload.streamer.res; digest=%s, req=%s, tag=%s, pending=%d", r.Digest, strings.Join(r.reqs, "|"), strings.Join(r.tags, "|"), pending)
 			}
@@ -574,12 +567,11 @@ func (u *uploader) callStream(ctx context.Context, name string, req UploadReques
 	case req.reader != nil:
 		reader = req.reader
 		defer func() {
-			if errClose := req.reader.Close(); err != nil {
+			if errClose := req.reader.Close(); errClose != nil {
 				err = errors.Join(ErrIO, errClose, err)
 			}
 			// IO holds were acquired during digestion for large files and are expected to be released here.
-			u.ioThrottler.release()
-			u.ioLargeThrottler.release()
+			u.releaseIOTokens()
 		}()
 
 	// Small file, a proto message (node), or an empty file.
