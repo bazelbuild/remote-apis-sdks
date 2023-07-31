@@ -144,8 +144,7 @@ func (u *uploader) dispatcher(queryCh chan<- missingBlobRequest, queryResCh <-ch
 						res.tags[i] = req.tag
 						res.reqs[i] = req.id
 						if req.reader != nil {
-							u.ioThrottler.release()
-							u.ioLargeThrottler.release()
+							u.releaseIOTokens()
 						}
 					}
 					if log.V(3) {

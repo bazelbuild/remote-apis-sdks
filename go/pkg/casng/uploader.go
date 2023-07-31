@@ -215,10 +215,8 @@ type uploader struct {
 	queryPubSub      *pubsub                 // Fan-out broker for query responses.
 	uploadPubSub     *pubsub                 // Fan-out broker for upload responses.
 
-	// ctx is used to make unified calls and terminate saturated throttlers and in-flight workers.
-	ctx context.Context
-
 	logBeatDoneCh chan struct{}
+	done          bool
 }
 
 // Node looks up a node from the node cache which is populated during digestion.
@@ -242,6 +240,7 @@ func (u *uploader) Node(req UploadRequest) proto.Message {
 // WIP: While this is intended to replace the uploader in the client and cas packages, it is not yet ready for production envionrments.
 //
 // The specified configs must be compatible with the capabilities of the server that the specified clients are connected to.
+// ctx is used to make unified calls and terminate saturated throttlers and in-flight workers.
 // ctx must be cancelled after all batching calls have returned to properly shutdown the uploader. It is only used for cancellation (not used with remote calls).
 // gRPC timeouts are multiplied by retries. Batched RPCs are retried per batch. Streaming PRCs are retried per chunk.
 func NewBatchingUploader(
@@ -259,6 +258,7 @@ func NewBatchingUploader(
 // WIP: While this is intended to replace the uploader in the client and cas packages, it is not yet ready for production envionrments.
 //
 // The specified configs must be compatible with the capabilities of the server which the specified clients are connected to.
+// ctx is used to make unified calls and terminate saturated throttlers and in-flight workers.
 // ctx must be cancelled after all response channels have been closed to properly shutdown the uploader. It is only used for cancellation (not used with remote calls).
 // gRPC timeouts are multiplied by retries. Batched RPCs are retried per batch. Streaming PRCs are retried per chunk.
 func NewStreamingUploader(
@@ -295,8 +295,6 @@ func newUploader(
 	}
 
 	u := &uploader{
-		ctx: ctx,
-
 		cas:          cas,
 		byteStream:   byteStream,
 		instanceName: instanceName,
@@ -348,13 +346,13 @@ func newUploader(
 
 	u.processorWg.Add(1)
 	go func() {
-		u.queryProcessor()
+		u.queryProcessor(ctx)
 		u.processorWg.Done()
 	}()
 
 	u.processorWg.Add(1)
 	go func() {
-		u.digester()
+		u.digester(ctx)
 		u.processorWg.Done()
 	}()
 
@@ -369,24 +367,29 @@ func newUploader(
 
 	u.processorWg.Add(1)
 	go func() {
-		u.batcher()
+		u.batcher(ctx)
 		u.processorWg.Done()
 	}()
 
 	u.processorWg.Add(1)
 	go func() {
-		u.streamer()
+		u.streamer(ctx)
 		u.processorWg.Done()
 	}()
 
-	go u.close()
+	go u.close(ctx)
 	go u.logBeat()
 	return u, nil
 }
 
-func (u *uploader) close() {
+func (u *uploader) close(ctx context.Context) {
 	// The context must be cancelled first.
-	<-u.ctx.Done()
+	<-ctx.Done()
+	// It's possible for a client to make a call between receiving the context cancellation
+	// signal and storing the done boolean value. Races are also possible.
+	// However, this is not a problem because the termination sequence below ensures
+	// all producers are terminated before releasing resources.
+	u.done = true
 
 	startTime := time.Now()
 
@@ -456,6 +459,12 @@ func (u *uploader) logBeat() {
 		log.Infof("[casng] beat; #%d, upload_subs=%d, query_subs=%d, walkers=%d, batching=%d, streaming=%d, querying=%d, open_files=%d, large_open_files=%d",
 			i, u.uploadPubSub.len(), u.queryPubSub.len(), u.walkThrottler.len(), u.uploadThrottler.len(), u.streamThrottle.len(), u.queryThrottler.len(), u.ioThrottler.len(), u.ioLargeThrottler.len())
 	}
+}
+
+// releaseIOTokens releases from both ioThrottler and ioLargeThrottler.
+func (u *uploader) releaseIOTokens() {
+	u.ioThrottler.release()
+	u.ioLargeThrottler.release()
 }
 
 func isExec(mode fs.FileMode) bool {
