@@ -8,9 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
@@ -75,10 +77,10 @@ func (c *Client) MissingBlobs(ctx context.Context, digests []digest.Digest) ([]d
 // Returns a slice of missing digests that were written and the sum of total bytes moved, which
 // may be different from logical bytes moved (i.e. sum of digest sizes) due to compression.
 func (c *Client) UploadIfMissing(ctx context.Context, entries ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
-	if !c.UnifiedUploads {
-		return c.uploadNonUnified(ctx, entries...)
+	if c.UnifiedUploads {
+		return c.uploadUnified(ctx, entries...)
 	}
-	return c.uploadUnified(ctx, entries...)
+	return c.uploadNonUnified(ctx, entries...)
 }
 
 // WriteBlobs is a proxy method for UploadIfMissing that facilitates specifying a map of
@@ -618,4 +620,16 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 	}
 	st.clients = nil
 	st.ue = nil
+}
+
+func (c *Client) NgUploadTree(ctx context.Context, execRoot impath.Absolute, workingDir, remoteWorkingDir impath.Relative, reqs ...casng.UploadRequest) (rootDigest digest.Digest, uploaded []digest.Digest, stats casng.Stats, err error) {
+	return c.ngCasUploader.UploadTree(ctx, execRoot, workingDir, remoteWorkingDir, reqs...)
+}
+
+func (c *Client) NgUpload(ctx context.Context, reqs ...casng.UploadRequest) ([]digest.Digest, casng.Stats, error) {
+	return c.ngCasUploader.Upload(ctx, reqs...)
+}
+
+func (c *Client) IsCasNG() bool {
+	return c.useCasNg
 }
