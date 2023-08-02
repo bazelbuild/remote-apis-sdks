@@ -40,6 +40,7 @@ go_test(
     name = "cas_test",
     srcs = [
         "batching_query_test.go",
+        "batching_upload_test.go",
         "batching_write_bytes_test.go",
         "streaming_query_test.go",
         "util_test.go",
@@ -50,6 +51,7 @@ go_test(
         "//go/pkg/digest",
         "//go/pkg/errors",
         "//go/pkg/io/impath",
+        "//go/pkg/io/walker",
         "//go/pkg/retry",
         "//go/pkg/symlinkopts",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:remote_execution_go_proto",
