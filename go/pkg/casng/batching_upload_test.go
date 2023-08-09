@@ -496,7 +496,6 @@ func TestUpload_Batching(t *testing.T) {
 			}
 		})
 	}
-	log.Flush()
 }
 
 func TestUpload_BatchingAbort(t *testing.T) {
