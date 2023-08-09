@@ -89,3 +89,5 @@ func (fakeSubConn) Connect() {
 func (fakeSubConn) GetOrBuildProducer(grpcbalancer.ProducerBuilder) (grpcbalancer.Producer, func()) {
 	return nil, nil
 }
+
+func (fakeSubConn) Shutdown() {}
