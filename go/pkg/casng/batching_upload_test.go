@@ -16,6 +16,8 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
 	"github.com/google/go-cmp/cmp"
+	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
@@ -41,7 +43,7 @@ func TestUpload_Batching(t *testing.T) {
 			root:  "foo.c",
 			ioCfg: casng.IOConfig{BufferSize: 1},
 			bsc: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return io.EOF
@@ -88,7 +90,7 @@ func TestUpload_Batching(t *testing.T) {
 				RetryPredicate:       retry.TransientOnly,
 			},
 			bsc: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					var size int64
 					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
@@ -141,7 +143,7 @@ func TestUpload_Batching(t *testing.T) {
 				RetryPredicate:       retry.TransientOnly,
 			},
 			bsc: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					var size int64
 					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
@@ -196,7 +198,7 @@ func TestUpload_Batching(t *testing.T) {
 				RetryPredicate:       retry.TransientOnly,
 			},
 			bsc: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					var size int64
 					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
@@ -263,7 +265,7 @@ func TestUpload_Batching(t *testing.T) {
 				RetryPredicate:       retry.TransientOnly,
 			},
 			bsc: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					var size int64
 					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
@@ -334,7 +336,7 @@ func TestUpload_Batching(t *testing.T) {
 				RetryPredicate:       retry.TransientOnly,
 			},
 			bsc: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					var size int64
 					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
@@ -397,7 +399,7 @@ func TestUpload_Batching(t *testing.T) {
 				Timeout:              time.Second,
 			},
 			bsc: &fakeByteStreamClient{
-				write: func(_ context.Context, _ ...grpc.CallOption) (bspb.ByteStream_WriteClient, error) {
+				write: func(_ context.Context, _ ...grpc.CallOption) (bsgrpc.ByteStream_WriteClient, error) {
 					return &fakeByteStreamWriteClient{
 						send: func(wr *bspb.WriteRequest) error {
 							return nil
