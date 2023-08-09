@@ -254,9 +254,6 @@ func (ec *Context) ngUploadInputs() error {
 			return err
 		}
 		absPath := execRoot.Append(rel)
-		if err != nil {
-			return err
-		}
 		// if seenPath[absPath] {
 		// return fmt.Errorf("[casng] %s %s> cannot have shared paths among inputs: %q", cmdID, executionID, absPath)
 		// }
@@ -287,9 +284,6 @@ func (ec *Context) ngUploadInputs() error {
 			return err
 		}
 		absPath := execRoot.Append(rel)
-		if err != nil {
-			return err
-		}
 		// If it collides with a real path, ignore it to avoid corrupting the node cache.
 		if pathSeen[absPath] {
 			continue
