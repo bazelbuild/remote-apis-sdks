@@ -622,14 +622,17 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 	st.ue = nil
 }
 
+// NgUploadTree delegates to UploadTree of the casng package.
 func (c *Client) NgUploadTree(ctx context.Context, execRoot impath.Absolute, workingDir, remoteWorkingDir impath.Relative, reqs ...casng.UploadRequest) (rootDigest digest.Digest, uploaded []digest.Digest, stats casng.Stats, err error) {
 	return c.ngCasUploader.UploadTree(ctx, execRoot, workingDir, remoteWorkingDir, reqs...)
 }
 
+// NgUpload delegates to Upload of the casng package.
 func (c *Client) NgUpload(ctx context.Context, reqs ...casng.UploadRequest) ([]digest.Digest, casng.Stats, error) {
 	return c.ngCasUploader.Upload(ctx, reqs...)
 }
 
+// IsCasNG returns true if casng feature flag is turned on.
 func (c *Client) IsCasNG() bool {
 	return c.useCasNg
 }

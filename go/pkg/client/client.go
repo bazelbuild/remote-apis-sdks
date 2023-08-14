@@ -440,8 +440,10 @@ func (p *PerRPCCreds) Apply(c *Client) {
 	c.creds = p.Creds
 }
 
+// UseCASNG is a feature flag for the casng package.
 type UseCASNG bool
 
+// Apply sets the feature flag value in the Client.
 func (o UseCASNG) Apply(c *Client) {
 	c.useCasNg = bool(o)
 }

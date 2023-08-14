@@ -19,7 +19,7 @@ import (
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
-	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
+	rpcstpb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 )
 
@@ -60,7 +60,7 @@ func TestUpload_Batching(t *testing.T) {
 				},
 				batchUpdateBlobs: func(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
 					return &repb.BatchUpdateBlobsResponse{
-						Responses: []*repb.BatchUpdateBlobsResponse_Response{{Digest: in.Requests[0].Digest, Status: &rpcstatus.Status{}}},
+						Responses: []*repb.BatchUpdateBlobsResponse_Response{{Digest: in.Requests[0].Digest, Status: &rpcstpb.Status{}}},
 					}, nil
 				},
 			},
@@ -109,7 +109,7 @@ func TestUpload_Batching(t *testing.T) {
 				},
 				batchUpdateBlobs: func(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
 					return &repb.BatchUpdateBlobsResponse{
-						Responses: []*repb.BatchUpdateBlobsResponse_Response{{Digest: in.Requests[0].Digest, Status: &rpcstatus.Status{}}},
+						Responses: []*repb.BatchUpdateBlobsResponse_Response{{Digest: in.Requests[0].Digest, Status: &rpcstpb.Status{}}},
 					}, nil
 				},
 			},
@@ -162,7 +162,7 @@ func TestUpload_Batching(t *testing.T) {
 				},
 				batchUpdateBlobs: func(ctx context.Context, in *repb.BatchUpdateBlobsRequest, opts ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
 					return &repb.BatchUpdateBlobsResponse{
-						Responses: []*repb.BatchUpdateBlobsResponse_Response{{Digest: in.Requests[0].Digest, Status: &rpcstatus.Status{}}},
+						Responses: []*repb.BatchUpdateBlobsResponse_Response{{Digest: in.Requests[0].Digest, Status: &rpcstpb.Status{}}},
 					}, nil
 				},
 			},
@@ -218,7 +218,7 @@ func TestUpload_Batching(t *testing.T) {
 				batchUpdateBlobs: func(_ context.Context, in *repb.BatchUpdateBlobsRequest, _ ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
 					resp := make([]*repb.BatchUpdateBlobsResponse_Response, len(in.Requests))
 					for i, r := range in.Requests {
-						resp[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest, Status: &rpcstatus.Status{}}
+						resp[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest, Status: &rpcstpb.Status{}}
 					}
 					return &repb.BatchUpdateBlobsResponse{
 						Responses: resp,
@@ -285,7 +285,7 @@ func TestUpload_Batching(t *testing.T) {
 				batchUpdateBlobs: func(_ context.Context, in *repb.BatchUpdateBlobsRequest, _ ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
 					resp := make([]*repb.BatchUpdateBlobsResponse_Response, len(in.Requests))
 					for i, r := range in.Requests {
-						resp[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest, Status: &rpcstatus.Status{}}
+						resp[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest, Status: &rpcstpb.Status{}}
 					}
 					return &repb.BatchUpdateBlobsResponse{
 						Responses: resp,
@@ -357,7 +357,7 @@ func TestUpload_Batching(t *testing.T) {
 				batchUpdateBlobs: func(_ context.Context, in *repb.BatchUpdateBlobsRequest, _ ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
 					resp := make([]*repb.BatchUpdateBlobsResponse_Response, len(in.Requests))
 					for i, r := range in.Requests {
-						resp[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest, Status: &rpcstatus.Status{}}
+						resp[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest, Status: &rpcstpb.Status{}}
 					}
 					return &repb.BatchUpdateBlobsResponse{
 						Responses: resp,
@@ -417,7 +417,7 @@ func TestUpload_Batching(t *testing.T) {
 				batchUpdateBlobs: func(_ context.Context, in *repb.BatchUpdateBlobsRequest, _ ...grpc.CallOption) (*repb.BatchUpdateBlobsResponse, error) {
 					resp := make([]*repb.BatchUpdateBlobsResponse_Response, len(in.Requests))
 					for i, r := range in.Requests {
-						resp[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest, Status: &rpcstatus.Status{}}
+						resp[i] = &repb.BatchUpdateBlobsResponse_Response{Digest: r.Digest, Status: &rpcstpb.Status{}}
 					}
 					return &repb.BatchUpdateBlobsResponse{
 						Responses: resp,
