@@ -25,7 +25,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/prototext"
-	"google.golang.org/protobuf/proto"
 
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
@@ -172,27 +171,60 @@ func (ec *Context) downloadOutputs(outDir string) (*rc.MovedBytesMetadata, *comm
 	return stats, command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
-func (ec *Context) computeInputs() error {
-	if ec.client.GrpcClient.IsCasNG() {
-		return ec.ngUploadInputs()
-	}
-	if ec.Metadata.ActionDigest.Size > 0 {
-		// Already computed inputs.
-		return nil
-	}
-	ec.Metadata.EventTimes[command.EventComputeMerkleTree] = &command.TimeInterval{From: time.Now()}
-	defer func() { ec.Metadata.EventTimes[command.EventComputeMerkleTree].To = time.Now() }()
+func (ec *Context) computeCmdDg() (*repb.Platform, error) {
 	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
 	commandHasOutputPathsField := ec.client.GrpcClient.SupportsCommandOutputPaths()
 	cmdPb := ec.cmd.ToREProto(commandHasOutputPathsField)
 	log.V(2).Infof("%s %s> Command: \n%s\n", cmdID, executionID, prototext.Format(cmdPb))
 	var err error
 	if ec.cmdUe, err = uploadinfo.EntryFromProto(cmdPb); err != nil {
-		return err
+		return nil, err
 	}
 	cmdDg := ec.cmdUe.Digest
 	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s %s> Command digest: %s", cmdID, executionID, cmdDg)
+	return cmdPb.Platform, nil
+}
+
+func (ec *Context) computeActionDg(rootDg digest.Digest, platform *repb.Platform) error {
+	acPb := &repb.Action{
+		CommandDigest:   ec.cmdUe.Digest.ToProto(),
+		InputRootDigest: rootDg.ToProto(),
+		DoNotCache:      ec.opt.DoNotCache,
+	}
+	// If supported, we attach a copy of the platform properties list to the Action.
+	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
+		acPb.Platform = platform
+	}
+
+	if ec.cmd.Timeout > 0 {
+		acPb.Timeout = dpb.New(ec.cmd.Timeout)
+	}
+	var err error
+	if ec.acUe, err = uploadinfo.EntryFromProto(acPb); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ec *Context) computeInputs() error {
+	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
+	if ec.Metadata.ActionDigest.Size > 0 {
+		// Already computed inputs.
+		log.V(1).Infof("%s %s> Inputs already uploaded", cmdID, executionID)
+		return nil
+	}
+	if ec.client.GrpcClient.IsCasNG() {
+		return ec.ngUploadInputs()
+	}
+
+	ec.Metadata.EventTimes[command.EventComputeMerkleTree] = &command.TimeInterval{From: time.Now()}
+	defer func() { ec.Metadata.EventTimes[command.EventComputeMerkleTree].To = time.Now() }()
+	cmdPlatform, err := ec.computeCmdDg()
+	if err != nil {
+		return err
+	}
+
 	log.V(1).Infof("%s %s> Computing input Merkle tree...", cmdID, executionID)
 	execRoot, workingDir, remoteWorkingDir := ec.cmd.ExecRoot, ec.cmd.WorkingDir, ec.cmd.RemoteWorkingDir
 	root, blobs, stats, err := ec.client.GrpcClient.ComputeMerkleTree(ec.ctx, execRoot, workingDir, remoteWorkingDir, ec.cmd.InputSpec, ec.client.FileMetadataCache)
@@ -203,38 +235,24 @@ func (ec *Context) computeInputs() error {
 	ec.Metadata.InputFiles = stats.InputFiles
 	ec.Metadata.InputDirectories = stats.InputDirectories
 	ec.Metadata.TotalInputBytes = stats.TotalInputBytes
-	acPb := &repb.Action{
-		CommandDigest:   cmdDg.ToProto(),
-		InputRootDigest: root.ToProto(),
-		DoNotCache:      ec.opt.DoNotCache,
-	}
-	// If supported, we attach a copy of the platform properties list to the Action.
-	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
-		acPb.Platform = cmdPb.Platform
-	}
-
-	if ec.cmd.Timeout > 0 {
-		acPb.Timeout = dpb.New(ec.cmd.Timeout)
-	}
-	if ec.acUe, err = uploadinfo.EntryFromProto(acPb); err != nil {
+	err = ec.computeActionDg(root, cmdPlatform)
+	if err != nil {
 		return err
 	}
-	acDg := ec.acUe.Digest
-	log.V(1).Infof("%s %s> Action digest: %s", cmdID, executionID, acDg)
+	log.V(1).Infof("%s %s> Action digest: %s", cmdID, executionID, ec.acUe.Digest)
 	ec.inputBlobs = append(ec.inputBlobs, ec.cmdUe)
 	ec.inputBlobs = append(ec.inputBlobs, ec.acUe)
-	ec.Metadata.ActionDigest = acDg
-	ec.Metadata.TotalInputBytes += cmdDg.Size + acDg.Size
+	ec.Metadata.ActionDigest = ec.acUe.Digest
+	ec.Metadata.TotalInputBytes += ec.cmdUe.Digest.Size + ec.acUe.Digest.Size
 	return nil
 }
 
 func (ec *Context) ngUploadInputs() error {
 	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
-	if ec.Metadata.ActionDigest.Size > 0 {
-		// Already computed inputs.
-		log.V(1).Infof("[casng] ng.req: inputs already uploaded; cmd_id=%s, exec_id=%s", cmdID, executionID)
-		return nil
-	}
+
+	ec.Metadata.EventTimes[command.EventUploadInputs] = &command.TimeInterval{From: time.Now()}
+	defer func() { ec.Metadata.EventTimes[command.EventUploadInputs].To = time.Now() }()
+
 	execRoot, workingDir, remoteWorkingDir, err := cmdDirs(ec.cmd)
 	if err != nil {
 		return err
@@ -342,45 +360,26 @@ func (ec *Context) ngUploadInputs() error {
 	ec.Metadata.RealBytesUploaded = stats.TotalBytesMoved
 	ec.Metadata.MissingDigests = missing
 
-	commandHasOutputPathsField := ec.client.GrpcClient.SupportsCommandOutputPaths()
-	cmdPb := ec.cmd.ToREProto(commandHasOutputPathsField)
-	log.V(4).Infof("[casng] ng.req: command; cmd_id=%s, exec_id=%s\n%s", cmdID, executionID, prototext.Format(cmdPb))
-	cmdBlb, err := proto.Marshal(cmdPb)
+	cmdPlatform, err := ec.computeCmdDg()
 	if err != nil {
 		return err
 	}
-	cmdDg := digest.NewFromBlob(cmdBlb)
-	ec.Metadata.CommandDigest = cmdDg
-	log.V(1).Infof("[casng] ng.req: command; digest=%s, cmd_id=%s, exec_id=%s", cmdDg, cmdID, executionID)
-	acPb := &repb.Action{
-		CommandDigest:   cmdDg.ToProto(),
-		InputRootDigest: rootDg.ToProto(),
-		DoNotCache:      ec.opt.DoNotCache,
-	}
-	// If supported, we attach a copy of the platform properties list to the Action.
-	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
-		acPb.Platform = cmdPb.Platform
-	}
-
-	if ec.cmd.Timeout > 0 {
-		acPb.Timeout = dpb.New(ec.cmd.Timeout)
-	}
-	acBlb, err := proto.Marshal(acPb)
+	log.V(1).Infof("[casng] ng.req: command; digest=%s, cmd_id=%s, exec_id=%s", ec.cmdUe.Digest, cmdID, executionID)
+	err = ec.computeActionDg(rootDg, cmdPlatform)
 	if err != nil {
 		return err
 	}
-	acDg := digest.NewFromBlob(acBlb)
-	log.V(1).Infof("[casng] ng.req: action; digest=%s, cmd_id=%s, exec_id=%s", acDg, cmdID, executionID)
+	log.V(1).Infof("[casng] ng.req: action; digest=%s, cmd_id=%s, exec_id=%s", ec.acUe.Digest, cmdID, executionID)
 	missing, stats, err = ec.client.GrpcClient.NgUpload(ec.ctx,
-		casng.UploadRequest{Bytes: acBlb, Digest: acDg},
-		casng.UploadRequest{Bytes: cmdBlb, Digest: cmdDg},
+		casng.UploadRequest{Bytes: ec.acUe.Contents, Digest: ec.acUe.Digest},
+		casng.UploadRequest{Bytes: ec.cmdUe.Contents, Digest: ec.cmdUe.Digest},
 	)
 
 	if err != nil {
 		return err
 	}
-	ec.Metadata.ActionDigest = acDg
-	ec.Metadata.TotalInputBytes += cmdDg.Size + acDg.Size
+	ec.Metadata.ActionDigest = ec.acUe.Digest
+	ec.Metadata.TotalInputBytes += ec.cmdUe.Digest.Size + ec.acUe.Digest.Size
 	ec.Metadata.MissingDigests = append(ec.Metadata.MissingDigests, missing...)
 	ec.Metadata.TotalInputBytes += stats.BytesRequested
 	ec.Metadata.LogicalBytesUploaded += stats.LogicalBytesMoved
