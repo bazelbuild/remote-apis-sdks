@@ -529,11 +529,20 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 		}
 
 		// Add this leaf node to its ancestors.
-		rpStr := strings.TrimPrefix(r.Path.String(), execRoot.String()+string(filepath.Separator))
+		// Start by swapping the working directory with the remote one.
+		// Using strings is faster than using filepath functions which use filepath.Clean which is not cheap.
+		// To properly handle corner cases (no working dir, root is '/', etc), this is done in separate steps.
+		rpStr := strings.TrimPrefix(r.Path.String(), execRoot.String()) // if execRoot=='/', rpStr is now relative
+		rpStr = strings.TrimPrefix(rpStr, string(filepath.Separator))   // if execRoot!='/', remove the path separator
 		if strings.HasPrefix(rpStr, workingDir.String()) {
 			rpStr = strings.Replace(rpStr, workingDir.String(), remoteWorkingDir.String(), 1)
 		}
-		rp := execRoot.Append(impath.MustRel(rpStr))
+		rpStrRel, errIm := impath.Rel(rpStr)
+		if errIm != nil {
+			err = errors.Join(fmt.Errorf("[casng] upload.tree; cannot construct the merkle tree with a path outside the root: path=%q, root=%q, working_dir=%q, remote_working_dir=%q", r.Path, execRoot, workingDir, remoteWorkingDir), errIm)
+			return
+		}
+		rp := execRoot.Append(rpStrRel)
 		parent := rp
 		for {
 			rp = parent
