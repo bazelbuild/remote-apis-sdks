@@ -73,7 +73,7 @@ var (
 	// KeepAliveTimeout specifies gRPCs keepalive timeout parameter.
 	KeepAliveTimeout = flag.Duration("grpc_keepalive_timeout", 20*time.Second, "After having pinged for keepalive check, the client waits for a duration of Timeout and if no activity is seen even after that the connection is closed. Default is 20s.")
 	// KeepAlivePermitWithoutStream specifies gRPCs keepalive permitWithoutStream parameter.
-	KeepAlivePermitWithoutStream = flag.Bool("grpc_keepalive_permit_without_stream", true, "If true, client sends keepalive pings even with no active RPCs; otherwise, doesn't send pings even if time and timeout are set. Default is true.")
+	KeepAlivePermitWithoutStream = flag.Bool("grpc_keepalive_permit_without_stream", false, "If true, client sends keepalive pings even with no active RPCs; otherwise, doesn't send pings even if time and timeout are set. Default is false.")
 )
 
 func init() {
