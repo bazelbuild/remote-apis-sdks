@@ -111,7 +111,11 @@ func (c *Client) ReadResourceTo(ctx context.Context, name string, w io.Writer) (
 //
 // The number of bytes read is returned.
 func (c *Client) ReadResourceToFile(ctx context.Context, name, fpath string) (int64, error) {
-	return c.readToFile(ctx, c.InstanceName+name, fpath)
+	rname, err := c.ResourceName(name)
+	if err != nil {
+		return 0, err
+	}
+	return c.readToFile(ctx, rname, fpath)
 }
 
 func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int64, error) {

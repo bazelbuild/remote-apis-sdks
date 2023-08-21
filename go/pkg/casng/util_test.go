@@ -87,7 +87,7 @@ type fakeByteStreamWriteClient struct {
 }
 
 type fakeByteStreamClientReadClient struct {
-	bspb.ByteStream_ReadClient
+	bsgrpc.ByteStream_ReadClient
 	recv func() (*bspb.ReadResponse, error)
 }
 
@@ -98,7 +98,7 @@ func (s *fakeByteStreamClient) Write(ctx context.Context, opts ...grpc.CallOptio
 	return &fakeByteStreamWriteClient{}, nil
 }
 
-func (s *fakeByteStreamClient) Read(ctx context.Context, in *bspb.ReadRequest, opts ...grpc.CallOption) (bspb.ByteStream_ReadClient, error) {
+func (s *fakeByteStreamClient) Read(ctx context.Context, in *bspb.ReadRequest, opts ...grpc.CallOption) (bsgrpc.ByteStream_ReadClient, error) {
 	if s.read != nil {
 		return s.read(ctx, in, opts...)
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -947,13 +948,15 @@ type writeDummyCloser struct {
 func (w *writeDummyCloser) Close() error { return nil }
 
 func (c *Client) resourceNameRead(hash string, sizeBytes int64) string {
-	return fmt.Sprintf("%s/blobs/%s/%d", c.InstanceName, hash, sizeBytes)
+	rname, _ := c.ResourceName("blobs", hash, strconv.FormatInt(sizeBytes, 10))
+	return rname
 }
 
 // TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
 // that gets merged in.
 func (c *Client) resourceNameCompressedRead(hash string, sizeBytes int64) string {
-	return fmt.Sprintf("%s/compressed-blobs/zstd/%s/%d", c.InstanceName, hash, sizeBytes)
+	rname, _ := c.ResourceName("compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
+	return rname
 }
 
 // maybeCompressReadBlob will, depending on the client configuration, set the blobs to be

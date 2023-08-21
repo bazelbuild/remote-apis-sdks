@@ -3,13 +3,16 @@ package client
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
@@ -74,10 +77,10 @@ func (c *Client) MissingBlobs(ctx context.Context, digests []digest.Digest) ([]d
 // Returns a slice of missing digests that were written and the sum of total bytes moved, which
 // may be different from logical bytes moved (i.e. sum of digest sizes) due to compression.
 func (c *Client) UploadIfMissing(ctx context.Context, entries ...*uploadinfo.Entry) ([]digest.Digest, int64, error) {
-	if !c.UnifiedUploads {
-		return c.uploadNonUnified(ctx, entries...)
+	if c.UnifiedUploads {
+		return c.uploadUnified(ctx, entries...)
 	}
-	return c.uploadUnified(ctx, entries...)
+	return c.uploadNonUnified(ctx, entries...)
 }
 
 // WriteBlobs is a proxy method for UploadIfMissing that facilitates specifying a map of
@@ -201,14 +204,16 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 
 // ResourceNameWrite generates a valid write resource name.
 func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
-	return fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
+	rname, _ := c.ResourceName("uploads", uuid.New(), "blobs", hash, strconv.FormatInt(sizeBytes, 10))
+	return rname
 }
 
 // ResourceNameCompressedWrite generates a valid write resource name.
 // TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
 // that gets merged in.
 func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) string {
-	return fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", c.InstanceName, uuid.New(), hash, sizeBytes)
+	rname, _ := c.ResourceName("uploads", uuid.New(), "compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
+	return rname
 }
 
 func (c *Client) writeRscName(ue *uploadinfo.Entry) string {
@@ -615,4 +620,19 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 	}
 	st.clients = nil
 	st.ue = nil
+}
+
+// NgUploadTree delegates to UploadTree of the casng package.
+func (c *Client) NgUploadTree(ctx context.Context, execRoot impath.Absolute, workingDir, remoteWorkingDir impath.Relative, reqs ...casng.UploadRequest) (rootDigest digest.Digest, uploaded []digest.Digest, stats casng.Stats, err error) {
+	return c.ngCasUploader.UploadTree(ctx, execRoot, workingDir, remoteWorkingDir, reqs...)
+}
+
+// NgUpload delegates to Upload of the casng package.
+func (c *Client) NgUpload(ctx context.Context, reqs ...casng.UploadRequest) ([]digest.Digest, casng.Stats, error) {
+	return c.ngCasUploader.Upload(ctx, reqs...)
+}
+
+// IsCasNG returns true if casng feature flag is turned on.
+func (c *Client) IsCasNG() bool {
+	return c.useCasNg
 }

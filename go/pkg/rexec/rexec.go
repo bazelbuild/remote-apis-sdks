@@ -4,15 +4,23 @@ package rexec
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/walker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/symlinkopts"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -163,27 +171,63 @@ func (ec *Context) downloadOutputs(outDir string) (*rc.MovedBytesMetadata, *comm
 	return stats, command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 }
 
-func (ec *Context) computeInputs() error {
-	if ec.Metadata.ActionDigest.Size > 0 {
-		// Already computed inputs.
-		return nil
-	}
-	ec.Metadata.EventTimes[command.EventComputeMerkleTree] = &command.TimeInterval{From: time.Now()}
-	defer func() { ec.Metadata.EventTimes[command.EventComputeMerkleTree].To = time.Now() }()
+func (ec *Context) computeCmdDg() (*repb.Platform, error) {
 	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
 	commandHasOutputPathsField := ec.client.GrpcClient.SupportsCommandOutputPaths()
 	cmdPb := ec.cmd.ToREProto(commandHasOutputPathsField)
 	log.V(2).Infof("%s %s> Command: \n%s\n", cmdID, executionID, prototext.Format(cmdPb))
 	var err error
 	if ec.cmdUe, err = uploadinfo.EntryFromProto(cmdPb); err != nil {
-		return err
+		return nil, err
 	}
 	cmdDg := ec.cmdUe.Digest
 	ec.Metadata.CommandDigest = cmdDg
 	log.V(1).Infof("%s %s> Command digest: %s", cmdID, executionID, cmdDg)
+	return cmdPb.Platform, nil
+}
+
+func (ec *Context) computeActionDg(rootDg digest.Digest, platform *repb.Platform) error {
+	acPb := &repb.Action{
+		CommandDigest:   ec.cmdUe.Digest.ToProto(),
+		InputRootDigest: rootDg.ToProto(),
+		DoNotCache:      ec.opt.DoNotCache,
+	}
+	// If supported, we attach a copy of the platform properties list to the Action.
+	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
+		acPb.Platform = platform
+	}
+
+	if ec.cmd.Timeout > 0 {
+		acPb.Timeout = dpb.New(ec.cmd.Timeout)
+	}
+	var err error
+	if ec.acUe, err = uploadinfo.EntryFromProto(acPb); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ec *Context) computeInputs() error {
+	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
+	if ec.Metadata.ActionDigest.Size > 0 {
+		// Already computed inputs.
+		log.V(1).Infof("%s %s> Inputs already uploaded", cmdID, executionID)
+		return nil
+	}
+	if ec.client.GrpcClient.IsCasNG() {
+		return ec.ngUploadInputs()
+	}
+
+	ec.Metadata.EventTimes[command.EventComputeMerkleTree] = &command.TimeInterval{From: time.Now()}
+	defer func() { ec.Metadata.EventTimes[command.EventComputeMerkleTree].To = time.Now() }()
+	cmdPlatform, err := ec.computeCmdDg()
+	if err != nil {
+		return err
+	}
+
 	log.V(1).Infof("%s %s> Computing input Merkle tree...", cmdID, executionID)
 	execRoot, workingDir, remoteWorkingDir := ec.cmd.ExecRoot, ec.cmd.WorkingDir, ec.cmd.RemoteWorkingDir
-	root, blobs, stats, err := ec.client.GrpcClient.ComputeMerkleTree(execRoot, workingDir, remoteWorkingDir, ec.cmd.InputSpec, ec.client.FileMetadataCache)
+	root, blobs, stats, err := ec.client.GrpcClient.ComputeMerkleTree(ec.ctx, execRoot, workingDir, remoteWorkingDir, ec.cmd.InputSpec, ec.client.FileMetadataCache)
 	if err != nil {
 		return err
 	}
@@ -191,29 +235,253 @@ func (ec *Context) computeInputs() error {
 	ec.Metadata.InputFiles = stats.InputFiles
 	ec.Metadata.InputDirectories = stats.InputDirectories
 	ec.Metadata.TotalInputBytes = stats.TotalInputBytes
-	acPb := &repb.Action{
-		CommandDigest:   cmdDg.ToProto(),
-		InputRootDigest: root.ToProto(),
-		DoNotCache:      ec.opt.DoNotCache,
-	}
-	// If supported, we attach a copy of the platform properties list to the Action.
-	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
-		acPb.Platform = cmdPb.Platform
-	}
-
-	if ec.cmd.Timeout > 0 {
-		acPb.Timeout = dpb.New(ec.cmd.Timeout)
-	}
-	if ec.acUe, err = uploadinfo.EntryFromProto(acPb); err != nil {
+	err = ec.computeActionDg(root, cmdPlatform)
+	if err != nil {
 		return err
 	}
-	acDg := ec.acUe.Digest
-	log.V(1).Infof("%s %s> Action digest: %s", cmdID, executionID, acDg)
+	log.V(1).Infof("%s %s> Action digest: %s", cmdID, executionID, ec.acUe.Digest)
 	ec.inputBlobs = append(ec.inputBlobs, ec.cmdUe)
 	ec.inputBlobs = append(ec.inputBlobs, ec.acUe)
-	ec.Metadata.ActionDigest = acDg
-	ec.Metadata.TotalInputBytes += cmdDg.Size + acDg.Size
+	ec.Metadata.ActionDigest = ec.acUe.Digest
+	ec.Metadata.TotalInputBytes += ec.cmdUe.Digest.Size + ec.acUe.Digest.Size
 	return nil
+}
+
+func (ec *Context) ngUploadInputs() error {
+	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
+
+	ec.Metadata.EventTimes[command.EventUploadInputs] = &command.TimeInterval{From: time.Now()}
+	defer func() { ec.Metadata.EventTimes[command.EventUploadInputs].To = time.Now() }()
+
+	execRoot, workingDir, remoteWorkingDir, err := cmdDirs(ec.cmd)
+	if err != nil {
+		return err
+	}
+	slo := symlinkOpts(ec.client.GrpcClient.TreeSymlinkOpts, ec.cmd.InputSpec.SymlinkBehavior)
+	filter, err := exclusionsFilter(ec.cmd.InputSpec.InputExclusions)
+	if err != nil {
+		return err
+	}
+	log.V(2).Infof("[casng] ng.req; exec_root=%s, working_dir=%s, remote_working_dir=%s, symlink_opts=%s, inputs=%d, virtual_inputs=%d, cmd_id=%s, exec_id=%s", execRoot, workingDir, remoteWorkingDir, slo, len(ec.cmd.InputSpec.Inputs), len(ec.cmd.InputSpec.VirtualInputs), cmdID, executionID)
+	log.V(4).Infof("[casng] ng.req; exec_root=%s, working_dir=%s, remote_working_dir=%s, symlink_opts=%s, inputs=%+v, virtual_inputs=%+v, cmd_id=%s, exec_id=%s", execRoot, workingDir, remoteWorkingDir, slo, ec.cmd.InputSpec.Inputs, ec.cmd.InputSpec.VirtualInputs, cmdID, executionID)
+	reqs := make([]casng.UploadRequest, 0, len(ec.cmd.InputSpec.Inputs)+len(ec.cmd.InputSpec.VirtualInputs))
+	pathSeen := make(map[impath.Absolute]bool)
+	for _, p := range ec.cmd.InputSpec.Inputs {
+		rel, err := impath.Rel(p)
+		if err != nil {
+			return err
+		}
+		absPath := execRoot.Append(rel)
+		// if seenPath[absPath] {
+		// return fmt.Errorf("[casng] %s %s> cannot have shared paths among inputs: %q", cmdID, executionID, absPath)
+		// }
+		pathSeen[absPath] = true
+		// Mark ancestors as seen to ensure any potential virtual parent is excluded.
+		parent := absPath.Dir()
+		for !pathSeen[parent] && parent.String() != execRoot.String() {
+			pathSeen[parent] = true
+			parent = parent.Dir()
+		}
+		reqs = append(reqs, casng.UploadRequest{Path: absPath, SymlinkOptions: slo, Exclude: filter})
+	}
+	// Append virtual inputs after real inputs in order to ignore any redundant virtual inputs.
+	// Sorting by path length descending is necessary to skip redundant ancestors. Otherwise, the conslidation in casng.UploadTree will skip descendants.
+	sort.Slice(ec.cmd.InputSpec.VirtualInputs, func(i, j int) bool {
+		return len(ec.cmd.InputSpec.VirtualInputs[i].Path) > len(ec.cmd.InputSpec.VirtualInputs[j].Path)
+	})
+	for _, p := range ec.cmd.InputSpec.VirtualInputs {
+		if p.Path == "" {
+			return fmt.Errorf("[casng] ng.req: empty virtual path; cmd_id=%s, exec_id=%s", cmdID, executionID)
+		}
+		// If execRoot is a virtual path, ignore it.
+		if p.Path == "." {
+			continue
+		}
+		rel, err := impath.Rel(p.Path)
+		if err != nil {
+			return err
+		}
+		absPath := execRoot.Append(rel)
+		// If it collides with a real path, ignore it to avoid corrupting the node cache.
+		if pathSeen[absPath] {
+			continue
+		}
+		parent := absPath.Dir()
+		for !pathSeen[parent] && parent.String() != execRoot.String() {
+			pathSeen[parent] = true
+			parent = parent.Dir()
+		}
+
+		r := casng.UploadRequest{Bytes: p.Contents, Path: absPath, Exclude: filter}
+		// Ensure Bytes is not nil to avoid traversing Path.
+		if r.Bytes == nil {
+			r.Bytes = []byte{}
+		}
+		if p.IsEmptyDirectory {
+			r.BytesFileMode |= fs.ModeDir
+		} else if p.IsExecutable {
+			r.BytesFileMode |= 0100
+		}
+		reqs = append(reqs, r)
+	}
+	log.V(1).Infof("[casng] ng.req: uploading inputs; count=%d, cmd_id=%s, exec_id=%s", len(reqs), cmdID, executionID)
+	ctx := ec.ctx
+	var ngTree, clTree *string
+	if log.V(5) {
+		ngTree = new(string)
+		clTree = new(string)
+		ctx = context.WithValue(ctx, "ng_tree", ngTree)
+		ctx = context.WithValue(ctx, "cl_tree", clTree)
+	}
+	rootDg, missing, stats, err := ec.client.GrpcClient.NgUploadTree(ctx, execRoot, workingDir, remoteWorkingDir, reqs...)
+	if err != nil {
+		if log.V(5) {
+			log.Infof("[casng] ng.req: upload error; cmd_id=%s, exec_id=%s\n%q\n%s", cmdID, executionID, err, formatInputSpec(ec.cmd.InputSpec, "  "))
+		}
+		return err
+	}
+	if log.V(5) {
+		rootDg2, _, _, err := ec.client.GrpcClient.ComputeMerkleTree(ctx, ec.cmd.ExecRoot, ec.cmd.WorkingDir, ec.cmd.RemoteWorkingDir, ec.cmd.InputSpec, ec.client.FileMetadataCache)
+		if err != nil {
+			return err
+		}
+		specStr := formatInputSpec(ec.cmd.InputSpec, "    ")
+		msg := fmt.Sprintf("ng=%s\n  cl=%s\n  spec\n%s\n  client_slo=%+v\n  ng_slo=%s\n  ng_tree\n%s\n  cl_tree\n%s", rootDg, rootDg2, specStr, ec.client.GrpcClient.TreeSymlinkOpts, slo, *ngTree, *clTree)
+		if rootDg.Hash != rootDg2.Hash {
+			log.Infof("[casng] ng.req: root digest mismatch; cmd_id=%s, exec_id=%s\n  %s", cmdID, executionID, msg)
+			return fmt.Errorf("root digest mismatch: ng=%s, cl=%s", rootDg, rootDg2)
+		}
+		log.Infof("[casng] ng.req: root digest match; cmd_id=%s, exec_id=%s\n  %s", cmdID, executionID, msg)
+	}
+	ec.Metadata.InputFiles = int(stats.InputFileCount)
+	ec.Metadata.InputDirectories = int(stats.InputDirCount)
+	ec.Metadata.TotalInputBytes = stats.BytesRequested
+	ec.Metadata.LogicalBytesUploaded = stats.LogicalBytesMoved
+	ec.Metadata.RealBytesUploaded = stats.TotalBytesMoved
+	ec.Metadata.MissingDigests = missing
+
+	cmdPlatform, err := ec.computeCmdDg()
+	if err != nil {
+		return err
+	}
+	log.V(1).Infof("[casng] ng.req: command; digest=%s, cmd_id=%s, exec_id=%s", ec.cmdUe.Digest, cmdID, executionID)
+	err = ec.computeActionDg(rootDg, cmdPlatform)
+	if err != nil {
+		return err
+	}
+	log.V(1).Infof("[casng] ng.req: action; digest=%s, cmd_id=%s, exec_id=%s", ec.acUe.Digest, cmdID, executionID)
+	missing, stats, err = ec.client.GrpcClient.NgUpload(ec.ctx,
+		casng.UploadRequest{Bytes: ec.acUe.Contents, Digest: ec.acUe.Digest},
+		casng.UploadRequest{Bytes: ec.cmdUe.Contents, Digest: ec.cmdUe.Digest},
+	)
+
+	if err != nil {
+		return err
+	}
+	ec.Metadata.ActionDigest = ec.acUe.Digest
+	ec.Metadata.TotalInputBytes += ec.cmdUe.Digest.Size + ec.acUe.Digest.Size
+	ec.Metadata.MissingDigests = append(ec.Metadata.MissingDigests, missing...)
+	ec.Metadata.TotalInputBytes += stats.BytesRequested
+	ec.Metadata.LogicalBytesUploaded += stats.LogicalBytesMoved
+	ec.Metadata.RealBytesUploaded += stats.TotalBytesMoved
+	return nil
+}
+
+func symlinkOpts(treeOpts *rc.TreeSymlinkOpts, cmdOpts command.SymlinkBehaviorType) symlinkopts.Options {
+	if treeOpts == nil {
+		treeOpts = rc.DefaultTreeSymlinkOpts()
+	}
+	slPreserve := treeOpts.Preserved
+	switch cmdOpts {
+	case command.ResolveSymlink:
+		slPreserve = false
+	case command.PreserveSymlink:
+		slPreserve = true
+	}
+
+	switch {
+	case slPreserve && treeOpts.FollowsTarget && treeOpts.MaterializeOutsideExecRoot:
+		return symlinkopts.ResolveExternalOnlyWithTarget()
+	case slPreserve && treeOpts.FollowsTarget:
+		return symlinkopts.PreserveWithTarget()
+	case slPreserve && treeOpts.MaterializeOutsideExecRoot:
+		return symlinkopts.ResolveExternalOnly()
+	case slPreserve:
+		return symlinkopts.PreserveNoDangling()
+	default:
+		return symlinkopts.ResolveAlways()
+	}
+}
+
+func cmdDirs(cmd *command.Command) (execRoot impath.Absolute, workingDir impath.Relative, remoteWorkingDir impath.Relative, err error) {
+	execRoot, err = impath.Abs(cmd.ExecRoot)
+	if err != nil {
+		return
+	}
+	workingDir, err = impath.Rel(cmd.WorkingDir)
+	if err != nil {
+		return
+	}
+	remoteWorkingDir, err = impath.Rel(cmd.RemoteWorkingDir)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func exclusionsFilter(es []*command.InputExclusion) (walker.Filter, error) {
+	filter := walker.Filter{}
+	var pathRegexes []*regexp.Regexp
+	var fileRegexes []*regexp.Regexp
+	var fileModes []fs.FileMode
+	var idBuilder strings.Builder
+	for _, e := range es {
+		re, err := regexp.Compile(e.Regex)
+		if err != nil {
+			return filter, fmt.Errorf("failed to compile regex from input exclusions: %w", err)
+		}
+
+		idBuilder.WriteString(e.Regex)
+
+		if e.Type == command.UnspecifiedInputType {
+			pathRegexes = append(pathRegexes, re)
+			continue
+		}
+
+		fileRegexes = append(fileRegexes, re)
+		mode := fs.FileMode(0)
+		switch e.Type {
+		case command.DirectoryInputType:
+			mode |= fs.ModeDir
+		case command.SymlinkInputType:
+			mode |= fs.ModeSymlink
+		}
+		fileModes = append(fileModes, mode)
+
+		idBuilder.WriteString(strconv.FormatUint(uint64(mode), 16))
+	}
+	id := idBuilder.String()
+
+	filter.Path = func(path string) bool {
+		for _, re := range pathRegexes {
+			if re.MatchString(path) {
+				return true
+			}
+		}
+		return false
+	}
+	filter.File = func(path string, mode fs.FileMode) bool {
+		for i, re := range fileRegexes {
+			if (fileModes[i] == 0 && mode.IsRegular() || fileModes[i]&mode != 0) && re.MatchString(path) {
+				return true
+			}
+		}
+		return false
+	}
+	filter.ID = func() string {
+		return id
+	}
+	return filter, nil
 }
 
 // GetCachedResult tries to get the command result from the cache. The Result will be nil on a
@@ -319,21 +587,25 @@ func (ec *Context) ExecuteRemotely() {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
+
 	cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
-	log.V(1).Infof("%s %s> Checking inputs to upload...", cmdID, executionID)
-	// TODO(olaola): compute input cache hit stats.
-	ec.Metadata.EventTimes[command.EventUploadInputs] = &command.TimeInterval{From: time.Now()}
-	missing, bytesMoved, err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, ec.inputBlobs...)
-	ec.Metadata.EventTimes[command.EventUploadInputs].To = time.Now()
-	if err != nil {
-		ec.Result = command.NewRemoteErrorResult(err)
-		return
+	if !ec.client.GrpcClient.IsCasNG() {
+		log.V(1).Infof("%s %s> Checking inputs to upload...", cmdID, executionID)
+		// TODO(olaola): compute input cache hit stats.
+		ec.Metadata.EventTimes[command.EventUploadInputs] = &command.TimeInterval{From: time.Now()}
+		missing, bytesMoved, err := ec.client.GrpcClient.UploadIfMissing(ec.ctx, ec.inputBlobs...)
+		ec.Metadata.EventTimes[command.EventUploadInputs].To = time.Now()
+		if err != nil {
+			ec.Result = command.NewRemoteErrorResult(err)
+			return
+		}
+		ec.Metadata.MissingDigests = missing
+		for _, d := range missing {
+			ec.Metadata.LogicalBytesUploaded += d.Size
+		}
+		ec.Metadata.RealBytesUploaded = bytesMoved
 	}
-	ec.Metadata.MissingDigests = missing
-	for _, d := range missing {
-		ec.Metadata.LogicalBytesUploaded += d.Size
-	}
-	ec.Metadata.RealBytesUploaded = bytesMoved
+
 	log.V(1).Infof("%s %s> Executing remotely...\n%s", cmdID, executionID, strings.Join(ec.cmd.Args, " "))
 	ec.Metadata.EventTimes[command.EventExecuteRemotely] = &command.TimeInterval{From: time.Now()}
 	// Initiate each streaming request once at most.
@@ -356,7 +628,7 @@ func (ec *Context) ExecuteRemotely() {
 				streamWg.Add(1)
 				go func() {
 					defer streamWg.Done()
-					path := fmt.Sprintf("%s/logstreams/%s", ec.client.GrpcClient.InstanceName, name)
+					path, _ := ec.client.GrpcClient.ResourceName("logstreams", name)
 					log.V(1).Infof("%s %s> Streaming to stdout from %q", cmdID, executionID, path)
 					// Ignoring the error here since the net result is downloading the full stream after the fact.
 					n, err := ec.client.GrpcClient.ReadResourceTo(ec.ctx, path, outerr.NewOutWriter(ec.oe))
@@ -372,7 +644,7 @@ func (ec *Context) ExecuteRemotely() {
 				streamWg.Add(1)
 				go func() {
 					defer streamWg.Done()
-					path := fmt.Sprintf("%s/logstreams/%s", ec.client.GrpcClient.InstanceName, name)
+					path, _ := ec.client.GrpcClient.ResourceName("logstreams", name)
 					log.V(1).Infof("%s %s> Streaming to stdout from %q", cmdID, executionID, path)
 					// Ignoring the error here since the net result is downloading the full stream after the fact.
 					n, err := ec.client.GrpcClient.ReadResourceTo(ec.ctx, path, outerr.NewErrWriter(ec.oe))
@@ -567,4 +839,22 @@ func (c *Client) Run(ctx context.Context, cmd *command.Command, opt *command.Exe
 	ec.ExecuteRemotely()
 	// TODO(olaola): implement the cache-miss-retry loop.
 	return ec.Result, ec.Metadata
+}
+
+func formatInputSpec(spec *command.InputSpec, indent string) string {
+	sb := strings.Builder{}
+	sb.WriteString(indent + "inputs:\n")
+	for _, p := range spec.Inputs {
+		sb.WriteString(fmt.Sprintf("%[1]s%[1]s%s\n", indent, p))
+	}
+	sb.WriteString(indent + "virtual_inputs:\n")
+	for _, v := range spec.VirtualInputs {
+		sb.WriteString(fmt.Sprintf("%[1]s%[1]s%s, bytes=%d, dir=%t, exe=%t\n", indent, v.Path, len(v.Contents), v.IsEmptyDirectory, v.IsExecutable))
+	}
+	sb.WriteString(indent + "exclusions:\n")
+	for _, e := range spec.InputExclusions {
+		sb.WriteString(fmt.Sprintf("%[1]s%[1]s%s\n", indent, e))
+	}
+	sb.WriteString(fmt.Sprintf("%ssymlink_behaviour: %s", indent, spec.SymlinkBehavior))
+	return sb.String()
 }

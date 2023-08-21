@@ -355,8 +355,8 @@ func (u *BatchingUploader) Upload(ctx context.Context, reqs ...UploadRequest) ([
 	for d := range digested {
 		stats.BytesRequested += d.Size
 		stats.LogicalBytesCached += d.Size
-		stats.CacheHitCount += 1
-		stats.DigestCount += 1
+		stats.CacheHitCount++
+		stats.DigestCount++
 	}
 	if len(reqs) == 0 {
 		contextmd.Infof(ctx, log.Level(1), "[casng] upload: nothing is missing")
@@ -378,7 +378,7 @@ func (u *BatchingUploader) Upload(ctx context.Context, reqs ...UploadRequest) ([
 		for _, r := range reqs {
 			select {
 			case ch <- r:
-			case <-u.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -470,7 +470,8 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 		}
 
 		// Clear the digest to ensure proper hierarchy caching in the digester.
-		r.Digest = digest.Digest{}
+		r.Digest.Hash = ""
+		r.Digest.Size = 0
 
 		if pathSeen[r.Path] {
 			continue
@@ -495,16 +496,17 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 		reqs[i] = r
 		i++
 	}
-	contextmd.Infof(ctx, log.Level(1), "[casng] upload.tree; got=%d, uploading=%d", len(reqs), i)
 
 	// Reslice to take included (shifted) requests only.
 	reqs = reqs[:i]
 	// paths is already sorted because reqs was sorted.
 	filterID = digest.NewFromBlob([]byte(strings.Join(paths, ""))).String()
 	filterIDFunc := func() string { return filterID }
-	for _, r := range reqs {
-		r.Exclude.ID = filterIDFunc // r is a copy, but r.Exclude is a reference.
+	for i := range reqs {
+		r := &reqs[i]
+		r.Exclude.ID = filterIDFunc
 	}
+	contextmd.Infof(ctx, log.Level(1), "[casng] upload.tree; filter_id=%s, got=%d, uploading=%d", filterID, len(reqs), i)
 
 	// 2nd, Upload the requests first to digest the files and cache the nodes.
 	uploaded, stats, err = u.Upload(ctx, reqs...)
@@ -522,16 +524,25 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 		// Each request in reqs must correspond to a cached node.
 		node := u.Node(r)
 		if node == nil {
-			err = fmt.Errorf("cannot construct the merkle tree with a missing node for path %q", r.Path)
+			err = fmt.Errorf("[casng] upload.tree; cannot construct the merkle tree with a missing node for path %q", r.Path)
 			return
 		}
 
 		// Add this leaf node to its ancestors.
-		rpStr := strings.TrimPrefix(r.Path.String(), execRoot.String()+string(filepath.Separator))
+		// Start by swapping the working directory with the remote one.
+		// Using strings is faster than using filepath functions which use filepath.Clean which is not cheap.
+		// To properly handle corner cases (no working dir, root is '/', etc), this is done in separate steps.
+		rpStr := strings.TrimPrefix(r.Path.String(), execRoot.String()) // if execRoot=='/', rpStr is now relative
+		rpStr = strings.TrimPrefix(rpStr, string(filepath.Separator))   // if execRoot!='/', remove the path separator
 		if strings.HasPrefix(rpStr, workingDir.String()) {
 			rpStr = strings.Replace(rpStr, workingDir.String(), remoteWorkingDir.String(), 1)
 		}
-		rp := execRoot.Append(impath.MustRel(rpStr))
+		rpStrRel, errIm := impath.Rel(rpStr)
+		if errIm != nil {
+			err = errors.Join(fmt.Errorf("[casng] upload.tree; cannot construct the merkle tree with a path outside the root: path=%q, root=%q, working_dir=%q, remote_working_dir=%q", r.Path, execRoot, workingDir, remoteWorkingDir), errIm)
+			return
+		}
+		rp := execRoot.Append(rpStrRel)
 		parent := rp
 		for {
 			rp = parent
@@ -558,9 +569,9 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 	dirReqs := make([]UploadRequest, 0, len(dirChildren))
 	stack := make([]impath.Absolute, 0, len(dirChildren))
 	stack = append(stack, execRoot)
-	var logPathDigest map[string]string
+	var logPathDigest map[string]*repb.Digest
 	if log.V(5) {
-		logPathDigest = make(map[string]string, len(dirChildren))
+		logPathDigest = make(map[string]*repb.Digest, len(dirChildren))
 	}
 	for len(stack) > 0 {
 		// Peek.
@@ -586,7 +597,7 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 			childrenNodes = append(childrenNodes, n)
 			if log.V(5) {
 				nd := n.(namedDigest)
-				logPathDigest[dir.Append(impath.MustRel(nd.GetName())).String()] = nd.GetDigest().String()
+				logPathDigest[dir.Append(impath.MustRel(nd.GetName())).String()] = nd.GetDigest()
 			}
 		}
 
@@ -597,7 +608,7 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 		}
 		dirReqs = append(dirReqs, UploadRequest{Bytes: b, Digest: digest.NewFromProtoUnvalidated(node.Digest)})
 		if log.V(5) {
-			logPathDigest[dir.String()] = node.GetDigest().String()
+			logPathDigest[dir.String()] = node.GetDigest()
 		}
 		if dir.String() == execRoot.String() {
 			rootDigest = digest.NewFromProtoUnvalidated(node.Digest)
@@ -608,7 +619,7 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 	}
 
 	// Upload the blobs of the shared ancestors.
-	contextmd.Infof(ctx, log.Level(1), "[casng] upload.tree; dirs=%d", len(dirReqs))
+	contextmd.Infof(ctx, log.Level(1), "[casng] upload.tree; dirs=%d, filter_id=%s", len(dirReqs), filterID)
 	moreUploaded, moreStats, moreErr := u.Upload(ctx, dirReqs...)
 	if moreErr != nil {
 		err = moreErr
@@ -637,6 +648,9 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 		}
 		sort.Strings(treePaths)
 		sb := strings.Builder{}
+		sb.WriteString("  filter_id=")
+		sb.WriteString(filterID)
+		sb.WriteString("\n")
 		sb.WriteString("  paths:\n  ")
 		sb.WriteString(strings.Join(paths, "\n  "))
 		sb.WriteString("\n  dir_paths:\n  ")

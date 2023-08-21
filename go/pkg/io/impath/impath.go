@@ -53,8 +53,8 @@ func (p Relative) Dir() Relative {
 }
 
 // Base is a convenient method that returns the last path element.
-func (p Absolute) Base() Absolute {
-	return Absolute{path: filepath.Base(p.String())}
+func (p Absolute) Base() Relative {
+	return Relative{path: filepath.Base(p.String())}
 }
 
 // Base is a convenient method that returns the last path element.

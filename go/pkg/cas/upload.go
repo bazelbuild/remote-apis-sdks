@@ -1062,10 +1062,14 @@ func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *re
 	}()
 
 	req := &bspb.WriteRequest{}
+	instanceSegment := u.InstanceName + "/"
+	if instanceSegment == "/" {
+		instanceSegment = ""
+	}
 	if compressed {
-		req.ResourceName = fmt.Sprintf("%s/uploads/%s/compressed-blobs/zstd/%s/%d", u.InstanceName, uuid.New(), digest.Hash, digest.SizeBytes)
+		req.ResourceName = fmt.Sprintf("%suploads/%s/compressed-blobs/zstd/%s/%d", instanceSegment, uuid.New(), digest.Hash, digest.SizeBytes)
 	} else {
-		req.ResourceName = fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", u.InstanceName, uuid.New(), digest.Hash, digest.SizeBytes)
+		req.ResourceName = fmt.Sprintf("%suploads/%s/blobs/%s/%d", instanceSegment, uuid.New(), digest.Hash, digest.SizeBytes)
 	}
 
 	buf := u.streamBufs.Get().(*[]byte)
