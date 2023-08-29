@@ -39,6 +39,7 @@ func TestFileReaderSeeks(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			path, err := testutil.CreateFile(t, false, tc.blob)
