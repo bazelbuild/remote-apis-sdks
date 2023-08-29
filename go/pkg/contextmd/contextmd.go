@@ -39,8 +39,7 @@ type Metadata struct {
 // also logs context metadata, if available.
 func Infof(ctx context.Context, v log.Level, format string, args ...any) {
 	if log.V(v) {
-		m, err := ExtractMetadata(ctx)
-		if err != nil && m.ActionID != "" {
+		if m, err := ExtractMetadata(ctx); err == nil && m.ActionID != "" {
 			format = "%s: " + format
 			args = append([]any{m.ActionID}, args...)
 		}
