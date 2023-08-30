@@ -671,7 +671,7 @@ func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
 	}
 }
 
-func NodePropertiesToApi(np *cpb.NodeProperties) *repb.NodeProperties {
+func NodePropertiesToAPI(np *cpb.NodeProperties) *repb.NodeProperties {
 	if np == nil {
 		return nil
 	}
@@ -691,7 +691,7 @@ func NodePropertiesToApi(np *cpb.NodeProperties) *repb.NodeProperties {
 	return res
 }
 
-func NodePropertiesFromApi(np *repb.NodeProperties) *cpb.NodeProperties {
+func NodePropertiesFromAPI(np *repb.NodeProperties) *cpb.NodeProperties {
 	if np == nil {
 		return nil
 	}

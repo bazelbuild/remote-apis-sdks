@@ -121,7 +121,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 		nodeProperties = make(map[string]*cpb.NodeProperties)
 		for path, t := range ts {
 			if t.NodeProperties != nil {
-				nodeProperties[path] = command.NodePropertiesFromApi(t.NodeProperties)
+				nodeProperties[path] = command.NodePropertiesFromAPI(t.NodeProperties)
 			}
 		}
 	} else if nodeProperties, err = readNodePropertiesFromFile(filepath.Join(actionRoot, "input_node_properties.textproto")); err != nil {
@@ -384,7 +384,7 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 	is := &cpb.InputSpec{InputNodeProperties: make(map[string]*cpb.NodeProperties)}
 	for path, t := range ts {
 		if t.NodeProperties != nil {
-			is.InputNodeProperties[path] = command.NodePropertiesFromApi(t.NodeProperties)
+			is.InputNodeProperties[path] = command.NodePropertiesFromAPI(t.NodeProperties)
 		}
 	}
 	if len(is.InputNodeProperties) == 0 {

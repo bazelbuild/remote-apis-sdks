@@ -29,13 +29,13 @@ var (
 	fooDgPb, barDgPb, bazDgPb = fooDg.ToProto(), barDg.ToProto(), bazDg.ToProto()
 	fooProperties             = &cpb.NodeProperties{Properties: []*cpb.NodeProperty{{Name: "fooName", Value: "fooValue"}}}
 
-	fooDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToApi(fooProperties)}}}
+	fooDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)}}}
 	barDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}}}
 	bazDir    = &repb.Directory{Files: []*repb.FileNode{{Name: "baz", Digest: bazDgPb}}}
 	vBarDir   = &repb.Directory{Directories: []*repb.DirectoryNode{{Name: "baz", Digest: digest.Empty.ToProto()}}}
 	foobarDir = &repb.Directory{Files: []*repb.FileNode{
 		{Name: "bar", Digest: barDgPb},
-		{Name: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToApi(fooProperties)},
+		{Name: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
 	}}
 
 	fooDirBlob, barDirBlob, foobarDirBlob, bazDirBlob, vBarDirBlob = mustMarshal(fooDir), mustMarshal(barDir), mustMarshal(foobarDir), mustMarshal(bazDir), mustMarshal(vBarDir)
@@ -1604,7 +1604,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			nodeProperties: map[string]*cpb.NodeProperties{"foo": fooProperties},
 			wantBlobs:      [][]byte{fooBlob},
 			wantResult: &repb.ActionResult{
-				OutputFiles: []*repb.OutputFile{&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToApi(fooProperties)}},
+				OutputFiles: []*repb.OutputFile{&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)}},
 			},
 			wantCacheCalls: map[string]int{
 				"bar": 1,
@@ -1623,7 +1623,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToApi(fooProperties)},
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
 					&repb.OutputFile{Path: "bar", Digest: barDgPb},
 				},
 			},
@@ -1645,7 +1645,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToApi(fooProperties)},
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
 					&repb.OutputFile{Path: "../bar", Digest: barDgPb},
 				},
 			},
@@ -1683,7 +1683,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToApi(fooProperties)},
+					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
 					&repb.OutputFile{Path: "bar", Digest: fooDgPb},
 				},
 			},
@@ -1811,7 +1811,7 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 			wantBlobs:      [][]byte{fooBlob, fooBlob},
 			wantTreeRoot: &repb.Directory{Files: []*repb.FileNode{
 				{Name: "bar", Digest: fooDgPb, IsExecutable: true},
-				{Name: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToApi(fooProperties)},
+				{Name: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
 			}},
 			wantCacheCalls: map[string]int{
 				"a/b/fooDir":     2,

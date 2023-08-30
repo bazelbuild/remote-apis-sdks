@@ -412,7 +412,7 @@ func packageTree(t *treeNode, stats *TreeStats, prefix string, tree map[string]d
 		// A node can have exactly one of file/symlink/emptyDirectoryMarker.
 		if n.file != nil {
 			dg := n.file.ue.Digest
-			dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: command.NodePropertiesToApi(n.nodeProperties)})
+			dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: command.NodePropertiesToAPI(n.nodeProperties)})
 			blobs[dg] = n.file.ue
 			stats.InputFiles++
 			stats.TotalInputBytes += dg.Size
@@ -422,7 +422,7 @@ func packageTree(t *treeNode, stats *TreeStats, prefix string, tree map[string]d
 			continue
 		}
 		if n.symlink != nil {
-			dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target, NodeProperties: command.NodePropertiesToApi(n.nodeProperties)})
+			dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target, NodeProperties: command.NodePropertiesToAPI(n.nodeProperties)})
 			stats.InputSymlinks++
 		}
 	}
@@ -571,12 +571,12 @@ func packageDirectories(t *treeNode) (root *repb.Directory, files map[digest.Dig
 		// A node can have exactly one of file/symlink/emptyDirectoryMarker.
 		if n.file != nil {
 			dg := n.file.ue.Digest
-			root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: command.NodePropertiesToApi(n.nodeProperties)})
+			root.Files = append(root.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: command.NodePropertiesToAPI(n.nodeProperties)})
 			files[dg] = n.file.ue
 			continue
 		}
 		if n.symlink != nil {
-			root.Symlinks = append(root.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target, NodeProperties: command.NodePropertiesToApi(n.nodeProperties)})
+			root.Symlinks = append(root.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target, NodeProperties: command.NodePropertiesToAPI(n.nodeProperties)})
 		}
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].Name < root.Files[j].Name })
@@ -611,7 +611,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 			// A regular file.
 			ue := uploadinfo.EntryFromFile(meta.Digest, absPath)
 			outs[meta.Digest] = ue
-			resPb.OutputFiles = append(resPb.OutputFiles, &repb.OutputFile{Path: normPath, Digest: meta.Digest.ToProto(), IsExecutable: meta.IsExecutable, NodeProperties: command.NodePropertiesToApi(nodeProperties[normPath])})
+			resPb.OutputFiles = append(resPb.OutputFiles, &repb.OutputFile{Path: normPath, Digest: meta.Digest.ToProto(), IsExecutable: meta.IsExecutable, NodeProperties: command.NodePropertiesToAPI(nodeProperties[normPath])})
 			continue
 		}
 		// A directory.
