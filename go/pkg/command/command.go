@@ -114,7 +114,7 @@ type InputSpec struct {
 	SymlinkBehavior SymlinkBehaviorType
 
 	// Node properties of inputs.
-	InputNodeProperties map[string]*repb.NodeProperties
+	InputNodeProperties map[string]*cpb.NodeProperties
 }
 
 // String returns the string representation of the VirtualInput.
@@ -592,7 +592,7 @@ func FromREProto(cmdPb *repb.Command) *Command {
 	cmd := &Command{
 		InputSpec: &InputSpec{
 			EnvironmentVariables: make(map[string]string),
-			InputNodeProperties:  make(map[string]*repb.NodeProperties),
+			InputNodeProperties:  make(map[string]*cpb.NodeProperties),
 		},
 		Identifiers: &Identifiers{},
 		WorkingDir:  cmdPb.WorkingDirectory,
@@ -669,6 +669,46 @@ func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
 		SymlinkBehavior:      symlinkBehaviorFromProto(is.GetSymlinkBehavior()),
 		InputNodeProperties:  is.GetInputNodeProperties(),
 	}
+}
+
+func NodePropertiesToApi(np *cpb.NodeProperties) *repb.NodeProperties {
+	if np == nil {
+		return nil
+	}
+	res := &repb.NodeProperties{
+		Mtime:    np.GetMtime(),
+		UnixMode: np.GetUnixMode(),
+	}
+	if np.Properties != nil {
+		res.Properties = make([]*repb.NodeProperty, 0, len(np.Properties))
+	}
+	for _, p := range np.GetProperties() {
+		res.Properties = append(res.Properties, &repb.NodeProperty{
+			Name:  p.Name,
+			Value: p.Value,
+		})
+	}
+	return res
+}
+
+func NodePropertiesFromApi(np *repb.NodeProperties) *cpb.NodeProperties {
+	if np == nil {
+		return nil
+	}
+	res := &cpb.NodeProperties{
+		Mtime:    np.GetMtime(),
+		UnixMode: np.GetUnixMode(),
+	}
+	if np.Properties != nil {
+		res.Properties = make([]*cpb.NodeProperty, 0, len(np.Properties))
+	}
+	for _, p := range np.GetProperties() {
+		res.Properties = append(res.Properties, &cpb.NodeProperty{
+			Name:  p.Name,
+			Value: p.Value,
+		})
+	}
+	return res
 }
 
 func inputSpecToProto(is *InputSpec) *cpb.InputSpec {

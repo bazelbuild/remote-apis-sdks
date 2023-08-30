@@ -19,7 +19,7 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 
-var fooProperties = &repb.NodeProperties{Properties: []*repb.NodeProperty{{Name: "fooName", Value: "fooValue"}}}
+var fooProperties = &cpb.NodeProperties{Properties: []*cpb.NodeProperty{{Name: "fooName", Value: "fooValue"}}}
 
 func TestTool_DownloadActionResult(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
@@ -68,7 +68,7 @@ func TestTool_ShowAction(t *testing.T) {
 				"a/b/input.txt",
 				"a/b/input2.txt",
 			},
-			InputNodeProperties: map[string]*repb.NodeProperties{"a/b/input2.txt": fooProperties},
+			InputNodeProperties: map[string]*cpb.NodeProperties{"a/b/input2.txt": fooProperties},
 		},
 		OutputFiles: []string{"a/b/out"},
 	}
@@ -146,7 +146,7 @@ func TestTool_DownloadAction(t *testing.T) {
 	cmd := &command.Command{
 		Args:        []string{"foo", "bar", "baz"},
 		ExecRoot:    e.ExecRoot,
-		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "a/b/i2"}, InputNodeProperties: map[string]*repb.NodeProperties{"i1": fooProperties}},
+		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "a/b/i2"}, InputNodeProperties: map[string]*cpb.NodeProperties{"i1": fooProperties}},
 		OutputFiles: []string{"a/b/out"},
 	}
 	_, acDg, _, _ := e.Set(cmd, command.DefaultExecutionOptions(), &command.Result{Status: command.SuccessResultStatus}, &fakes.InputFile{Path: "i1", Contents: "i1"}, &fakes.InputFile{Path: "a/b/i2", Contents: "i2"})
@@ -210,7 +210,7 @@ func TestTool_ExecuteAction(t *testing.T) {
 	cmd := &command.Command{
 		Args:        []string{"foo", "bar", "baz"},
 		ExecRoot:    e.ExecRoot,
-		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}, InputNodeProperties: map[string]*repb.NodeProperties{"i1": fooProperties}},
+		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}, InputNodeProperties: map[string]*cpb.NodeProperties{"i1": fooProperties}},
 		OutputFiles: []string{"a/b/out"},
 	}
 	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
@@ -304,7 +304,7 @@ func TestTool_ExecuteActionFromRoot(t *testing.T) {
 	cmd := &command.Command{
 		Args:        []string{"foo", "bar", "baz"},
 		ExecRoot:    e.ExecRoot,
-		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}, InputNodeProperties: map[string]*repb.NodeProperties{"i1": fooProperties}},
+		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}, InputNodeProperties: map[string]*cpb.NodeProperties{"i1": fooProperties}},
 		OutputFiles: []string{"a/b/out"},
 	}
 	// Create files necessary for the fake
@@ -329,7 +329,7 @@ func TestTool_ExecuteActionFromRoot(t *testing.T) {
 		t.Fatalf("failed creating input file: %v", err)
 	}
 	ipPb := &cpb.InputSpec{
-		InputNodeProperties: map[string]*repb.NodeProperties{"i1": fooProperties},
+		InputNodeProperties: map[string]*cpb.NodeProperties{"i1": fooProperties},
 	}
 	if err := os.WriteFile(filepath.Join(e.ExecRoot, "input_node_properties.textproto"), []byte(prototext.Format(ipPb)), 0644); err != nil {
 		t.Fatalf("failed creating input node properties file: %v", err)

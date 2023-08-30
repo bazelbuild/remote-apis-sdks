@@ -7,8 +7,8 @@ proto_library(
     srcs = ["command.proto"],
     visibility = ["//visibility:public"],
     deps = [
-      "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:remote_execution_proto",
       "@com_google_protobuf//:timestamp_proto",
+      "@com_google_protobuf//:wrappers_proto",
     ],
 )
 
@@ -17,7 +17,6 @@ go_proto_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/api/command",
     proto = ":command_proto",
     visibility = ["//visibility:public"],
-    deps = ["@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:remote_execution_go_proto"],
 )
 
 go_library(

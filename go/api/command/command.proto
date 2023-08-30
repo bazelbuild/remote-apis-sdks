@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package cmd;
 
-import "build/bazel/remote/execution/v2/remote_execution.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
 // A command to execute locally or remotely.
 message Command {
@@ -126,7 +126,31 @@ message InputSpec {
   SymlinkBehaviorType.Value symlink_behavior = 6;
 
   // Node properties of inputs.
-  map<string,build.bazel.remote.execution.v2.NodeProperties> input_node_properties = 7;
+  map<string,NodeProperties> input_node_properties = 7;
+}
+
+// A copy of NodeProperties from https://github.com/bazelbuild/remote-apis/blob/main/build/bazel/remote/execution/v2/remote_execution.proto
+// to importing it as a proto dependency
+message NodeProperties {
+  // A list of string-based
+  // [NodeProperties][build.bazel.remote.execution.v2.NodeProperty].
+  repeated NodeProperty properties = 1;
+
+  // The file's last modification timestamp.
+  google.protobuf.Timestamp mtime = 2;
+
+  // The UNIX file mode, e.g., 0755.
+  google.protobuf.UInt32Value unix_mode = 3;
+}
+
+// A copy of NodeProperty from https://github.com/bazelbuild/remote-apis/blob/main/build/bazel/remote/execution/v2/remote_execution.proto
+// to importing it as a proto dependency
+message NodeProperty {
+    // The property name.
+    string name = 1;
+
+    // The property value.
+    string value = 2;
 }
 
 message OutputSpec {

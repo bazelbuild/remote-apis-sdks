@@ -16,6 +16,7 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/client",
     visibility = ["//visibility:public"],
     deps = [
+        "//go/api/command",
         "//go/pkg/actas",
         "//go/pkg/balancer",
         "//go/pkg/balancer/proto",

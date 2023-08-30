@@ -107,7 +107,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 		actionRoot = filepath.Join(os.TempDir(), acDg.Hash+"_"+curTime)
 	}
 	inputRoot := filepath.Join(actionRoot, "input")
-	var nodeProperties map[string]*repb.NodeProperties
+	var nodeProperties map[string]*cpb.NodeProperties
 	if fetchInputs {
 		dg, err := digest.NewFromProto(actionProto.GetInputRootDigest())
 		if err != nil {
@@ -118,10 +118,10 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 		if err != nil {
 			return nil, err
 		}
-		nodeProperties = make(map[string]*repb.NodeProperties)
+		nodeProperties = make(map[string]*cpb.NodeProperties)
 		for path, t := range ts {
 			if t.NodeProperties != nil {
-				nodeProperties[path] = t.NodeProperties
+				nodeProperties[path] = command.NodePropertiesFromApi(t.NodeProperties)
 			}
 		}
 	} else if nodeProperties, err = readNodePropertiesFromFile(filepath.Join(actionRoot, "input_node_properties.textproto")); err != nil {
@@ -146,7 +146,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 	return cmd, nil
 }
 
-func readNodePropertiesFromFile(path string) (nps map[string]*repb.NodeProperties, err error) {
+func readNodePropertiesFromFile(path string) (nps map[string]*cpb.NodeProperties, err error) {
 	if _, err = os.Stat(path); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("error accessing input node properties file: %v", err)
@@ -381,10 +381,10 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 	if err != nil {
 		return fmt.Errorf("error fetching input tree: %v", err)
 	}
-	is := &cpb.InputSpec{InputNodeProperties: make(map[string]*repb.NodeProperties)}
+	is := &cpb.InputSpec{InputNodeProperties: make(map[string]*cpb.NodeProperties)}
 	for path, t := range ts {
 		if t.NodeProperties != nil {
-			is.InputNodeProperties[path] = t.NodeProperties
+			is.InputNodeProperties[path] = command.NodePropertiesFromApi(t.NodeProperties)
 		}
 	}
 	if len(is.InputNodeProperties) == 0 {
