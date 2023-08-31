@@ -145,7 +145,8 @@ message NodeProperties {
 }
 
 // A copy of NodeProperty from https://github.com/bazelbuild/remote-apis/blob/main/build/bazel/remote/execution/v2/remote_execution.proto
-// to importing it as a proto dependency
+// to avoid importing it as a proto dependency.
+// Importing the messages causes resource exhastion on high parelelism builds on high spec machines.
 message NodeProperty {
     // The property name.
     string name = 1;
