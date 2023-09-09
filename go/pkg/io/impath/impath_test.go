@@ -33,6 +33,12 @@ func Test_Abs(t *testing.T) {
 			want:  filepath.Join(impath.Root, "foo", "baz"),
 			err:   nil,
 		},
+		{
+			name:  "some_empty",
+			parts: []string{impath.Root, "", "foo", "", "bar", "..", "baz"},
+			want:  filepath.Join(impath.Root, "foo", "baz"),
+			err:   nil,
+		},
 	}
 
 	for _, test := range tests {
@@ -71,6 +77,12 @@ func Test_Rel(t *testing.T) {
 		{
 			name:  "not_clean",
 			parts: []string{"foo", "bar", "..", "baz"},
+			want:  filepath.Join("foo", "baz"),
+			err:   nil,
+		},
+		{
+			name:  "some_empty",
+			parts: []string{"", "foo", "", "bar", "..", "baz"},
 			want:  filepath.Join("foo", "baz"),
 			err:   nil,
 		},
