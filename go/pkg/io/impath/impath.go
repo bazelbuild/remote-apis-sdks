@@ -116,7 +116,7 @@ func MustAbs(elements ...string) Absolute {
 //
 // If the specified elements do not join to a valid relative path, ErrNotRelative is returned.
 func Rel(elements ...string) (Relative, error) {
-	p := strings.Join(elements, string(os.PathSeparator))
+	p := strings.Join(filterNotEmpty(elements...), string(os.PathSeparator))
 	if filepath.IsAbs(p) {
 		return zeroRel, errors.Join(ErrNotRelative, fmt.Errorf("path %q", p))
 	}
@@ -219,4 +219,14 @@ func dirty(path string) bool {
 		prevRune = r
 	}
 	return false
+}
+
+func filterNotEmpty(strs ...string) []string {
+	filtered := make([]string, 0, len(strs))
+	for _, elm := range strs {
+		if elm != "" {
+			filtered = append(filtered, elm)
+		}
+	}
+	return filtered
 }

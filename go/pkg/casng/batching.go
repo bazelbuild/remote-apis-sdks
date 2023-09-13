@@ -530,19 +530,11 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 
 		// Add this leaf node to its ancestors.
 		// Start by swapping the working directory with the remote one.
-		// Using strings is faster than using filepath functions which use filepath.Clean which is not cheap.
-		// To properly handle corner cases (no working dir, root is '/', etc), this is done in separate steps.
-		rpStr := strings.TrimPrefix(r.Path.String(), execRoot.String()) // if execRoot=='/', rpStr is now relative
-		rpStr = strings.TrimPrefix(rpStr, string(filepath.Separator))   // if execRoot!='/', remove the path separator
-		if strings.HasPrefix(rpStr, workingDir.String()) {
-			rpStr = strings.Replace(rpStr, workingDir.String(), remoteWorkingDir.String(), 1)
-		}
-		rpStrRel, errIm := impath.Rel(rpStr)
+		rp, errIm := ReplaceWorkingDir(r.Path, execRoot, workingDir, remoteWorkingDir)
 		if errIm != nil {
 			err = errors.Join(fmt.Errorf("[casng] upload.tree; cannot construct the merkle tree with a path outside the root: path=%q, root=%q, working_dir=%q, remote_working_dir=%q", r.Path, execRoot, workingDir, remoteWorkingDir), errIm)
 			return
 		}
-		rp := execRoot.Append(rpStrRel)
 		parent := rp
 		for {
 			rp = parent
@@ -664,4 +656,28 @@ func (u *BatchingUploader) UploadTree(ctx context.Context, execRoot impath.Absol
 	}
 
 	return
+}
+
+// ReplaceWorkingDir swaps remoteWorkingDir for workingDir in path which must be prefixed by root.
+// workingDir is assumed to be prefixed by root, and the returned path will be a descendant of root, but not necessarily a descendant of remoteWorkingDir.
+// Example: path=/root/out/foo.c, root=/root, workdingDir=out/reclient, remoteWorkingDir=set_by_reclient/a, result=/root/set_by_reclient/foo.c
+func ReplaceWorkingDir(path, root impath.Absolute, workingDir, remoteWorkingDir impath.Relative) (impath.Absolute, error) {
+	if !strings.HasPrefix(path.String(), root.String()) {
+		return impath.Absolute{}, fmt.Errorf("cannot replace working dir for path %q because it is not prefixed by %q", path, root)
+	}
+
+	p := strings.TrimPrefix(path.String(), root.String()) // if root == '/', p is now relative
+	// if root isn't the system root, there would be a leading path separator.
+	p = strings.TrimPrefix(p, string(filepath.Separator))
+
+	p, err := filepath.Rel(workingDir.String(), p)
+	if err != nil {
+		return impath.Absolute{}, err
+	}
+
+	rp, err := impath.Rel(remoteWorkingDir.String(), p)
+	if err != nil {
+		return impath.Absolute{}, err
+	}
+	return root.Append(rp), nil
 }
