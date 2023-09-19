@@ -31,14 +31,14 @@ var SystemOutErr = NewStreamOutErr(os.Stdout, os.Stderr)
 // WriteOut writes the given bytes to stdout.
 func (s *StreamOutErr) WriteOut(buf []byte) {
 	if _, e := s.OutWriter.Write(buf); e != nil {
-		log.Errorf("error writing to stdout stream: %v", e)
+		log.Errorf("Error writing to stdout stream: %v", e)
 	}
 }
 
 // WriteErr writes the given bytes to stderr.
 func (s *StreamOutErr) WriteErr(buf []byte) {
 	if _, e := s.ErrWriter.Write(buf); e != nil {
-		log.Errorf("error writing to stdout stream: %v", e)
+		log.Errorf("Error writing to stderr stream: %v", e)
 	}
 }
 
