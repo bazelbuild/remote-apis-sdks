@@ -117,13 +117,13 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 	}
 
 	var credentialHelper credentialhelper.CredentialHelper
- 	if *CredentialHelper != "" {
- 		helper, err := credentialhelper.NewClient(*CredentialHelper)
- 		if err != nil {
- 			return nil, err
- 		}
- 		credentialHelper = helper
- 	}
+	if *CredentialHelper != "" {
+		helper, err := credentialhelper.NewClient(*CredentialHelper)
+		if err != nil {
+			return nil, err
+		}
+		credentialHelper = helper
+	}
 
 	dialOpts := make([]grpc.DialOption, 0)
 	if *KeepAliveTime > 0*time.Second {

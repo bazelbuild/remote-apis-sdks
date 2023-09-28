@@ -630,11 +630,11 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else if params.CredentialHelper != nil {
 		authUsed = CredentialHelperAuth
- 		opts = append(opts, grpc.WithPerRPCCredentials(credentialhelpergrpc.NewPerRPCCredentials(params.CredentialHelper)))
- 		// Set the ServerName and RootCAs fields, if needed.
- 		tlsConfig, err := createTLSConfig(params)
- 		if err != nil {
- 			return nil, authUsed, fmt.Errorf("could not create TLS config: %w", err)
+		opts = append(opts, grpc.WithPerRPCCredentials(credentialhelpergrpc.NewPerRPCCredentials(params.CredentialHelper)))
+		// Set the ServerName and RootCAs fields, if needed.
+		tlsConfig, err := createTLSConfig(params)
+		if err != nil {
+			return nil, authUsed, fmt.Errorf("could not create TLS config: %w", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else if params.UseExternalAuthToken {
