@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/EngFlow/credential-helper-go"
+	"github.com/EngFlow/credential-helper-go/credentialhelpergrpc"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
@@ -60,6 +62,9 @@ const (
 
 	// NoAuth refers to no authentication when connecting to the RBE service.
 	NoAuth
+
+	// CredentialHelperAuth refers to using a Credential Helper for athentication.
+	CredentialHelperAuth
 
 	// ExternalTokenAuth is used to connect to the RBE service.
 	ExternalTokenAuth
@@ -510,6 +515,11 @@ type DialParams struct {
 	// not need to authenticate with the server.
 	NoAuth bool
 
+	// CredentialHelper specifies the Credential Helper to use for getting credentials.
+	//
+	// If this is specified, it takes precedence over all other client-wide credentials other than transport credentials (i.e., it takes precedence over `ExternalPerRPCCreds`, `UseApplicationDefault` and similar, but not over `mTLS` credentials).
+	CredentialHelper credentialhelper.CredentialHelper
+
 	// TransportCredsOnly is true if it's the caller's responsibility to set per-RPC credentials
 	// on individual calls. This overrides ActAsAccount, UseApplicationDefault, and UseComputeEngine.
 	// This is not the same as NoSecurity, as transport credentials will still be set.
@@ -616,6 +626,15 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		tlsConfig, err := createTLSConfig(params)
 		if err != nil {
 			return nil, authUsed, fmt.Errorf("could not create TLS config: %v", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	} else if params.CredentialHelper != nil {
+		authUsed = CredentialHelperAuth
+ 		opts = append(opts, grpc.WithPerRPCCredentials(credentialhelpergrpc.NewPerRPCCredentials(params.CredentialHelper)))
+ 		// Set the ServerName and RootCAs fields, if needed.
+ 		tlsConfig, err := createTLSConfig(params)
+ 		if err != nil {
+ 			return nil, authUsed, fmt.Errorf("could not create TLS config: %w", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else if params.UseExternalAuthToken {

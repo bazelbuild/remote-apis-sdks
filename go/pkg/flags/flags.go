@@ -6,6 +6,7 @@ import (
 	"flag"
 	"time"
 
+	"github.com/EngFlow/credential-helper-go"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag"
@@ -37,6 +38,8 @@ var (
 	UseGCECredentials = flag.Bool("use_gce_credentials", false, "If true (and --use_application_default_credentials is false), use the default GCE credentials to authenticate with remote execution.")
 	// UseRPCCredentials can be set to false to disable all per-RPC credentials.
 	UseRPCCredentials = flag.Bool("use_rpc_credentials", true, "If false, no per-RPC credentials will be used (disables --credential_file, --use_application_default_credentials, and --use_gce_credentials.")
+	// CredentialHelper specifies the path to the Credential Helper to use for authentication.
+	CredentialHelper = flag.String("credential_helper", "", "Specifies the path to a Credential Helper to use for authentication. If set, this takes precedence over any other authentication method.")
 	// UseExternalAuthToken specifies whether to use an externally provided auth token, given via PerRPCCreds dial option, should be used.
 	UseExternalAuthToken = flag.Bool("use_external_auth_token", false, "If true, se an externally provided auth token, given via PerRPCCreds when the SDK is initialized.")
 	// Service represents the host (and, if applicable, port) of the remote execution service.
@@ -113,6 +116,15 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 	}
 
+	var credentialHelper credentialhelper.CredentialHelper
+ 	if *CredentialHelper != "" {
+ 		helper, err := credentialhelper.NewClient(*CredentialHelper)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+ 		credentialHelper = helper
+ 	}
+
 	dialOpts := make([]grpc.DialOption, 0)
 	if *KeepAliveTime > 0*time.Second {
 		params := keepalive.ClientParameters{
@@ -129,6 +141,7 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		NoAuth:                *ServiceNoAuth,
 		CASService:            *CASService,
 		CredFile:              *CredFile,
+		CredentialHelper:      credentialHelper,
 		DialOpts:              dialOpts,
 		UseApplicationDefault: *UseApplicationDefaultCreds,
 		UseComputeEngine:      *UseGCECredentials,
