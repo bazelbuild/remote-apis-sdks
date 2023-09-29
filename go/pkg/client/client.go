@@ -700,7 +700,7 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 	conn, authUsed, err := Dial(ctx, params.Service, params)
 	casConn := conn
 	if params.CASService != "" && params.CASService != params.Service {
-		log.Infof("Connecting to CAS service %s", params.Service)
+		log.Infof("Connecting to CAS service %s", params.CASService)
 		casConn, authUsed, err = Dial(ctx, params.CASService, params)
 	}
 	if err != nil {
