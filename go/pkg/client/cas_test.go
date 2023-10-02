@@ -1867,3 +1867,49 @@ func TestDownloadFilesCancel(t *testing.T) {
 		})
 	}
 }
+
+func TestBatchDownloadBlobsCompressed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("Cannot listen: %v", err)
+	}
+	fakeCAS := fakes.NewCAS()
+	defer listener.Close()
+	server := grpc.NewServer()
+	repb.RegisterContentAddressableStorageServer(server, fakeCAS)
+	go server.Serve(listener)
+	defer server.Stop()
+	c, err := client.NewClient(ctx, instance, client.DialParams{
+		Service:    listener.Addr().String(),
+		NoSecurity: true,
+	}, client.StartupCapabilities(false))
+	if err != nil {
+		t.Fatalf("Error connecting to server: %v", err)
+	}
+	defer c.Close()
+
+	fooDigest := fakeCAS.Put([]byte("foo"))
+	barDigest := fakeCAS.Put([]byte("bar"))
+	digests := []digest.Digest{fooDigest, barDigest}
+	client.UseBatchCompression(true).Apply(c)
+
+	wantBlobs := map[digest.Digest]client.CompressedBlobInfo{
+		fooDigest: client.CompressedBlobInfo{
+			CompressedSize: 16,
+			Data:           []byte("foo"),
+		},
+		barDigest: client.CompressedBlobInfo{
+			CompressedSize: 16,
+			Data:           []byte("bar"),
+		},
+	}
+	gotBlobs, err := c.BatchDownloadBlobsWithStats(ctx, digests)
+	if err != nil {
+		t.Errorf("client.BatchDownloadBlobs(ctx, digests) failed: %v", err)
+	}
+	if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
+		t.Errorf("client.BatchDownloadBlobs(ctx, digests) had diff (want -> got):\n%s", diff)
+	}
+}

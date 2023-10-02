@@ -46,7 +46,7 @@ func (c *Client) CheckCapabilities(ctx context.Context) (err error) {
 		}
 		for _, compressor := range c.serverCaps.CacheCapabilities.SupportedBatchUpdateCompressors {
 			if compressor == repb.Compressor_ZSTD {
-				c.batchCompression = true
+				c.useBatchCompression = UseBatchCompression(true)
 			}
 		}
 	}

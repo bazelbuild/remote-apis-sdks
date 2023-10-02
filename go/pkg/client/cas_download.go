@@ -186,16 +186,19 @@ func (c *Client) DownloadDirectory(ctx context.Context, d digest.Digest, outDir 
 // zstdDecoder is a shared instance that should only be used in stateless mode, i.e. only by calling DecodeAll()
 var zstdDecoder, _ = zstd.NewReader(nil)
 
-// BatchDownloadBlobs downloads a number of blobs from the CAS to memory. They must collectively be below the
-// maximum total size for a batch read, which is about 4 MB (see MaxBatchSize). Digests must be
-// computed in advance by the caller. In case multiple errors occur during the blob read, the
-// last error will be returned.
-func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (map[digest.Digest][]byte, error) {
+// CompressedBlobInfo is primarily used to store stats about compressed blob size
+// in addition to the actual blob data.
+type CompressedBlobInfo struct {
+	CompressedSize int64
+	Data           []byte
+}
+
+func (c *Client) BatchDownloadBlobsWithStats(ctx context.Context, dgs []digest.Digest) (map[digest.Digest]CompressedBlobInfo, error) {
 	if len(dgs) > int(c.MaxBatchDigests) {
 		return nil, fmt.Errorf("batch read of %d total blobs exceeds maximum of %d", len(dgs), c.MaxBatchDigests)
 	}
 	req := &repb.BatchReadBlobsRequest{InstanceName: c.InstanceName}
-	if c.batchCompression {
+	if c.useBatchCompression {
 		req.AcceptableCompressors = []repb.Compressor_Value{repb.Compressor_ZSTD}
 	}
 	var sz int64
@@ -211,9 +214,9 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 	if sz > int64(c.MaxBatchSize) {
 		return nil, fmt.Errorf("batch read of %d total bytes exceeds maximum of %d", sz, c.MaxBatchSize)
 	}
-	res := make(map[digest.Digest][]byte)
+	res := make(map[digest.Digest]CompressedBlobInfo)
 	if foundEmpty {
-		res[digest.Empty] = nil
+		res[digest.Empty] = CompressedBlobInfo{}
 	}
 	opts := c.RPCOpts()
 	closure := func() error {
@@ -244,10 +247,12 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 				errDg = r.Digest
 				errMsg = r.Status.Message
 			} else {
+				CompressedSize := len(r.Data)
 				switch r.Compressor {
 				case repb.Compressor_IDENTITY:
 					// do nothing
 				case repb.Compressor_ZSTD:
+					CompressedSize = len(r.Data)
 					b, err := zstdDecoder.DecodeAll(r.Data, nil)
 					if err != nil {
 						errDg = r.Digest
@@ -260,7 +265,11 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 					errMsg = fmt.Sprintf("blob returned with unsupported compressor %s", r.Compressor)
 					continue
 				}
-				res[digest.NewFromProtoUnvalidated(r.Digest)] = r.Data
+				bi := CompressedBlobInfo{
+					CompressedSize: int64(CompressedSize),
+					Data:           r.Data,
+				}
+				res[digest.NewFromProtoUnvalidated(r.Digest)] = bi
 			}
 		}
 		req.Digests = failedDgs
@@ -273,6 +282,19 @@ func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (m
 		return nil
 	}
 	return res, c.Retrier.Do(ctx, closure)
+}
+
+// BatchDownloadBlobs downloads a number of blobs from the CAS to memory. They must collectively be below the
+// maximum total size for a batch read, which is about 4 MB (see MaxBatchSize). Digests must be
+// computed in advance by the caller. In case multiple errors occur during the blob read, the
+// last error will be returned.
+func (c *Client) BatchDownloadBlobs(ctx context.Context, dgs []digest.Digest) (map[digest.Digest][]byte, error) {
+	biRes, err := c.BatchDownloadBlobsWithStats(ctx, dgs)
+	res := make(map[digest.Digest][]byte)
+	for dg, bi := range biRes {
+		res[dg] = bi.Data
+	}
+	return res, err
 }
 
 // ReadBlob fetches a blob from the CAS into a byte slice.
@@ -727,20 +749,20 @@ func (c *Client) download(ctx context.Context, data []*downloadRequest) {
 
 func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest) {
 	contextmd.Infof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
-	bchMap, err := c.BatchDownloadBlobs(ctx, batch)
+	bchMap, err := c.BatchDownloadBlobsWithStats(ctx, batch)
 	if err != nil {
 		afterDownload(batch, reqs, map[digest.Digest]*MovedBytesMetadata{}, err)
 		return
 	}
 	for _, dg := range batch {
+		bi := bchMap[dg]
 		stats := &MovedBytesMetadata{
 			Requested:    dg.Size,
 			LogicalMoved: dg.Size,
 			// There's no compression for batch requests, and there's no such thing as "partial" data for
 			// a blob since they're all inlined in the response.
-			RealMoved: dg.Size,
+			RealMoved: bi.CompressedSize,
 		}
-		data := bchMap[dg]
 		for i, r := range reqs[dg] {
 			perm := c.RegularMode
 			if r.output.IsExecutable {
@@ -750,7 +772,7 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 			// We only report it to the first client to prevent double accounting.
 			r.wait <- &downloadResponse{
 				stats: stats,
-				err:   os.WriteFile(filepath.Join(r.outDir, r.output.Path), data, perm),
+				err:   os.WriteFile(filepath.Join(r.outDir, r.output.Path), bi.Data, perm),
 			}
 			if i == 0 {
 				// Prevent races by not writing to the original stats.
@@ -859,20 +881,20 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 			}
 			if len(batch) > 1 {
 				contextmd.Infof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
-				bchMap, err := c.BatchDownloadBlobs(eCtx, batch)
+				bchMap, err := c.BatchDownloadBlobsWithStats(eCtx, batch)
 				for _, dg := range batch {
-					data := bchMap[dg]
+					bi := bchMap[dg]
 					out := outputs[dg]
 					perm := c.RegularMode
 					if out.IsExecutable {
 						perm = c.ExecutableMode
 					}
-					if err := os.WriteFile(filepath.Join(outDir, out.Path), data, perm); err != nil {
+					if err := os.WriteFile(filepath.Join(outDir, out.Path), bi.Data, perm); err != nil {
 						return err
 					}
 					statsMu.Lock()
-					fullStats.LogicalMoved += int64(len(data))
-					fullStats.RealMoved += int64(len(data))
+					fullStats.LogicalMoved += int64(len(bi.Data))
+					fullStats.RealMoved += bi.CompressedSize
 					statsMu.Unlock()
 				}
 				if err != nil {
