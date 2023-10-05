@@ -120,22 +120,23 @@ func getRelPath(base, path string) (string, error) {
 	return rel, nil
 }
 
-// getTargetRelPath returns both the target's path relative to exec root
-// and relative to the symlink's dir, iff the target is under execRoot.
-// Otherwise it returns an error.
-func getTargetRelPath(execRoot, path string, symMeta *filemetadata.SymlinkMetadata) (relExecRoot string, relSymlinkDir string, err error) {
-	symlinkAbsDir := filepath.Join(execRoot, filepath.Dir(path))
-	target := symMeta.Target
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(symlinkAbsDir, target)
+// getTargetRelPath returns two versions of targetPath, the first is relative to execRoot
+// and the second is relative to the directory of symlinkRelPath.
+// symlinkRelPath must be relative to execRoot.
+// targetPath must either be absolute or relative to the directory of symlinkRelPath.
+// If targetPath is not a descendant of execRoot, an error is returned.
+func getTargetRelPath(execRoot, symlinkRelPath string, targetPath string) (relExecRoot string, relSymlinkDir string, err error) {
+	symlinkAbsDir := filepath.Join(execRoot, filepath.Dir(symlinkRelPath))
+	if !filepath.IsAbs(targetPath) {
+		targetPath = filepath.Join(symlinkAbsDir, targetPath)
 	}
 
-	relExecRoot, err = getRelPath(execRoot, target)
+	relExecRoot, err = getRelPath(execRoot, targetPath)
 	if err != nil {
 		return "", "", err
 	}
 
-	relSymlinkDir, err = filepath.Rel(symlinkAbsDir, target)
+	relSymlinkDir, err = filepath.Rel(symlinkAbsDir, targetPath)
 	return relExecRoot, relSymlinkDir, err
 }
 
@@ -165,6 +166,67 @@ func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string)
 	return relPath, remoteRelPath, nil
 }
 
+// evalParentSymlinks replaces each parent element in relPath with its target if it's a symlink.
+//
+// Returns the evaluated path with a list of parent symlinks if any. All are relative to execRoot, but not necessarily descendents of it.
+// Returned paths may not be filepath.Clean.
+// The basename of relPath is not resolved. It remains a symlink if it is one.
+// Any errors would be from accessing files.
+// Example: execRoot=/a relPath=b/c/d/e.go, b->bb, evaledPath=/a/bb/c/d/e.go, symlinks=[a/b]
+func evalParentSymlinks(execRoot, relPath string, materializeOutsideExecRoot bool, fmdCache filemetadata.Cache) (string, []string, error) {
+	var symlinks []string
+	evaledPathBuilder := strings.Builder{}
+	// targetPathBuilder captures the absolute path to the evaluated target so far.
+	// It is effectively what relative symlinks are relative to. If materialization
+	// is enabled, the materialized path may represent a different tree which makes it
+	// unusable with relative symlinks.
+	targetPathBuilder := strings.Builder{}
+	targetPathBuilder.WriteString(execRoot)
+	targetPathBuilder.WriteRune(filepath.Separator)
+
+	ps := strings.Split(relPath, string(filepath.Separator))
+	lastIndex := len(ps) - 1
+	for i, p := range ps {
+		if i != 0 {
+			evaledPathBuilder.WriteRune(filepath.Separator)
+			targetPathBuilder.WriteRune(filepath.Separator)
+		}
+		if i == lastIndex {
+			// Do not resolve basename.
+			evaledPathBuilder.WriteString(p)
+			break
+		}
+
+		relP := evaledPathBuilder.String() + p
+		absP := filepath.Join(execRoot, relP)
+		fmd := fmdCache.Get(absP)
+		if fmd.Symlink == nil {
+			// Not a symlink.
+			evaledPathBuilder.WriteString(p)
+			targetPathBuilder.WriteString(p)
+			continue
+		}
+
+		if filepath.IsAbs(fmd.Symlink.Target) {
+			targetPathBuilder.Reset()
+		}
+		targetPathBuilder.WriteString(fmd.Symlink.Target)
+		// log.V(5).Infof("eval: relPath=%s, relP=%s, absP=%s, targetPath=%s", relPath, relP, absP, targetPathBuilder.String())
+
+		_, targetRelSymlinkDir, err := getTargetRelPath(execRoot, relP, targetPathBuilder.String())
+		if err != nil {
+			if materializeOutsideExecRoot {
+				evaledPathBuilder.WriteString(p)
+				continue
+			}
+			return "", nil, err
+		}
+		evaledPathBuilder.WriteString(targetRelSymlinkDir)
+		symlinks = append(symlinks, relP)
+	}
+	return evaledPathBuilder.String(), symlinks, nil
+}
+
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
 func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts, nodeProperties map[string]*cpb.NodeProperties) error {
@@ -172,6 +234,11 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 		opts = DefaultTreeSymlinkOpts()
 	}
 
+	var seenRelPaths map[string]struct{}
+	if opts.Preserved {
+		// Remember loaded files to avoid reprocessing shared symlink ancestors.
+		seenRelPaths = make(map[string]struct{}, len(filesToProcess))
+	}
 	for len(filesToProcess) != 0 {
 		path := filesToProcess[0]
 		filesToProcess = filesToProcess[1:]
@@ -179,7 +246,26 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 		if path == "" {
 			return errors.New("empty Input, use \".\" for entire exec root")
 		}
-		absPath := filepath.Join(execRoot, path)
+		var absPath string
+		if opts.Preserved {
+			// Save here as well to handle the case when a symlink is both a requested file and an ancestor.
+			seenRelPaths[path] = struct{}{}
+			evaledPath, parentSymlinks, err := evalParentSymlinks(execRoot, path, opts.MaterializeOutsideExecRoot, cache)
+			log.V(3).Infof("loadFiles: path=%s, evaled=%s, parentSymlinks=%v, err=%v", path, evaledPath, parentSymlinks, err)
+			if err != nil {
+				return err
+			}
+			absPath = filepath.Join(execRoot, evaledPath)
+			for _, p := range parentSymlinks {
+				if _, ok := seenRelPaths[p]; ok {
+					continue
+				}
+				seenRelPaths[p] = struct{}{}
+				filesToProcess = append(filesToProcess, p)
+			}
+		} else {
+			absPath = filepath.Join(execRoot, path)
+		}
 		normPath, remoteNormPath, err := getExecRootRelPaths(absPath, execRoot, localWorkingDir, remoteWorkingDir)
 		if err != nil {
 			return err
@@ -198,7 +284,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			if shouldIgnore(absPath, command.SymlinkInputType, excl) {
 				continue
 			}
-			targetExecRoot, targetSymDir, err := getTargetRelPath(execRoot, normPath, meta.Symlink)
+			targetExecRoot, targetSymDir, err := getTargetRelPath(execRoot, normPath, meta.Symlink.Target)
 			if err != nil {
 				// The symlink points to a file outside the exec root. This is an
 				// error unless materialization of symlinks pointing outside the
