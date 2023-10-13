@@ -505,10 +505,24 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 		f.mu.Lock()
 		f.reads[dg]++
 		f.mu.Unlock()
+
+		useZSTDCompression := false
+		compressor := repb.Compressor_IDENTITY
+		for _, c := range req.AcceptableCompressors {
+			if c == repb.Compressor_ZSTD {
+				compressor = repb.Compressor_ZSTD
+				useZSTDCompression = true
+				break
+			}
+		}
+		if useZSTDCompression {
+			data = zstdEncoder.EncodeAll(data, nil)
+		}
 		resps = append(resps, &repb.BatchReadBlobsResponse_Response{
-			Digest: dgPb,
-			Status: status.New(codes.OK, "").Proto(),
-			Data:   data,
+			Digest:     dgPb,
+			Status:     status.New(codes.OK, "").Proto(),
+			Data:       data,
+			Compressor: compressor,
 		})
 	}
 	return &repb.BatchReadBlobsResponse{Responses: resps}, nil

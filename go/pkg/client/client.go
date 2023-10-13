@@ -173,7 +173,8 @@ type Client struct {
 	// UnifiedDownloadTickDuration specifies how often the unified download daemon flushes the pending requests.
 	UnifiedDownloadTickDuration UnifiedDownloadTickDuration
 	// TreeSymlinkOpts controls how symlinks are handled when constructing a tree.
-	TreeSymlinkOpts     *TreeSymlinkOpts
+	TreeSymlinkOpts *TreeSymlinkOpts
+
 	serverCaps          *repb.ServerCapabilities
 	useBatchOps         UseBatchOps
 	casConcurrency      int64
@@ -186,7 +187,7 @@ type Client struct {
 	creds               credentials.PerRPCCredentials
 	uploadOnce          sync.Once
 	downloadOnce        sync.Once
-	batchCompression    bool
+	useBatchCompression UseBatchCompression
 }
 
 const (
@@ -387,6 +388,15 @@ type UseBatchOps bool
 // Apply sets the UseBatchOps flag on a client.
 func (u UseBatchOps) Apply(c *Client) {
 	c.useBatchOps = u
+}
+
+// UseBatchCompression is currently set to true when the server has
+// SupportedBatchUpdateCompressors capability and supports ZSTD compression.
+type UseBatchCompression bool
+
+// Apply sets the batchCompression flag on a client.
+func (u UseBatchCompression) Apply(c *Client) {
+	c.useBatchCompression = u
 }
 
 // CASConcurrency is the number of simultaneous requests that will be issued for CAS upload and
