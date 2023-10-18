@@ -51,14 +51,22 @@ func mustMarshal(p proto.Message) []byte {
 	return b
 }
 
+func newDigest(t *testing.T, hash string, size int64) digest.Digest {
+	dg, err := digest.New(hash, size)
+	if err != nil {
+		t.Fatalf("unexpected error while creating digest: %v", err)
+	}
+	return dg
+}
+
 type inputPath struct {
-	path          string
-	emptyDir      bool
-	fileContents  []byte
-	isExecutable  bool
-	isSymlink     bool
-	isAbsolute    bool
-	symlinkTarget string
+	path             string
+	emptyDir         bool
+	fileContents     []byte
+	isExecutable     bool
+	isSymlink        bool
+	isAbsolute       bool
+	relSymlinkTarget string
 }
 
 func construct(dir string, ips []*inputPath) error {
@@ -74,7 +82,7 @@ func construct(dir string, ips []*inputPath) error {
 			return err
 		}
 		if ip.isSymlink {
-			target := ip.symlinkTarget
+			target := ip.relSymlinkTarget
 			if ip.isAbsolute {
 				target = filepath.Join(dir, target)
 			}
@@ -548,7 +556,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "File absolute symlink",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "foo", isSymlink: true, isAbsolute: true, symlinkTarget: "fooDir/foo"},
+				{path: "foo", isSymlink: true, isAbsolute: true, relSymlinkTarget: "fooDir/foo"},
 			},
 			spec: &command.InputSpec{
 				Inputs:              []string{"fooDir", "foo"},
@@ -574,7 +582,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "File relative symlink",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "foo", isSymlink: true, symlinkTarget: "fooDir/foo"},
+				{path: "foo", isSymlink: true, relSymlinkTarget: "fooDir/foo"},
 			},
 			spec: &command.InputSpec{
 				Inputs:              []string{"fooDir", "foo"},
@@ -600,7 +608,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "File relative symlink (preserved)",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "fooSym", isSymlink: true, symlinkTarget: "fooDir/foo"},
+				{path: "fooSym", isSymlink: true, relSymlinkTarget: "fooDir/foo"},
 			},
 			spec: &command.InputSpec{
 				// The symlink target will be traversed recursively.
@@ -613,6 +621,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
 			wantCacheCalls: map[string]int{
+				"fooDir":     1,
 				"fooDir/foo": 1,
 				"fooSym":     1,
 			},
@@ -631,7 +640,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "File relative symlink (preserved based on InputSpec)",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "fooSym", isSymlink: true, symlinkTarget: "fooDir/foo"},
+				{path: "fooSym", isSymlink: true, relSymlinkTarget: "fooDir/foo"},
 			},
 			spec: &command.InputSpec{
 				// The symlink target will be traversed recursively.
@@ -645,6 +654,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
 			wantCacheCalls: map[string]int{
+				"fooDir":     1,
 				"fooDir/foo": 1,
 				"fooSym":     1,
 			},
@@ -662,7 +672,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "File relative symlink (preserved but not followed)",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "fooSym", isSymlink: true, symlinkTarget: "fooDir/foo"},
+				{path: "fooSym", isSymlink: true, relSymlinkTarget: "fooDir/foo"},
 			},
 			spec: &command.InputSpec{
 				Inputs:              []string{"fooSym"},
@@ -689,7 +699,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "File absolute symlink (preserved)",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "fooSym", isSymlink: true, isAbsolute: true, symlinkTarget: "fooDir/foo"},
+				{path: "fooSym", isSymlink: true, isAbsolute: true, relSymlinkTarget: "fooDir/foo"},
 			},
 			spec: &command.InputSpec{
 				// The symlink target will be traversed recursively.
@@ -702,6 +712,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
 			wantCacheCalls: map[string]int{
+				"fooDir":     1,
 				"fooDir/foo": 1,
 				"fooSym":     1,
 			},
@@ -720,8 +731,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "File invalid symlink",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "foo", isSymlink: true, symlinkTarget: "fooDir/foo"},
-				{path: "bar", isSymlink: true, symlinkTarget: "fooDir/bar"},
+				{path: "foo", isSymlink: true, relSymlinkTarget: "fooDir/foo"},
+				{path: "bar", isSymlink: true, relSymlinkTarget: "fooDir/bar"},
 			},
 			spec: &command.InputSpec{
 				Inputs:              []string{"fooDir", "foo"},
@@ -747,7 +758,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Dangling symlink is preserved",
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "invalidSym", isSymlink: true, symlinkTarget: "fooDir/invalid"},
+				{path: "invalidSym", isSymlink: true, relSymlinkTarget: "fooDir/invalid"},
 			},
 			spec: &command.InputSpec{
 				Inputs:              []string{"fooDir", "invalidSym"},
@@ -760,7 +771,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			additionalBlobs: [][]byte{fooBlob, fooDirBlob},
 			wantCacheCalls: map[string]int{
-				"fooDir":     1,
+				"fooDir":     2,
 				"fooDir/foo": 1,
 				"invalidSym": 1,
 			},
@@ -779,7 +790,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "barDirTarget/bar", fileContents: barBlob},
-				{path: "barDir", isSymlink: true, isAbsolute: true, symlinkTarget: "barDirTarget"},
+				{path: "barDir", isSymlink: true, isAbsolute: true, relSymlinkTarget: "barDirTarget"},
 			},
 			spec: &command.InputSpec{
 				Inputs:              []string{"fooDir", "barDir"},
@@ -807,7 +818,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			input: []*inputPath{
 				{path: "fooDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "barDirTarget/bar", fileContents: barBlob},
-				{path: "barDir", isSymlink: true, symlinkTarget: "barDirTarget"},
+				{path: "barDir", isSymlink: true, relSymlinkTarget: "barDirTarget"},
 			},
 			spec: &command.InputSpec{
 				Inputs:              []string{"fooDir", "barDir"},
@@ -835,7 +846,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			input: []*inputPath{
 				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "foobarDir/bar", fileContents: barBlob},
-				{path: "base/foobarSymDir", isSymlink: true, isAbsolute: true, symlinkTarget: "foobarDir"},
+				{path: "base/foobarSymDir", isSymlink: true, isAbsolute: true, relSymlinkTarget: "foobarDir"},
 			},
 			spec: &command.InputSpec{
 				// The symlink target will be traversed recursively.
@@ -847,7 +858,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob, foobarSymDirBlob},
 			wantCacheCalls: map[string]int{
-				"foobarDir":         1,
+				"base":              1,
+				"foobarDir":         3,
 				"foobarDir/foo":     1,
 				"foobarDir/bar":     1,
 				"base/foobarSymDir": 1,
@@ -868,7 +880,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			input: []*inputPath{
 				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "foobarDir/bar", fileContents: barBlob},
-				{path: "base/foobarSymDir", isSymlink: true, symlinkTarget: "../foobarDir"},
+				{path: "base/foobarSymDir", isSymlink: true, relSymlinkTarget: "../foobarDir"},
 			},
 			spec: &command.InputSpec{
 				// The symlink target will be traversed recursively.
@@ -880,7 +892,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob, foobarSymDirBlob},
 			wantCacheCalls: map[string]int{
-				"foobarDir":         1,
+				"base":              1,
+				"foobarDir":         3,
 				"foobarDir/foo":     1,
 				"foobarDir/bar":     1,
 				"base/foobarSymDir": 1,
@@ -900,9 +913,9 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Directory relative symlink (materialized from outside exec root)",
 			input: []*inputPath{
 				{path: "../foo", fileContents: fooBlob, isExecutable: true},
-				{path: "fooSym", isSymlink: true, symlinkTarget: "../foo"},
+				{path: "fooSym", isSymlink: true, relSymlinkTarget: "../foo"},
 				{path: "barDir/bar", fileContents: barBlob},
-				{path: "barSym", isSymlink: true, symlinkTarget: "barDir/bar"},
+				{path: "barSym", isSymlink: true, relSymlinkTarget: "barDir/bar"},
 			},
 			spec: &command.InputSpec{
 				Inputs: []string{"fooSym", "barSym"},
@@ -920,6 +933,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			additionalBlobs: [][]byte{fooBlob, barDirBlob, barBlob},
 			wantCacheCalls: map[string]int{
+				"barDir":     1,
 				"fooSym":     1,
 				"barSym":     1,
 				"barDir/bar": 1,
@@ -934,6 +948,141 @@ func TestComputeMerkleTree(t *testing.T) {
 				Preserved:                  true,
 				FollowsTarget:              true,
 				MaterializeOutsideExecRoot: true,
+			},
+		},
+		{
+			desc: "Intermediate directory relative symlink (preserved)",
+			input: []*inputPath{
+				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "foobarDir/bar", fileContents: barBlob},
+				{path: "foobarSymDir", isSymlink: true, relSymlinkTarget: "foobarDir"},
+			},
+			spec: &command.InputSpec{
+				Inputs:              []string{"foobarSymDir/foo", "foobarSymDir/bar"},
+				InputNodeProperties: map[string]*cpb.NodeProperties{"foobarDir/foo": fooProperties},
+			},
+			rootDir: &repb.Directory{
+				// foobarSymDir should not be a directory.
+				Directories: []*repb.DirectoryNode{{Name: "foobarDir", Digest: foobarDirDgPb}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "foobarSymDir", Target: "foobarDir"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
+			wantCacheCalls: map[string]int{
+				"foobarDir/foo": 2, // 1 via the dir and 1 via the symlink
+				"foobarDir/bar": 2,
+				"foobarDir":     3, // 1 as input, 2 as a real ancestor
+				"foobarSymDir":  3, // 1 as input, 2 as a symlink ancestor
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2, // Root and foobarDir
+				InputFiles:       2,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved:     true,
+				FollowsTarget: true,
+			},
+		},
+		{
+			desc: "Intermediate directory relative symlink and input (preserved)",
+			input: []*inputPath{
+				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "foobarDir/bar", fileContents: barBlob},
+				{path: "foobarSymDir", isSymlink: true, relSymlinkTarget: "foobarDir"},
+			},
+			spec: &command.InputSpec{
+				// The directory symlink is also an input.
+				Inputs:              []string{"foobarSymDir", "foobarSymDir/foo", "foobarSymDir/bar"},
+				InputNodeProperties: map[string]*cpb.NodeProperties{"foobarDir/foo": fooProperties},
+			},
+			rootDir: &repb.Directory{
+				// foobarSymDir should not be a directory.
+				Directories: []*repb.DirectoryNode{{Name: "foobarDir", Digest: foobarDirDgPb}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "foobarSymDir", Target: "foobarDir"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
+			wantCacheCalls: map[string]int{
+				"foobarDir/foo": 2, // 1 via the dir and 1 via the symlink
+				"foobarDir/bar": 2,
+				"foobarDir":     3, // 1 as input, 2 as a real ancestor
+				"foobarSymDir":  3, // 1 as input, 2 as a symlink ancestor
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2, // Root and foobarDir
+				InputFiles:       2,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved:     true,
+				FollowsTarget: true,
+			},
+		},
+		{
+			desc: "Intermediate directory relative symlink (preserved, materialize)",
+			input: []*inputPath{
+				{path: "../foobarDirOrig/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "../foobarDirOrig/bar", fileContents: barBlob},
+				{path: "foobarDir", isSymlink: true, relSymlinkTarget: "../foobarDirOrig"},
+			},
+			spec: &command.InputSpec{
+				Inputs:              []string{"foobarDir", "foobarDir/foo", "foobarDir/bar"},
+				InputNodeProperties: map[string]*cpb.NodeProperties{"foobarDir/foo": fooProperties},
+			},
+			rootDir: &repb.Directory{
+				// foobarDir should be materialized as a directory.
+				Directories: []*repb.DirectoryNode{{Name: "foobarDir", Digest: foobarDirDgPb}},
+			},
+			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
+			wantCacheCalls: map[string]int{
+				"foobarDir/foo": 2,
+				"foobarDir/bar": 2,
+				"foobarDir":     5, // 2 as an ancestor to input files, 1 as input, 2 as an ancestor to nested files.
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2, // Root and foobarDir
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved:                  true,
+				FollowsTarget:              true,
+				MaterializeOutsideExecRoot: true,
+			},
+		},
+		{
+			desc: "Intermediate directory absolute symlink (preserved)",
+			input: []*inputPath{
+				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "foobarDir/bar", fileContents: barBlob},
+				{path: "foobarSymDir", isSymlink: true, isAbsolute: true, relSymlinkTarget: "foobarDir"},
+			},
+			spec: &command.InputSpec{
+				Inputs:              []string{"foobarSymDir", "foobarSymDir/foo", "foobarSymDir/bar"},
+				InputNodeProperties: map[string]*cpb.NodeProperties{"foobarDir/foo": fooProperties},
+			},
+			rootDir: &repb.Directory{
+				// foobarSymDir should not be a directory.
+				Directories: []*repb.DirectoryNode{{Name: "foobarDir", Digest: foobarDirDgPb}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "foobarSymDir", Target: "foobarDir"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
+			wantCacheCalls: map[string]int{
+				"foobarDir/foo": 2, // 1 via the dir and 1 via the symlink
+				"foobarDir/bar": 2,
+				"foobarDir":     3, // 1 as input, 2 as a real ancestor
+				"foobarSymDir":  3, // 1 as input, 2 as a symlink ancestor
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2, // Root and foobarDir
+				InputFiles:       2,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved:     true,
+				FollowsTarget: true,
 			},
 		},
 		{
@@ -1452,7 +1601,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			desc: "Preserved symlink escaping exec root",
 			input: []*inputPath{
 				{path: "../foo", fileContents: fooBlob, isExecutable: true},
-				{path: "escapingFoo", isSymlink: true, symlinkTarget: "../foo"},
+				{path: "escapingFoo", isSymlink: true, relSymlinkTarget: "../foo"},
 			},
 			spec: &command.InputSpec{
 				Inputs: []string{"escapingFoo"},
@@ -1464,7 +1613,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 		{
 			desc: "Materialization of dangling symlink pointing outside exec root fails",
 			input: []*inputPath{
-				{path: "danglingSym", isSymlink: true, symlinkTarget: "../doesNotExist"},
+				{path: "danglingSym", isSymlink: true, relSymlinkTarget: "../doesNotExist"},
 			},
 			spec: &command.InputSpec{
 				Inputs: []string{"danglingSym"},
@@ -1658,7 +1807,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			desc: "Symlink",
 			input: []*inputPath{
 				{path: "bar", fileContents: barBlob},
-				{path: "dir1/dir2/bar", isSymlink: true, symlinkTarget: "../../bar"},
+				{path: "dir1/dir2/bar", isSymlink: true, relSymlinkTarget: "../../bar"},
 			},
 			paths:     []string{"dir1/dir2/bar"},
 			wantBlobs: [][]byte{barBlob},
@@ -1987,7 +2136,7 @@ func BenchmarkComputeMerkleTree(b *testing.B) {
 		{path: "d/c", emptyDir: true},
 		{path: "d/d/a", fileContents: randomBytes(randGen, 5912)},
 		{path: "d/d/b", fileContents: randomBytes(randGen, 9157)},
-		{path: "d/d/c", isSymlink: true, symlinkTarget: "../../b"},
+		{path: "d/d/c", isSymlink: true, relSymlinkTarget: "../../b"},
 		{path: "d/d/d", fileContents: randomBytes(randGen, 5381)},
 	})
 
