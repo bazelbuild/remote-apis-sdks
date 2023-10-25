@@ -148,6 +148,9 @@ func TestTool_DownloadAction(t *testing.T) {
 		ExecRoot:    e.ExecRoot,
 		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "a/b/i2"}, InputNodeProperties: map[string]*cpb.NodeProperties{"i1": fooProperties}},
 		OutputFiles: []string{"a/b/out"},
+		Platform: map[string]string{
+			"container-image": "foo",
+		},
 	}
 	_, acDg, _, _ := e.Set(cmd, command.DefaultExecutionOptions(), &command.Result{Status: command.SuccessResultStatus}, &fakes.InputFile{Path: "i1", Contents: "i1"}, &fakes.InputFile{Path: "a/b/i2", Contents: "i2"})
 
@@ -161,6 +164,14 @@ func TestTool_DownloadAction(t *testing.T) {
 	reCmdPb := &repb.Command{
 		Arguments:   []string{"foo", "bar", "baz"},
 		OutputFiles: []string{"a/b/out"},
+		Platform: &repb.Platform{
+			Properties: []*repb.Platform_Property{
+				&repb.Platform_Property{
+					Name:  "container-image",
+					Value: "foo",
+				},
+			},
+		},
 	}
 	acPb := &repb.Action{
 		CommandDigest:   digest.TestNewFromMessage(reCmdPb).ToProto(),
@@ -212,6 +223,9 @@ func TestTool_ExecuteAction(t *testing.T) {
 		ExecRoot:    e.ExecRoot,
 		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "i2"}, InputNodeProperties: map[string]*cpb.NodeProperties{"i1": fooProperties}},
 		OutputFiles: []string{"a/b/out"},
+		Platform: map[string]string{
+			"container-image": "foo",
+		},
 	}
 	opt := &command.ExecutionOptions{AcceptCached: false, DownloadOutputs: true, DownloadOutErr: true}
 	_, acDg, _, _ := e.Set(cmd, opt, &command.Result{Status: command.SuccessResultStatus}, &fakes.OutputFile{Path: "a/b/out", Contents: "out"},
