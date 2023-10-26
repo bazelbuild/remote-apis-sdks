@@ -70,6 +70,10 @@ func (s *Exec) ExecuteCalls() int {
 	return int(atomic.LoadInt32(&s.numExecCalls))
 }
 
+func fakeOPName(adg digest.Digest) string {
+	return "fake-action-" + adg.String()
+}
+
 func (s *Exec) fakeExecution(dg digest.Digest, skipCacheLookup bool) (*oppb.Operation, error) {
 	ar := s.ActionResult
 	st := s.Status
@@ -108,7 +112,7 @@ func (s *Exec) fakeExecution(dg digest.Digest, skipCacheLookup bool) (*oppb.Oper
 		return nil, err
 	}
 	return &oppb.Operation{
-		Name:   "fake",
+		Name:   fakeOPName(dg),
 		Done:   true,
 		Result: &oppb.Operation_Response{Response: any},
 	}, nil
@@ -153,7 +157,7 @@ func (s *Exec) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_Execute
 		if err != nil {
 			return err
 		}
-		if err := stream.Send(&oppb.Operation{Name: "fake", Metadata: md}); err != nil {
+		if err := stream.Send(&oppb.Operation{Name: fakeOPName(dg), Metadata: md}); err != nil {
 			return err
 		}
 	}
@@ -166,7 +170,13 @@ func (s *Exec) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_Execute
 	return nil
 }
 
-// WaitExecution is not implemented on this fake.
 func (s *Exec) WaitExecution(req *repb.WaitExecutionRequest, stream regrpc.Execution_WaitExecutionServer) (err error) {
-	return status.Error(codes.Unimplemented, "method WaitExecution not implemented by test fake")
+	if req.Name != fakeOPName(s.adg) {
+		return status.Errorf(codes.NotFound, "requested operation %v not found", req.Name)
+	}
+	if op, err := s.fakeExecution(s.adg, true); err != nil {
+		return err
+	} else {
+		return stream.Send(op)
+	}
 }
