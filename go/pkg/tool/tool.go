@@ -354,8 +354,8 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 		return err
 	}
 
-	if _, err := os.Stat(outputPath); os.IsExist(err) {
-		// Directory already exists, ask the user for confirmation
+	// Directory already exists, ask the user for confirmation before overwrite it.
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
 		fmt.Printf("Directory '%s' already exists. Do you want to overwrite it? (yes/no): ", outputPath)
 		reader := bufio.NewReader(os.Stdin)
 		input, err := reader.ReadString('\n')
@@ -365,22 +365,16 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 		input = strings.TrimSpace(input)
 		input = strings.ToLower(input)
 
-		if input == "yes" || input == "y" {
-			// If the user confirms, remove the existing directory and create a new one
-			err := os.RemoveAll(outputPath)
-			if err != nil {
-				return fmt.Errorf("error removing existing directory: %v", err)
-			}
-
-			err = os.MkdirAll(outputPath, os.ModePerm)
-			if err != nil {
-				return fmt.Errorf("error creating the directory: %v", err)
-			}
-		} else {
+		if !(input == "yes" || input == "y") {
 			return errors.Errorf("operation aborted.")
 		}
+		// If the user confirms, remove the existing directory and create a new one
+		err = os.RemoveAll(outputPath)
+		if err != nil {
+			return fmt.Errorf("error removing existing directory: %v", err)
+		}
 	}
-	// Directory doesn't exist, create it
+	// Directory doesn't exist, create it.
 	err = os.MkdirAll(outputPath, os.ModePerm)
 	if err != nil {
 		return fmt.Errorf("error creating the directory: %v", err)
