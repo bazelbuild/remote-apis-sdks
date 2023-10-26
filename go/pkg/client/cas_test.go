@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 )
@@ -1878,7 +1879,7 @@ func TestBatchDownloadBlobsCompressed(t *testing.T) {
 	fakeCAS := fakes.NewCAS()
 	defer listener.Close()
 	server := grpc.NewServer()
-	repb.RegisterContentAddressableStorageServer(server, fakeCAS)
+	regrpc.RegisterContentAddressableStorageServer(server, fakeCAS)
 	go server.Serve(listener)
 	defer server.Stop()
 	c, err := client.NewClient(ctx, instance, client.DialParams{
