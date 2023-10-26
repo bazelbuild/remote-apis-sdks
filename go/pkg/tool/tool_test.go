@@ -154,7 +154,7 @@ func TestTool_DownloadAction(t *testing.T) {
 	client := &Client{GrpcClient: e.Client.GrpcClient}
 	tmpDir := filepath.Join(t.TempDir(), "action_root")
 	os.MkdirAll(tmpDir, os.ModePerm)
-	if err := client.DownloadAction(context.Background(), acDg.String(), tmpDir); err != nil {
+	if err := client.DownloadAction(context.Background(), acDg.String(), tmpDir, true); err != nil {
 		t.Errorf("error DownloadAction: %v", err)
 	}
 
@@ -232,7 +232,7 @@ func TestTool_ExecuteAction(t *testing.T) {
 	tmpDir := filepath.Join(t.TempDir(), "action_root")
 	os.MkdirAll(tmpDir, os.ModePerm)
 	inputRoot := filepath.Join(tmpDir, "input")
-	if err := client.DownloadAction(context.Background(), acDg.String(), tmpDir); err != nil {
+	if err := client.DownloadAction(context.Background(), acDg.String(), tmpDir, true); err != nil {
 		t.Errorf("error DownloadAction: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(inputRoot, "i1"), []byte("i11"), 0644); err != nil {
