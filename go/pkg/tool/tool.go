@@ -3,6 +3,7 @@
 package tool
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -351,6 +352,41 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 	log.Infof("Reading action..")
 	if _, err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
 		return err
+	}
+
+	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
+		// Directory doesn't exist, create it
+		err := os.MkdirAll(outputPath, os.ModePerm)
+		if err != nil {
+			return err
+
+		}
+		log.Infof("Directory created:", outputPath)
+	} else {
+		// Directory already exists, ask the user for confirmation
+		fmt.Printf("Directory '%s' already exists. Do you want to overwrite it? (yes/no): ", outputPath)
+		reader := bufio.NewReader(os.Stdin)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return err
+		}
+		input = strings.TrimSpace(input)
+		input = strings.ToLower(input)
+
+		if input == "yes" || input == "y" {
+			// If the user confirms, remove the existing directory and create a new one
+			err := os.RemoveAll(outputPath)
+			if err != nil {
+				return err
+			}
+
+			err = os.MkdirAll(outputPath, os.ModePerm)
+			if err != nil {
+				return err
+			}
+		} else {
+			return errors.Errorf("Operation aborted.")
+		}
 	}
 	if err := c.writeProto(actionProto, filepath.Join(outputPath, "ac.textproto")); err != nil {
 		return err
