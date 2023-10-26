@@ -63,7 +63,7 @@ var (
 	operation    = flag.String("operation", "", fmt.Sprintf("Specifies the operation to perform. Supported values: %v", supportedOps))
 	digest       = flag.String("digest", "", "Digest in <digest/size_bytes> format.")
 	pathPrefix   = flag.String("path", "", "Path to which outputs should be downloaded to.")
-	overwrite    = flag.Bool("overwrite", false, "Overwrite the output path if it is already exist.")
+	overwrite    = flag.Bool("overwrite", false, "Overwrite the output path if it already exist.")
 	actionRoot   = flag.String("action_root", "", "For execute_action: the root of the action spec, containing ac.textproto (Action proto), cmd.textproto (Command proto), and input/ (root of the input tree).")
 	execAttempts = flag.Int("exec_attempts", 10, "For check_determinism: the number of times to remotely execute the action and check for mismatches.")
 	_            = flag.String("input_root", "", "Deprecated. Use action root instead.")

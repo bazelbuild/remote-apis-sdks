@@ -357,12 +357,9 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 	// Directory already exists, ask the user for confirmation before overwrite it.
 	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
 		fmt.Printf("Directory '%s' already exists. Do you want to overwrite it? (yes/no): ", outputPath)
-		var input string
-		if overwrite {
-			input = "yes"
-		} else {
+		if !overwrite {
 			reader := bufio.NewReader(os.Stdin)
-			input, err = reader.ReadString('\n')
+			input, err := reader.ReadString('\n')
 			if err != nil {
 				return fmt.Errorf("error reading user input: %v", err)
 			}
