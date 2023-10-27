@@ -381,7 +381,7 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 	if err != nil {
 		return fmt.Errorf("error creating the directory: %v", err)
 	}
-	log.Infof("Directory created:", outputPath)
+	log.Infof("Directory created: %v", outputPath)
 
 	if err := c.writeProto(actionProto, filepath.Join(outputPath, "ac.textproto")); err != nil {
 		return err
