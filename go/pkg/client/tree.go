@@ -234,10 +234,11 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 		opts = DefaultTreeSymlinkOpts()
 	}
 
-	var seenRelPaths map[string]struct{}
+	var seenAncestorSymlinkRel map[string]bool
 	if opts.Preserved {
-		// Remember loaded files to avoid reprocessing shared symlink ancestors.
-		seenRelPaths = make(map[string]struct{}, len(filesToProcess))
+		// Remember ancestor symlinks to avoid redundant processing for shared ancestors.
+		// This ensures that an ancestor symlink is only ever added once to the list.
+		seenAncestorSymlinkRel = make(map[string]bool, len(filesToProcess))
 	}
 	for len(filesToProcess) != 0 {
 		path := filesToProcess[0]
@@ -248,8 +249,6 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 		}
 		var absPath string
 		if opts.Preserved {
-			// Save here as well to handle the case when a symlink is both a requested file and an ancestor.
-			seenRelPaths[path] = struct{}{}
 			evaledPath, parentSymlinks, err := evalParentSymlinks(execRoot, path, opts.MaterializeOutsideExecRoot, cache)
 			log.V(3).Infof("loadFiles: path=%s, evaled=%s, parentSymlinks=%v, err=%v", path, evaledPath, parentSymlinks, err)
 			if err != nil {
@@ -257,10 +256,10 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			}
 			absPath = filepath.Join(execRoot, evaledPath)
 			for _, p := range parentSymlinks {
-				if _, ok := seenRelPaths[p]; ok {
+				if _, ok := seenAncestorSymlinkRel[p]; ok {
 					continue
 				}
-				seenRelPaths[p] = struct{}{}
+				seenAncestorSymlinkRel[p] = true
 				filesToProcess = append(filesToProcess, p)
 			}
 		} else {
@@ -307,7 +306,16 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 				nodeProperties: np,
 			}
 
-			if !meta.Symlink.IsDangling && opts.FollowsTarget {
+			followsTarget := opts.FollowsTarget
+			if seenAncestorSymlinkRel[normPath] {
+				// Do not follow target if this symlink was only an ancestor and not an explicit input.
+				// Otherwise, the entire tree of the target will be included.
+				followsTarget = false
+				// If the target is also specified as input, it will appear again in the list. Remove the mark here to ensure it gets followed.
+				seenAncestorSymlinkRel[normPath] = false
+			}
+
+			if !meta.Symlink.IsDangling && followsTarget {
 				// getTargetRelPath validates this target is under execRoot,
 				// and the iteration loop will get the relative path to execRoot,
 				filesToProcess = append(filesToProcess, targetExecRoot)

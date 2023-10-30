@@ -968,10 +968,10 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
 			wantCacheCalls: map[string]int{
-				"foobarDir/foo": 2, // 1 via the dir and 1 via the symlink
-				"foobarDir/bar": 2,
-				"foobarDir":     3, // 1 as input, 2 as a real ancestor
-				"foobarSymDir":  3, // 1 as input, 2 as a symlink ancestor
+				"foobarDir/foo": 1, // 1 via the symlink
+				"foobarDir/bar": 1,
+				"foobarSymDir":  3, // 1 as added symlink ancestor, 2 as input ancestor
+				// foobarDir should not have been followed as a target of the symlink since it was not an explicit input.
 			},
 			wantStats: &client.TreeStats{
 				InputDirectories: 2, // Root and foobarDir
@@ -993,7 +993,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 			spec: &command.InputSpec{
 				// The directory symlink is also an input.
-				Inputs:              []string{"foobarSymDir", "foobarSymDir/foo", "foobarSymDir/bar"},
+				// Must appear last to cover the corner case where it is seen as an ancestor before as an input.
+				Inputs:              []string{"foobarSymDir/foo", "foobarSymDir/bar", "foobarSymDir"},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"foobarDir/foo": fooProperties},
 			},
 			rootDir: &repb.Directory{
@@ -1005,8 +1006,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			wantCacheCalls: map[string]int{
 				"foobarDir/foo": 2, // 1 via the dir and 1 via the symlink
 				"foobarDir/bar": 2,
-				"foobarDir":     3, // 1 as input, 2 as a real ancestor
-				"foobarSymDir":  3, // 1 as input, 2 as a symlink ancestor
+				"foobarDir":     3, // 1 as input, 2 as input ancestor
+				"foobarSymDir":  4, // 1 as input, 1 as added symlink ancestor, 2 as input ancestor
 			},
 			wantStats: &client.TreeStats{
 				InputDirectories: 2, // Root and foobarDir
@@ -1038,7 +1039,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			wantCacheCalls: map[string]int{
 				"foobarDir/foo": 2,
 				"foobarDir/bar": 2,
-				"foobarDir":     5, // 2 as an ancestor to input files, 1 as input, 2 as an ancestor to nested files.
+				"foobarDir":     5, // 2 as input ancestor, 1 as input, 2 as nested input ancestor
 			},
 			wantStats: &client.TreeStats{
 				InputDirectories: 2, // Root and foobarDir
@@ -1052,7 +1053,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
-			desc: "Intermediate directory absolute symlink (preserved)",
+			desc: "Intermediate directory absolute symlink and input (preserved)",
 			input: []*inputPath{
 				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
 				{path: "foobarDir/bar", fileContents: barBlob},
@@ -1071,8 +1072,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			wantCacheCalls: map[string]int{
 				"foobarDir/foo": 2, // 1 via the dir and 1 via the symlink
 				"foobarDir/bar": 2,
-				"foobarDir":     3, // 1 as input, 2 as a real ancestor
-				"foobarSymDir":  3, // 1 as input, 2 as a symlink ancestor
+				"foobarDir":     3, // 1 as target of the symlink, 2 as input ancestor
+				"foobarSymDir":  4, // 1 as input, 1 as added symlink ancestor, 2 as input ancestor
 			},
 			wantStats: &client.TreeStats{
 				InputDirectories: 2, // Root and foobarDir
