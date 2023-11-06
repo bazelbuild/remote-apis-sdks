@@ -701,7 +701,7 @@ func (ec *Context) ExecuteRemotely() {
 				}
 			}
 		}
-		if ec.Result.Err == nil && ec.opt.DownloadOutputs {
+		if ec.Result.IsDownloadable() && ec.opt.DownloadOutputs {
 			log.V(1).Infof("%s %s> Downloading outputs...", cmdID, executionID)
 			stats, res := ec.downloadOutputs(ec.cmd.ExecRoot)
 			ec.Metadata.LogicalBytesDownloaded += stats.LogicalMoved

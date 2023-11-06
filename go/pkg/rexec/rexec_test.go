@@ -264,7 +264,7 @@ func TestExecRemoteFailureDownloadsPartialResults(t *testing.T) {
 	}{
 		{
 			name:    "non zero exit",
-			wantRes: &command.Result{ExitCode: 52, Status: command.NonZeroExitResultStatus},
+			wantRes: &command.Result{ExitCode: 52, Status: command.NonZeroExitResultStatus, Err: command.ErrNonZeroExit},
 		},
 		{
 			name:    "remote error",
@@ -340,7 +340,7 @@ func TestDoNotDownloadOutputs(t *testing.T) {
 		{
 			name:     "non zero exit",
 			exitCode: 11,
-			wantRes:  &command.Result{ExitCode: 11, Status: command.NonZeroExitResultStatus},
+			wantRes:  &command.Result{ExitCode: 11, Status: command.NonZeroExitResultStatus, Err: command.ErrNonZeroExit},
 		},
 		{
 			name:    "timeout",
@@ -481,7 +481,7 @@ func TestStreamOutErr(t *testing.T) {
 			hasStdOutStream: true,
 			hasStdErrStream: true,
 			exitCode:        11,
-			wantRes:         &command.Result{ExitCode: 11, Status: command.NonZeroExitResultStatus},
+			wantRes:         &command.Result{ExitCode: 11, Status: command.NonZeroExitResultStatus, Err: command.ErrNonZeroExit},
 			wantStdOut:      "streaming-stdout",
 			wantStdErr:      "streaming-stderr",
 		},

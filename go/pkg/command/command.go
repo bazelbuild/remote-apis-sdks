@@ -378,6 +378,11 @@ var resultStatuses = [...]string{
 	"LocalErrorResultStatus",
 }
 
+var (
+	ErrNonZeroExit = errors.New("command returns non-zero exit code")
+	ErrTimeout     = errors.New("command timeout-exceeded")
+)
+
 // IsOk returns whether the status indicates a successful action.
 func (s ResultStatus) IsOk() bool {
 	return s == SuccessResultStatus || s == CacheHitResultStatus
@@ -403,6 +408,11 @@ type Result struct {
 // IsOk returns whether the result was successful.
 func (r *Result) IsOk() bool {
 	return r.Status.IsOk()
+}
+
+// IsDownloadable returns whether the result or partial result could be downloaded.
+func (r Result) IsDownloadable() bool {
+	return r.Err == nil || r.Err == ErrNonZeroExit || r.Err == ErrTimeout
 }
 
 // LocalErrorExitCode is an exit code corresponding to a local error.
@@ -438,12 +448,15 @@ func NewRemoteErrorResult(err error) *Result {
 // NewResultFromExitCode constructs a Result from a given command exit code.
 func NewResultFromExitCode(exitCode int) *Result {
 	st := SuccessResultStatus
+	var err error
 	if exitCode != 0 {
 		st = NonZeroExitResultStatus
+		err = ErrNonZeroExit
 	}
 	return &Result{
 		ExitCode: exitCode,
 		Status:   st,
+		Err:      err,
 	}
 }
 
@@ -452,6 +465,7 @@ func NewTimeoutResult() *Result {
 	return &Result{
 		ExitCode: TimeoutExitCode,
 		Status:   TimeoutResultStatus,
+		Err:      ErrTimeout,
 	}
 }
 
