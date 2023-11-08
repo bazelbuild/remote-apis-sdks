@@ -331,6 +331,10 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			if shouldIgnore(absPath, command.DirectoryInputType, excl) {
 				continue
 			} else if meta.Err != nil {
+				// Skip files with read permission issues.
+				if e, ok := meta.Err.(*filemetadata.FileError); ok && os.IsPermission(e.Err) {
+					continue
+				}
 				return meta.Err
 			}
 
@@ -358,6 +362,10 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			if shouldIgnore(absPath, command.FileInputType, excl) {
 				continue
 			} else if meta.Err != nil {
+				// Skip files with read permission issues.
+				if e, ok := meta.Err.(*filemetadata.FileError); ok && os.IsPermission(e.Err) {
+					continue
+				}
 				return meta.Err
 			}
 
