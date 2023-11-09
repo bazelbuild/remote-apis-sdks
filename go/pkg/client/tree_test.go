@@ -2123,16 +2123,16 @@ func TestComputeOutputsToUploadFileNoPermissions(t *testing.T) {
 		{path: "wd/foo", fileContents: fooBlob, isExecutable: true},
 		{path: "bar", fileContents: barBlob},
 	}
-	paths :=          []string{"foo", "../bar"}
+	paths := []string{"foo", "../bar"}
 	nodeProperties := map[string]*cpb.NodeProperties{"foo": fooProperties}
-	wd :=             "wd"
-	wantBlob:=      [][]byte{fooBlob}
-	wantResult:= &repb.ActionResult{
+	wd := "wd"
+	wantBlob := [][]byte{fooBlob}
+	wantResult := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
 			&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
 		},
 	}
-	wantCacheCalls:= map[string]int{
+	wantCacheCalls := map[string]int{
 		"bar":    1,
 		"wd/foo": 1,
 	}

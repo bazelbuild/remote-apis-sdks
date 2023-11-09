@@ -111,7 +111,7 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 
 // shouldIgnoreErr returns whether a given error should be ignored.
 func shouldIgnoreErr(err error) bool {
-	// We should skip files without read permissions. If the user doesn't have read permissions, 
+	// We should skip files without read permissions. If the user doesn't have read permissions,
 	// the file is unlikely to be used in the build in the first place.
 	if e, ok := err.(*filemetadata.FileError); ok {
 		return os.IsPermission(e.Err)
