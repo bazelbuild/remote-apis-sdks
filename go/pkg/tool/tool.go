@@ -344,6 +344,10 @@ func (c *Client) writeProto(m proto.Message, baseName string) error {
 //     input tree, as an InputSpec proto file in text format. Will be omitted
 //     if no NodeProperties are defined.
 func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath string, overwrite bool) error {
+	resPb, err := c.getActionResult(ctx, actionDigest)
+	if err != nil {
+		return err
+	}
 	acDg, err := digest.NewFromString(actionDigest)
 	if err != nil {
 		return err
@@ -418,10 +422,21 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 			is.InputNodeProperties[path] = command.NodePropertiesFromAPI(t.NodeProperties)
 		}
 	}
-	if len(is.InputNodeProperties) == 0 {
-		return nil
+	if len(is.InputNodeProperties) != 0 {
+		err = c.writeProto(is, filepath.Join(outputPath, "input_node_properties.textproto"))
+		if err != nil {
+			return err
+		}
 	}
-	return c.writeProto(is, filepath.Join(outputPath, "input_node_properties.textproto"))
+	res, err := c.formatAction(ctx, actionProto, resPb, commandProto, cmdDg)
+	if err != nil {
+		return fmt.Errorf("error formatting action %v", err)
+	}
+	err = os.WriteFile(filepath.Join(outputPath, "action.txt"), []byte(res), 0644)
+	if err != nil {
+		return fmt.Errorf("error dumping to action.txt] %v: %v", outputPath, err)
+	}
+	return nil
 }
 
 func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, error) {
@@ -532,7 +547,6 @@ func (c *Client) ExecuteAction(ctx context.Context, actionDigest, actionRoot, ou
 
 // ShowAction parses and displays an action with its corresponding command.
 func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, error) {
-	var showActionRes bytes.Buffer
 	resPb, err := c.getActionResult(ctx, actionDigest)
 	if err != nil {
 		return "", err
@@ -546,35 +560,35 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 	if _, err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
 		return "", err
 	}
-
-	if actionProto.Timeout != nil {
-		timeout := actionProto.Timeout.AsDuration()
-		showActionRes.WriteString(fmt.Sprintf("Timeout: %s\n", timeout.String()))
-	}
-
 	commandProto := &repb.Command{}
 	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
 	if err != nil {
 		return "", err
 	}
-	showActionRes.WriteString("Command\n=======\n")
-	showActionRes.WriteString(fmt.Sprintf("Command Digest: %v\n", cmdDg))
-
 	log.Infof("Reading command from action digest..")
 	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
 		return "", err
 	}
+	return c.formatAction(ctx, actionProto, resPb, commandProto, cmdDg)
+}
+
+func (c *Client) formatAction(ctx context.Context, actionProto *repb.Action, resPb *repb.ActionResult, commandProto *repb.Command, cmdDg digest.Digest) (string, error) {
+	var showActionRes bytes.Buffer
+	if actionProto.Timeout != nil {
+		timeout := actionProto.Timeout.AsDuration()
+		showActionRes.WriteString(fmt.Sprintf("Timeout: %s\n", timeout.String()))
+	}
+	showActionRes.WriteString("Command\n=======\n")
+	showActionRes.WriteString(fmt.Sprintf("Command Digest: %v\n", cmdDg))
 	for _, ev := range commandProto.GetEnvironmentVariables() {
 		showActionRes.WriteString(fmt.Sprintf("\t%s=%s\n", ev.Name, ev.Value))
 	}
 	cmdStr := strings.Join(commandProto.GetArguments(), " ")
 	showActionRes.WriteString(fmt.Sprintf("\t%v\n", cmdStr))
-
 	showActionRes.WriteString("\nPlatform\n========\n")
 	for _, property := range commandProto.GetPlatform().GetProperties() {
 		showActionRes.WriteString(fmt.Sprintf("\t%s=%s\n", property.Name, property.Value))
 	}
-
 	showActionRes.WriteString("\nInputs\n======\n")
 	log.Infof("Fetching input tree from input root digest..")
 	inpTree, _, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
