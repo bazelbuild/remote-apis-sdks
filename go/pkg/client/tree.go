@@ -109,6 +109,16 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 	return false
 }
 
+// shouldIgnoreErr returns whether a given error should be ignored.
+func shouldIgnoreErr(err error) bool {
+	// We should skip files without read permissions. If the user doesn't have read permissions, 
+	// the file is unlikely to be used in the build in the first place.
+	if e, ok := err.(*filemetadata.FileError); ok {
+		return os.IsPermission(e.Err)
+	}
+	return false
+}
+
 func getRelPath(base, path string) (string, error) {
 	rel, err := filepath.Rel(base, path)
 	if err != nil {
@@ -331,8 +341,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			if shouldIgnore(absPath, command.DirectoryInputType, excl) {
 				continue
 			} else if meta.Err != nil {
-				// Skip files with read permission issues.
-				if e, ok := meta.Err.(*filemetadata.FileError); ok && os.IsPermission(e.Err) {
+				if shouldIgnoreErr(meta.Err) {
 					continue
 				}
 				return meta.Err
@@ -362,8 +371,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			if shouldIgnore(absPath, command.FileInputType, excl) {
 				continue
 			} else if meta.Err != nil {
-				// Skip files with read permission issues.
-				if e, ok := meta.Err.(*filemetadata.FileError); ok && os.IsPermission(e.Err) {
+				if shouldIgnoreErr(meta.Err) {
 					continue
 				}
 				return meta.Err
@@ -702,6 +710,9 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 		if meta.Err != nil {
 			if e, ok := meta.Err.(*filemetadata.FileError); ok && e.IsNotFound {
 				continue // Ignore missing outputs.
+			}
+			if shouldIgnoreErr(meta.Err) {
+				continue
 			}
 			return nil, nil, meta.Err
 		}

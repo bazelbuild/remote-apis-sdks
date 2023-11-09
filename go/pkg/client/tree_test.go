@@ -2118,85 +2118,70 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 }
 
 func TestComputeOutputsToUploadFileNoPermissions(t *testing.T) {
-	tests := []struct {
-		desc           string
-		input          []*inputPath
-		wd             string
-		paths          []string
-		nodeProperties map[string]*cpb.NodeProperties
-		wantResult     *repb.ActionResult
-		wantBlobs      [][]byte
-		wantCacheCalls map[string]int
-	}{
-		{
-			desc: "foo with permissions, bar without permissions",
-			input: []*inputPath{
-				{path: "wd/foo", fileContents: fooBlob, isExecutable: true},
-				{path: "bar", fileContents: barBlob},
-			},
-			paths:          []string{"foo", "bar"},
-			nodeProperties: map[string]*cpb.NodeProperties{"foo": fooProperties},
-			wd:             "wd",
-			wantBlobs:      [][]byte{fooBlob},
-			wantResult: &repb.ActionResult{
-				OutputFiles: []*repb.OutputFile{
-					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
-				},
-			},
-			wantCacheCalls: map[string]int{
-				"bar":    1,
-				"wd/foo": 1,
-			},
+	desc := "foo with permissions, bar without permissions"
+	input := []*inputPath{
+		{path: "wd/foo", fileContents: fooBlob, isExecutable: true},
+		{path: "bar", fileContents: barBlob},
+	}
+	paths :=          []string{"foo", "../bar"}
+	nodeProperties := map[string]*cpb.NodeProperties{"foo": fooProperties}
+	wd :=             "wd"
+	wantBlob:=      [][]byte{fooBlob}
+	wantResult:= &repb.ActionResult{
+		OutputFiles: []*repb.OutputFile{
+			&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
 		},
 	}
-
-	for _, tc := range tests {
-		root := t.TempDir()
-		if err := construct(root, tc.input); err != nil {
-			t.Fatalf("failed to construct input dir structure: %v", err)
-		}
-
-		if err := os.Chmod(filepath.Join(root, "bar"), 0100); err != nil {
-			t.Fatalf("failed to set permissions of bar: %v", err)
-		}
-
-		t.Run(tc.desc, func(t *testing.T) {
-			wantBlobs := make(map[digest.Digest][]byte)
-			for _, b := range tc.wantBlobs {
-				wantBlobs[digest.NewFromBlob(b)] = b
-			}
-
-			gotBlobs := make(map[digest.Digest][]byte)
-			cache := newCallCountingMetadataCache(root, t)
-			e, cleanup := fakes.NewTestEnv(t)
-			defer cleanup()
-
-			inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, tc.wd, tc.paths, cache, command.UnspecifiedSymlinkBehavior, tc.nodeProperties)
-			if err != nil {
-				t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
-			}
-			for _, ue := range inputs {
-				ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
-				if err != nil {
-					t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
-				}
-				blob, err := ch.FullData()
-				if err != nil {
-					t.Errorf("chunker %v FullData() returned error %v", ch, err)
-				}
-				gotBlobs[ue.Digest] = blob
-			}
-			if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
-				t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
-			}
-			if diff := cmp.Diff(tc.wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
-				t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
-			}
-			if diff := cmp.Diff(tc.wantResult, gotResult, cmp.Comparer(proto.Equal)); diff != "" {
-				t.Errorf("ComputeOutputsToUpload(...) gave diff on action result (-want +got) on blobs:\n%s", diff)
-			}
-		})
+	wantCacheCalls:= map[string]int{
+		"bar":    1,
+		"wd/foo": 1,
 	}
+
+	root := t.TempDir()
+	if err := construct(root, input); err != nil {
+		t.Fatalf("failed to construct input dir structure: %v", err)
+	}
+
+	if err := os.Chmod(filepath.Join(root, "bar"), 0100); err != nil {
+		t.Fatalf("failed to set permissions of bar: %v", err)
+	}
+
+	t.Run(desc, func(t *testing.T) {
+		wantBlobs := make(map[digest.Digest][]byte)
+		for _, b := range wantBlob {
+			wantBlobs[digest.NewFromBlob(b)] = b
+		}
+
+		gotBlobs := make(map[digest.Digest][]byte)
+		cache := newCallCountingMetadataCache(root, t)
+		e, cleanup := fakes.NewTestEnv(t)
+		defer cleanup()
+
+		inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, wd, paths, cache, command.UnspecifiedSymlinkBehavior, nodeProperties)
+		if err != nil {
+			t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
+		}
+		for _, ue := range inputs {
+			ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
+			if err != nil {
+				t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
+			}
+			blob, err := ch.FullData()
+			if err != nil {
+				t.Errorf("chunker %v FullData() returned error %v", ch, err)
+			}
+			gotBlobs[ue.Digest] = blob
+		}
+		if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
+			t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
+		}
+		if diff := cmp.Diff(wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
+			t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
+		}
+		if diff := cmp.Diff(wantResult, gotResult, cmp.Comparer(proto.Equal)); diff != "" {
+			t.Errorf("ComputeOutputsToUpload(...) gave diff on action result (-want +got) on blobs:\n%s", diff)
+		}
+	})
 }
 
 func randomBytes(randGen *rand.Rand, n int) []byte {
