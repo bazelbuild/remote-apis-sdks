@@ -428,13 +428,13 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 			return err
 		}
 	}
-	res, err := c.formatActionResStr(ctx, actionProto, resPb, commandProto, cmdDg)
+	res, err := c.formatAction(ctx, actionProto, resPb, commandProto, cmdDg)
 	if err != nil {
-		return fmt.Errorf("error showing action %v: %v", outputPath, err)
+		return fmt.Errorf("error formatting action %v", err)
 	}
-	err = os.WriteFile(filepath.Join(outputPath, "show_action.txt"), []byte(res), 0644)
+	err = os.WriteFile(filepath.Join(outputPath, "action.txt"), []byte(res), 0644)
 	if err != nil {
-		return fmt.Errorf("error dumping to show_action.txt] %v: %v", outputPath, err)
+		return fmt.Errorf("error dumping to action.txt] %v: %v", outputPath, err)
 	}
 	return nil
 }
@@ -569,10 +569,10 @@ func (c *Client) ShowAction(ctx context.Context, actionDigest string) (string, e
 	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
 		return "", err
 	}
-	return c.formatActionResStr(ctx, actionProto, resPb, commandProto, cmdDg)
+	return c.formatAction(ctx, actionProto, resPb, commandProto, cmdDg)
 }
 
-func (c *Client) formatActionResStr(ctx context.Context, actionProto *repb.Action, resPb *repb.ActionResult, commandProto *repb.Command, cmdDg digest.Digest) (string, error) {
+func (c *Client) formatAction(ctx context.Context, actionProto *repb.Action, resPb *repb.ActionResult, commandProto *repb.Command, cmdDg digest.Digest) (string, error) {
 	var showActionRes bytes.Buffer
 	if actionProto.Timeout != nil {
 		timeout := actionProto.Timeout.AsDuration()
