@@ -162,7 +162,10 @@ func getRemotePath(path, workingDir, remoteWorkingDir string) (string, error) {
 }
 
 // getExecRootRelPaths returns local and remote exec-root-relative paths for a given local absolute path
-func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string) (relPath string, remoteRelPath string, err error) {
+// path may be relative or absolute. In both cases it's joined to and relativised to the execRoot.
+// This has unintuitive implications. For example, execRoot=/root and path=/foo, returns relPath=foo.
+func getExecRootRelPaths(path, execRoot, workingDir, remoteWorkingDir string) (relPath string, remoteRelPath string, err error) {
+	absPath := filepath.Join(execRoot, path)
 	if relPath, err = getRelPath(execRoot, absPath); err != nil {
 		return "", "", err
 	}
@@ -172,7 +175,7 @@ func getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir string)
 	if remoteRelPath, err = getRemotePath(relPath, workingDir, remoteWorkingDir); err != nil {
 		return relPath, "", err
 	}
-	log.V(3).Infof("getExecRootRelPaths(%q, %q, %q, %q)=(%q, %q)", absPath, execRoot, workingDir, remoteWorkingDir, relPath, remoteRelPath)
+	log.V(3).Infof("getExecRootRelPaths(%q, %q, %q, %q)=(%q, %q)", path, execRoot, workingDir, remoteWorkingDir, relPath, remoteRelPath)
 	return relPath, remoteRelPath, nil
 }
 
@@ -237,6 +240,42 @@ func evalParentSymlinks(execRoot, relPath string, materializeOutsideExecRoot boo
 	return evaledPathBuilder.String(), symlinks, nil
 }
 
+// loadIntermediateSymlinks inserts symlink nodes into fs.
+// If the symlink source path already exists in fs (e.g. a for a-->../a_file), it is not
+// overwritten, which means the first entry wins.
+// This helps avoid redundant allocations from shared ancestors.
+// For example, if fs["a/b/c"] is already associated with a symlink node with target ../c_target, and symlinks has
+// "a/b/c"-->../cc_target, the result will not change and fs["a/b/c"] will still point to ../c_target.
+// However, the case should always be that the target is identical.
+func loadIntermediateSymlinks(symlinks []string, execRoot, workingDir, remoteWorkingDir string, cache filemetadata.Cache, fs map[string]*fileSysNode) error {
+	for _, relPath := range symlinks {
+		relPath, remoteRelPath, err := getExecRootRelPaths(relPath, execRoot, workingDir, remoteWorkingDir)
+		if err != nil {
+			return err
+		}
+		// Only skip if the path is already associated with a symlink node.
+		// This also means that an existing non-symlink node will get overwritten.
+		if n := fs[remoteRelPath]; n != nil && n.symlink != nil {
+			log.V(3).Infof("loadIntermediateSymlinks.Skipped: symlink=%s", relPath)
+			continue
+		}
+		absPath := filepath.Join(execRoot, relPath)
+		meta := cache.Get(absPath)
+		if meta.Symlink == nil {
+			return fmt.Errorf("%q is not a symlink", absPath)
+		}
+		_, targetSymDir, err := getTargetRelPath(execRoot, relPath, meta.Symlink.Target)
+		if err != nil {
+			return err
+		}
+		fs[remoteRelPath] = &fileSysNode{
+			symlink: &symlinkNode{target: targetSymDir},
+		}
+		log.V(3).Infof("loadIntermediateSymlinks: symlink=%s", relPath)
+	}
+	return nil
+}
+
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
 func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts, nodeProperties map[string]*cpb.NodeProperties) error {
@@ -244,38 +283,26 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 		opts = DefaultTreeSymlinkOpts()
 	}
 
-	var seenAncestorSymlinkRel map[string]bool
-	if opts.Preserved {
-		// Remember ancestor symlinks to avoid redundant processing for shared ancestors.
-		// This ensures that an ancestor symlink is only ever added once to the list.
-		seenAncestorSymlinkRel = make(map[string]bool, len(filesToProcess))
-	}
 	for len(filesToProcess) != 0 {
-		path := filesToProcess[0]
+		relPath := filesToProcess[0]
 		filesToProcess = filesToProcess[1:]
 
-		if path == "" {
+		if relPath == "" {
 			return errors.New("empty Input, use \".\" for entire exec root")
 		}
-		var absPath string
 		if opts.Preserved {
-			evaledPath, parentSymlinks, err := evalParentSymlinks(execRoot, path, opts.MaterializeOutsideExecRoot, cache)
-			log.V(3).Infof("loadFiles: path=%s, evaled=%s, parentSymlinks=%v, err=%v", path, evaledPath, parentSymlinks, err)
+			evaledPath, parentSymlinks, err := evalParentSymlinks(execRoot, relPath, opts.MaterializeOutsideExecRoot, cache)
+			log.V(3).Infof("loadFiles: path=%s, evaled=%s, parentSymlinks=%v, err=%v", relPath, evaledPath, parentSymlinks, err)
 			if err != nil {
 				return err
 			}
-			absPath = filepath.Join(execRoot, evaledPath)
-			for _, p := range parentSymlinks {
-				if _, ok := seenAncestorSymlinkRel[p]; ok {
-					continue
-				}
-				seenAncestorSymlinkRel[p] = true
-				filesToProcess = append(filesToProcess, p)
+			relPath = evaledPath
+			if err := loadIntermediateSymlinks(parentSymlinks, execRoot, localWorkingDir, remoteWorkingDir, cache, fs); err != nil {
+				return err
 			}
-		} else {
-			absPath = filepath.Join(execRoot, path)
 		}
-		normPath, remoteNormPath, err := getExecRootRelPaths(absPath, execRoot, localWorkingDir, remoteWorkingDir)
+		absPath := filepath.Join(execRoot, relPath)
+		normPath, remoteNormPath, err := getExecRootRelPaths(relPath, execRoot, localWorkingDir, remoteWorkingDir)
 		if err != nil {
 			return err
 		}
@@ -316,16 +343,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 				nodeProperties: np,
 			}
 
-			followsTarget := opts.FollowsTarget
-			if seenAncestorSymlinkRel[normPath] {
-				// Do not follow target if this symlink was only an ancestor and not an explicit input.
-				// Otherwise, the entire tree of the target will be included.
-				followsTarget = false
-				// If the target is also specified as input, it will appear again in the list. Remove the mark here to ensure it gets followed.
-				seenAncestorSymlinkRel[normPath] = false
-			}
-
-			if !meta.Symlink.IsDangling && followsTarget {
+			if !meta.Symlink.IsDangling && opts.FollowsTarget {
 				// getTargetRelPath validates this target is under execRoot,
 				// and the iteration loop will get the relative path to execRoot,
 				filesToProcess = append(filesToProcess, targetExecRoot)
@@ -337,6 +355,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 		}
 
 	processNonSymlink:
+		log.V(3).Infof("loadFiles.non-sl: path=%s", relPath)
 		if meta.IsDirectory {
 			if shouldIgnore(absPath, command.DirectoryInputType, excl) {
 				continue
@@ -393,12 +412,24 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, remoteWorkingDir string, is *command.InputSpec, cache filemetadata.Cache) (root digest.Digest, inputs []*uploadinfo.Entry, stats *TreeStats, err error) {
 	stats = &TreeStats{}
 	fs := make(map[string]*fileSysNode)
+	slOpts := treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior)
 	for _, i := range is.VirtualInputs {
 		if i.Path == "" {
 			return digest.Empty, nil, nil, errors.New("empty Path in VirtualInputs")
 		}
-		absPath := filepath.Join(execRoot, i.Path)
-		normPath, remoteNormPath, err := getExecRootRelPaths(absPath, execRoot, workingDir, remoteWorkingDir)
+		path := i.Path
+		if slOpts.Preserved {
+			evaledPath, parentSymlinks, err := evalParentSymlinks(execRoot, path, slOpts.MaterializeOutsideExecRoot, cache)
+			log.V(3).Infof("ComputeMerkleTree.VirtualInput: path=%s, evaled=%s, parentSymlinks=%v, err=%v", path, evaledPath, parentSymlinks, err)
+			if err != nil {
+				return digest.Empty, nil, nil, err
+			}
+			path = evaledPath
+			if err := loadIntermediateSymlinks(parentSymlinks, execRoot, workingDir, remoteWorkingDir, cache, fs); err != nil {
+				return digest.Empty, nil, nil, err
+			}
+		}
+		normPath, remoteNormPath, err := getExecRootRelPaths(path, execRoot, workingDir, remoteWorkingDir)
 		if err != nil {
 			return digest.Empty, nil, nil, err
 		}
@@ -417,7 +448,7 @@ func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, re
 			nodeProperties: np,
 		}
 	}
-	if err := loadFiles(execRoot, workingDir, remoteWorkingDir, is.InputExclusions, is.Inputs, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, is.SymlinkBehavior), is.InputNodeProperties); err != nil {
+	if err := loadFiles(execRoot, workingDir, remoteWorkingDir, is.InputExclusions, is.Inputs, fs, cache, slOpts, is.InputNodeProperties); err != nil {
 		return digest.Empty, nil, nil, err
 	}
 	ft, err := buildTree(fs)

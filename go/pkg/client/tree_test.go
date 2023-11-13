@@ -985,6 +985,41 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "Intermediate virtual directory relative symlink (preserved)",
+			input: []*inputPath{
+				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
+				{path: "foobarDir/bar", fileContents: barBlob},
+				{path: "foobarSymDir", isSymlink: true, relSymlinkTarget: "foobarDir"},
+			},
+			spec: &command.InputSpec{
+				VirtualInputs: []*command.VirtualInput{
+					{Path: "foobarSymDir/foo", Contents: fooBlob, IsExecutable: true},
+					{Path: "foobarSymDir/bar", Contents: barBlob},
+				},
+				InputNodeProperties: map[string]*cpb.NodeProperties{"foobarDir/foo": fooProperties},
+			},
+			rootDir: &repb.Directory{
+				// foobarSymDir should not be a directory.
+				Directories: []*repb.DirectoryNode{{Name: "foobarDir", Digest: foobarDirDgPb}},
+				Symlinks:    []*repb.SymlinkNode{{Name: "foobarSymDir", Target: "foobarDir"}},
+			},
+			additionalBlobs: [][]byte{fooBlob, barBlob, foobarDirBlob},
+			wantCacheCalls: map[string]int{
+				"foobarSymDir": 3, // 1 as added symlink ancestor, 2 as input ancestor
+				// foobarDir should not have been followed as a target of the symlink since it was not an explicit input.
+			},
+			wantStats: &client.TreeStats{
+				InputDirectories: 2, // Root and foobarDir
+				InputFiles:       2,
+				InputSymlinks:    1,
+				TotalInputBytes:  fooDg.Size + barDg.Size + foobarDirDg.Size,
+			},
+			treeOpts: &client.TreeSymlinkOpts{
+				Preserved:     true,
+				FollowsTarget: true,
+			},
+		},
+		{
 			desc: "Intermediate directory relative symlink and input (preserved)",
 			input: []*inputPath{
 				{path: "foobarDir/foo", fileContents: fooBlob, isExecutable: true},
@@ -1073,7 +1108,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				"foobarDir/foo": 2, // 1 via the dir and 1 via the symlink
 				"foobarDir/bar": 2,
 				"foobarDir":     3, // 1 as target of the symlink, 2 as input ancestor
-				"foobarSymDir":  4, // 1 as input, 1 as added symlink ancestor, 2 as input ancestor
+				"foobarSymDir":  3, // 1 as input, 2 as input ancestor
 			},
 			wantStats: &client.TreeStats{
 				InputDirectories: 2, // Root and foobarDir
