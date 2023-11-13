@@ -2118,7 +2118,6 @@ func TestComputeOutputsToUploadDirectories(t *testing.T) {
 }
 
 func TestComputeOutputsToUploadFileNoPermissions(t *testing.T) {
-	desc := "foo with permissions, bar without permissions"
 	input := []*inputPath{
 		{path: "wd/foo", fileContents: fooBlob, isExecutable: true},
 		{path: "bar", fileContents: barBlob},
@@ -2146,42 +2145,40 @@ func TestComputeOutputsToUploadFileNoPermissions(t *testing.T) {
 		t.Fatalf("failed to set permissions of bar: %v", err)
 	}
 
-	t.Run(desc, func(t *testing.T) {
-		wantBlobs := make(map[digest.Digest][]byte)
-		for _, b := range wantBlob {
-			wantBlobs[digest.NewFromBlob(b)] = b
-		}
+	wantBlobs := make(map[digest.Digest][]byte)
+	for _, b := range wantBlob {
+		wantBlobs[digest.NewFromBlob(b)] = b
+	}
 
-		gotBlobs := make(map[digest.Digest][]byte)
-		cache := newCallCountingMetadataCache(root, t)
-		e, cleanup := fakes.NewTestEnv(t)
-		defer cleanup()
+	gotBlobs := make(map[digest.Digest][]byte)
+	cache := newCallCountingMetadataCache(root, t)
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
 
-		inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, wd, paths, cache, command.UnspecifiedSymlinkBehavior, nodeProperties)
+	inputs, gotResult, err := e.Client.GrpcClient.ComputeOutputsToUpload(root, wd, paths, cache, command.UnspecifiedSymlinkBehavior, nodeProperties)
+	if err != nil {
+		t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
+	}
+	for _, ue := range inputs {
+		ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
 		if err != nil {
-			t.Errorf("ComputeOutputsToUpload(...) = gave error %v, want success", err)
+			t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
 		}
-		for _, ue := range inputs {
-			ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
-			if err != nil {
-				t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
-			}
-			blob, err := ch.FullData()
-			if err != nil {
-				t.Errorf("chunker %v FullData() returned error %v", ch, err)
-			}
-			gotBlobs[ue.Digest] = blob
+		blob, err := ch.FullData()
+		if err != nil {
+			t.Errorf("chunker %v FullData() returned error %v", ch, err)
 		}
-		if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
-			t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
-		}
-		if diff := cmp.Diff(wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
-			t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
-		}
-		if diff := cmp.Diff(wantResult, gotResult, cmp.Comparer(proto.Equal)); diff != "" {
-			t.Errorf("ComputeOutputsToUpload(...) gave diff on action result (-want +got) on blobs:\n%s", diff)
-		}
-	})
+		gotBlobs[ue.Digest] = blob
+	}
+	if diff := cmp.Diff(wantBlobs, gotBlobs); diff != "" {
+		t.Errorf("ComputeOutputsToUpload(...) gave diff (-want +got) on blobs:\n%s", diff)
+	}
+	if diff := cmp.Diff(wantCacheCalls, cache.calls, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("ComputeOutputsToUpload(...) gave diff on file metadata cache access (-want +got) on blobs:\n%s", diff)
+	}
+	if diff := cmp.Diff(wantResult, gotResult, cmp.Comparer(proto.Equal)); diff != "" {
+		t.Errorf("ComputeOutputsToUpload(...) gave diff on action result (-want +got) on blobs:\n%s", diff)
+	}
 }
 
 func randomBytes(randGen *rand.Rand, n int) []byte {
