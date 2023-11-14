@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -404,6 +405,10 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 		return err
 	}
 
+	if err := c.writeExecScript(ctx, commandProto, filepath.Join(outputPath, "run_locally.sh")); err != nil {
+		return err
+	}
+
 	log.Infof("Fetching input tree from input root digest.. %v", actionProto.GetInputRootDigest())
 	rootPath := filepath.Join(outputPath, "input")
 	os.RemoveAll(rootPath)
@@ -437,6 +442,55 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 		return fmt.Errorf("error dumping to action.txt] %v: %v", outputPath, err)
 	}
 	return nil
+}
+
+func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filename string) error {
+	if cmd == nil {
+		return fmt.Errorf("invalid comment (nil)")
+	}
+
+	var runActionScript bytes.Buffer
+	runActionFilename := filepath.Join(filepath.Dir(filename), "run_command.sh")
+	wd := cmd.WorkingDirectory
+	execCmd := strings.Join(cmd.GetArguments(), " ")
+	runActionScript.WriteString(fmt.Sprintf("#!/bin/bash\n\n"))
+	runActionScript.WriteString(fmt.Sprintf("# This script is meant to be called by %v.\n", filename))
+	if wd != "" {
+		runActionScript.WriteString(fmt.Sprintf("cd %v\n", wd))
+	}
+	for _, od := range cmd.GetOutputDirectories() {
+		runActionScript.WriteString(fmt.Sprintf("mkdir -p %v\n", od))
+	}
+	for _, of := range cmd.GetOutputFiles() {
+		runActionScript.WriteString(fmt.Sprintf("mkdir -p %v\n", filepath.Dir(of)))
+	}
+	for _, e := range cmd.GetEnvironmentVariables() {
+		runActionScript.WriteString(fmt.Sprintf("export %v=%v\n", e.GetName(), e.GetValue()))
+	}
+	runActionScript.WriteString(fmt.Sprintf("%v\n", execCmd))
+	runActionScript.WriteString(fmt.Sprintf("bash\n"))
+	if err := ioutil.WriteFile(runActionFilename, runActionScript.Bytes(), 0755); err != nil {
+		return err
+	}
+
+	var container string
+	for _, property := range cmd.Platform.GetProperties() {
+		if property.Name == "container-image" {
+			container = strings.TrimPrefix(property.Value, "docker://")
+		}
+	}
+	if container == "" {
+		return fmt.Errorf("container-image platform property missing from command proto: %v", cmd)
+	}
+	var execScript bytes.Buffer
+	dockerCmd := fmt.Sprintf("docker run -i -t -w /b/f/w -v `pwd`/input:/b/f/w -v `pwd`/run_command.sh:/b/f/w/run_command.sh %v ./run_command.sh\n", container)
+	execScript.WriteString(fmt.Sprintf("#!/bin/bash\n\n"))
+	execScript.WriteString(fmt.Sprintf("# This script can be used to run the action locally on\n"))
+	execScript.WriteString(fmt.Sprintf("# this machine.\n"))
+	execScript.WriteString(fmt.Sprintf("echo \"WARNING: The results from executing the action through this script may differ from results from RBE.\"\n"))
+	execScript.WriteString(fmt.Sprintf("set -x\n"))
+	execScript.WriteString(dockerCmd)
+	return ioutil.WriteFile(filename, execScript.Bytes(), 0755)
 }
 
 func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, error) {
