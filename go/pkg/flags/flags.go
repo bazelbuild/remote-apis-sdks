@@ -106,12 +106,16 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		opts = append(opts, client.RPCTimeouts(timeouts))
 	}
 	var perRPCCreds *client.PerRPCCreds
+	tOpts := []client.Opt{}
 	for _, opt := range opts {
 		switch opt.(type) {
 		case *client.PerRPCCreds:
 			perRPCCreds = (opt).(*(client.PerRPCCreds))
+		default:
+			tOpts = append(tOpts, opt)
 		}
 	}
+	opts = tOpts
 
 	dialOpts := make([]grpc.DialOption, 0)
 	if *KeepAliveTime > 0*time.Second {
