@@ -24,6 +24,7 @@ go_library(
         "//go/pkg/command",
         "//go/pkg/contextmd",
         "//go/pkg/digest",
+        "//go/pkg/diskcache",
         "//go/pkg/filemetadata",
         "//go/pkg/retry",
         "//go/pkg/uploadinfo",

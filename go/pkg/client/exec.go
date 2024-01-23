@@ -98,13 +98,23 @@ func (c *Client) ExecuteAction(ctx context.Context, ac *Action) (*repb.ActionRes
 }
 
 // CheckActionCache queries remote action cache, returning an ActionResult or nil if it doesn't exist.
-func (c *Client) CheckActionCache(ctx context.Context, acDg *repb.Digest) (*repb.ActionResult, error) {
+func (c *Client) CheckActionCache(ctx context.Context, dg digest.Digest) (*repb.ActionResult, error) {
+	if c.diskCache != nil {
+		if res, loaded := c.diskCache.LoadActionCache(dg); loaded {
+			return res, nil
+		}
+	}
 	res, err := c.GetActionResult(ctx, &repb.GetActionResultRequest{
 		InstanceName: c.InstanceName,
-		ActionDigest: acDg,
+		ActionDigest: dg.ToProto(),
 	})
 	switch st, _ := status.FromError(err); st.Code() {
 	case codes.OK:
+		if c.diskCache != nil {
+			if err := c.diskCache.StoreActionCache(dg, res); err != nil {
+				log.Errorf("error storing ActionResult of %s to disk cache: %v", dg, err)
+			}
+		}
 		return res, nil
 	case codes.NotFound:
 		return nil, nil
@@ -166,12 +176,13 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshalling Action proto: %w", err)
 	}
-	acDg := digest.NewFromBlob(acBlob).ToProto()
+	dg := digest.NewFromBlob(acBlob)
+	acDg := dg.ToProto()
 
 	// If the result is cacheable, check if it's already in the cache.
 	if !ac.DoNotCache || !ac.SkipCache {
 		log.V(1).Info("Checking cache")
-		res, err := c.CheckActionCache(ctx, acDg)
+		res, err := c.CheckActionCache(ctx, dg)
 		if err != nil {
 			return nil, nil, err
 		}

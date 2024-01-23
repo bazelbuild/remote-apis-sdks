@@ -101,6 +101,17 @@ func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 			symlinks = append(symlinks, out)
 			continue
 		}
+		if c.diskCache != nil {
+			absPath := out.Path
+			if !filepath.IsAbs(absPath) {
+				absPath = filepath.Join(outDir, absPath)
+			}
+			if c.diskCache.LoadCas(out.Digest, absPath) {
+				fullStats.Requested += out.Digest.Size
+				fullStats.Cached += out.Digest.Size
+				continue
+			}
+		}
 		if _, ok := downloads[out.Digest]; ok {
 			copies = append(copies, out)
 			// All copies are effectivelly cached
@@ -128,6 +139,11 @@ func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 		}
 		if err := cache.Update(absPath, md); err != nil {
 			return fullStats, err
+		}
+		if c.diskCache != nil {
+			if err := c.diskCache.StoreCas(output.Digest, absPath); err != nil {
+				return fullStats, err
+			}
 		}
 	}
 	for _, out := range copies {

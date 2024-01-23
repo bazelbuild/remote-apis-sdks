@@ -79,6 +79,10 @@ var (
 	UseRoundRobinBalancer = flag.Bool("use_round_robin_balancer", false, "If true, a round-robin connection bool is used for gRPC. Otherwise, the existing load balancer is used.")
 	// RoundRobinBalancerPoolSize specifies the pool size for the round robin balancer.
 	RoundRobinBalancerPoolSize = flag.Int("round_robin_balancer_pool_size", client.DefaultMaxConcurrentRequests, "pool size for round robin grpc balacner")
+	// DiskCachePath, if set, adds a local disk cache for downloaded outputs and action cache results.
+	DiskCachePath = flag.String("disk_cache_path", "", "If set, will use a local disk cache for downloaded outputs.")
+	// DiskCacheCapacityGb specifies a maximum limit in GB to store in the local disk cache. A no-op if --disk_cache_path is not set.
+	DiskCacheCapacityGb = flag.Float64("disk_cache_max_gb", 1.0, "Maximum GB to store in the local disk cache. A no-op if --disk_cache_path is not set.")
 )
 
 func init() {
@@ -94,7 +98,15 @@ func init() {
 // NewClientFromFlags connects to a remote execution service and returns a client suitable for higher-level
 // functionality. It uses the flags from above to configure the connection to remote execution.
 func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
-	opts = append(opts, []client.Opt{client.CASConcurrency(*CASConcurrency), client.StartupCapabilities(*StartupCapabilities)}...)
+	opts = append(opts, []client.Opt{
+		client.CASConcurrency(*CASConcurrency),
+		client.StartupCapabilities(*StartupCapabilities),
+		&client.DiskCacheOpts{
+			Context:       ctx,
+			Path:          *DiskCachePath,
+			MaxCapacityGb: *DiskCacheCapacityGb,
+		},
+	}...)
 	if len(RPCTimeouts) > 0 {
 		timeouts := make(map[string]time.Duration)
 		for rpc, d := range client.DefaultRPCTimeouts {
