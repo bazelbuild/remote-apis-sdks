@@ -19,6 +19,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/diskcache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"github.com/pkg/errors"
@@ -188,6 +189,7 @@ type Client struct {
 	uploadOnce          sync.Once
 	downloadOnce        sync.Once
 	useBatchCompression UseBatchCompression
+	diskCache           *diskcache.DiskCache
 }
 
 const (
@@ -331,6 +333,20 @@ func (s UnifiedDownloadTickDuration) Apply(c *Client) {
 // Apply sets the client's TreeSymlinkOpts.
 func (o *TreeSymlinkOpts) Apply(c *Client) {
 	c.TreeSymlinkOpts = o
+}
+
+type DiskCacheOpts struct {
+	Context       context.Context
+	Path          string
+	MaxCapacityGb float64
+}
+
+// Apply sets the client's TreeSymlinkOpts.
+func (o *DiskCacheOpts) Apply(c *Client) {
+	if o.Path != "" {
+		capBytes := uint64(o.MaxCapacityGb * 1024 * 1024 * 1024)
+		c.diskCache = diskcache.New(o.Context, o.Path, capBytes)
+	}
 }
 
 // MaxBatchDigests is maximum amount of digests to batch in upload and download operations.

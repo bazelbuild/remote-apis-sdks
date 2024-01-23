@@ -74,6 +74,8 @@ var (
 	KeepAliveTimeout = flag.Duration("grpc_keepalive_timeout", 20*time.Second, "After having pinged for keepalive check, the client waits for a duration of Timeout and if no activity is seen even after that the connection is closed. Default is 20s.")
 	// KeepAlivePermitWithoutStream specifies gRPCs keepalive permitWithoutStream parameter.
 	KeepAlivePermitWithoutStream = flag.Bool("grpc_keepalive_permit_without_stream", false, "If true, client sends keepalive pings even with no active RPCs; otherwise, doesn't send pings even if time and timeout are set. Default is false.")
+	DiskCachePath                = flag.String("disk_cache_path", "", "If set, will use a local disk cache for downloaded outputs.")
+	DiskCacheCapacityGb          = flag.Float64("disk_cache_max_gb", 1.0, "Maximum GB to store in the local disk cache. A Noop if --disk_cas_path is not set.")
 )
 
 func init() {
@@ -89,7 +91,15 @@ func init() {
 // NewClientFromFlags connects to a remote execution service and returns a client suitable for higher-level
 // functionality. It uses the flags from above to configure the connection to remote execution.
 func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
-	opts = append(opts, []client.Opt{client.CASConcurrency(*CASConcurrency), client.StartupCapabilities(*StartupCapabilities)}...)
+	opts = append(opts, []client.Opt{
+		client.CASConcurrency(*CASConcurrency),
+		client.StartupCapabilities(*StartupCapabilities),
+		&client.DiskCacheOpts{
+			Context:       ctx,
+			Path:          *DiskCachePath,
+			MaxCapacityGb: *DiskCacheCapacityGb,
+		},
+	}...)
 	if len(RPCTimeouts) > 0 {
 		timeouts := make(map[string]time.Duration)
 		for rpc, d := range client.DefaultRPCTimeouts {
