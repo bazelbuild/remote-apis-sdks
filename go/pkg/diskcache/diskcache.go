@@ -116,6 +116,11 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
 	}
 	heap.Init(res.queue)
 	_ = os.MkdirAll(root, os.ModePerm)
+	// We use Git's directory/file naming structure as inspiration:
+	// https://git-scm.com/book/en/v2/Git-Internals-Git-Objects#:~:text=The%20subdirectory%20is%20named%20with%20the%20first%202%20characters%20of%20the%20SHA%2D1%2C%20and%20the%20filename%20is%20the%20remaining%2038%20characters.
+	for i := 0; i < 256; i++ {
+		_ = os.MkdirAll(filepath.Join(root, fmt.Sprintf("%02x", i)), os.ModePerm)
+	}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		// We log and continue on all errors, because cache read errors are not critical.
 		if err != nil {
@@ -125,15 +130,15 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
 		if d.IsDir() {
 			return nil
 		}
-		fname := d.Name()
-		k, err := res.getKeyFromFileName(fname)
+		subdir := filepath.Base(filepath.Dir(path))
+		k, err := res.getKeyFromFileName(subdir + d.Name())
 		if err != nil {
-			log.Errorf("Error parsing cached file name %s: %v", fname, err)
+			log.Errorf("Error parsing cached file name %s: %v", path, err)
 			return nil
 		}
-		atime, err := GetLastAccessTime(filepath.Join(root, fname))
+		atime, err := GetLastAccessTime(path)
 		if err != nil {
-			log.Errorf("Error getting last accessed time of %s: %v", fname, err)
+			log.Errorf("Error getting last accessed time of %s: %v", path, err)
 			return nil
 		}
 		it := &qitem{
@@ -142,7 +147,7 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
 		}
 		size, err := res.getItemSize(k)
 		if err != nil {
-			log.Errorf("Error getting file size of %s: %v", fname, err)
+			log.Errorf("Error getting file size of %s: %v", path, err)
 			return nil
 		}
 		res.store.Store(k, it)
@@ -175,25 +180,25 @@ func (d *DiskCache) TotalSizeBytes() uint64 {
 	return uint64(atomic.LoadInt64(&d.sizeBytes))
 }
 
-// This function is defined in https://pkg.go.dev/strings#CutPrefix
+// This function is defined in https://pkg.go.dev/strings#CutSuffix
 // It is copy/pasted here as a hack, because I failed to upgrade the *Reclient* repo to the latest Go 1.20.7.
-func CutPrefix(s, prefix string) (after string, found bool) {
-	if !strings.HasPrefix(s, prefix) {
+func CutSuffix(s, suffix string) (before string, found bool) {
+	if !strings.HasSuffix(s, suffix) {
 		return s, false
 	}
-	return s[len(prefix):], true
+	return s[:len(s)-len(suffix)], true
 }
 
 func (d *DiskCache) getKeyFromFileName(fname string) (key, error) {
 	pair := strings.Split(fname, ".")
 	if len(pair) != 2 {
-		return key{}, fmt.Errorf("Expected file name in the form [ac_]hash/size, got %s", fname)
+		return key{}, fmt.Errorf("expected file name in the form [ac_]hash/size, got %s", fname)
 	}
 	size, err := strconv.ParseInt(pair[1], 10, 64)
 	if err != nil {
 		return key{}, fmt.Errorf("invalid size in digest %s: %s", fname, err)
 	}
-	hash, isAc := CutPrefix(pair[0], "ac_")
+	hash, isAc := CutSuffix(pair[0], "ac_")
 	dg, err := digest.New(hash, size)
 	if err != nil {
 		return key{}, fmt.Errorf("invalid digest from file name %s: %v", fname, err)
@@ -202,11 +207,11 @@ func (d *DiskCache) getKeyFromFileName(fname string) (key, error) {
 }
 
 func (d *DiskCache) getPath(k key) string {
-	prefix := ""
+	suffix := ""
 	if !k.isCas {
-		prefix = "ac_"
+		suffix = "_ac"
 	}
-	return filepath.Join(d.root, fmt.Sprintf("%s%s.%d", prefix, k.digest.Hash, k.digest.Size))
+	return filepath.Join(d.root, k.digest.Hash[:2], fmt.Sprintf("%s%s.%d", k.digest.Hash[2:], suffix, k.digest.Size))
 }
 
 func (d *DiskCache) StoreCas(dg digest.Digest, path string) error {
@@ -292,6 +297,7 @@ func (d *DiskCache) gc() {
 				}
 				atomic.AddInt64(&d.sizeBytes, -size)
 				it.mu.Lock()
+				// We only delete the files, and not the prefix directories, because the prefixes are not worth worrying about.
 				if err := os.Remove(d.getPath(it.key)); err != nil {
 					log.Errorf("Error removing file: %v", err)
 				}
