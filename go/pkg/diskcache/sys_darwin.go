@@ -1,4 +1,4 @@
-// Utility to get the last accessed time on Darwin.
+// System utilities that differ between OS implementations.
 package diskcache
 
 import (
