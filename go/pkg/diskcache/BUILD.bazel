@@ -3,10 +3,10 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "diskcache",
     srcs = [
-        "atim_darwin.go",
-        "atim_linux.go",
-        "atim_windows.go",
         "diskcache.go",
+        "sys_darwin.go",
+        "sys_linux.go",
+        "sys_windows.go",
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/diskcache",
     visibility = ["//visibility:public"],
