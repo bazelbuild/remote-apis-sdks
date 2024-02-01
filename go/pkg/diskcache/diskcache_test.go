@@ -21,12 +21,9 @@ import (
 
 // Test utility only. Assumes all modifications are done, and at least one GC is expected.
 func waitForGc(d *DiskCache) {
-	for {
-		select {
-		case t := <-d.testGcTicks:
-			if t == d.gcTick {
-				return
-			}
+	for t := range d.testGcTicks {
+		if t == d.gcTick {
+			return
 		}
 	}
 }

@@ -118,43 +118,52 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
 	_ = os.MkdirAll(root, os.ModePerm)
 	// We use Git's directory/file naming structure as inspiration:
 	// https://git-scm.com/book/en/v2/Git-Internals-Git-Objects#:~:text=The%20subdirectory%20is%20named%20with%20the%20first%202%20characters%20of%20the%20SHA%2D1%2C%20and%20the%20filename%20is%20the%20remaining%2038%20characters.
+	var wg sync.WaitGroup
+	wg.Add(256)
 	for i := 0; i < 256; i++ {
-		_ = os.MkdirAll(filepath.Join(root, fmt.Sprintf("%02x", i)), os.ModePerm)
+		prefixDir := filepath.Join(root, fmt.Sprintf("%02x", i))
+		go func() {
+			defer wg.Done()
+			_ = os.MkdirAll(prefixDir, os.ModePerm)
+			_ = filepath.WalkDir(prefixDir, func(path string, d fs.DirEntry, err error) error {
+				// We log and continue on all errors, because cache read errors are not critical.
+				if err != nil {
+					log.Errorf("Error reading cache directory: %v", err)
+					return nil
+				}
+				if d.IsDir() {
+					return nil
+				}
+				subdir := filepath.Base(filepath.Dir(path))
+				k, err := res.getKeyFromFileName(subdir + d.Name())
+				if err != nil {
+					log.Errorf("Error parsing cached file name %s: %v", path, err)
+					return nil
+				}
+				atime, err := GetLastAccessTime(path)
+				if err != nil {
+					log.Errorf("Error getting last accessed time of %s: %v", path, err)
+					return nil
+				}
+				it := &qitem{
+					key: k,
+					lat: atime,
+				}
+				size, err := res.getItemSize(k)
+				if err != nil {
+					log.Errorf("Error getting file size of %s: %v", path, err)
+					return nil
+				}
+				res.store.Store(k, it)
+				atomic.AddInt64(&res.sizeBytes, size)
+				res.mu.Lock()
+				heap.Push(res.queue, it)
+				res.mu.Unlock()
+				return nil
+			})
+		}()
 	}
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		// We log and continue on all errors, because cache read errors are not critical.
-		if err != nil {
-			log.Errorf("Error reading cache directory: %v", err)
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		subdir := filepath.Base(filepath.Dir(path))
-		k, err := res.getKeyFromFileName(subdir + d.Name())
-		if err != nil {
-			log.Errorf("Error parsing cached file name %s: %v", path, err)
-			return nil
-		}
-		atime, err := GetLastAccessTime(path)
-		if err != nil {
-			log.Errorf("Error getting last accessed time of %s: %v", path, err)
-			return nil
-		}
-		it := &qitem{
-			key: k,
-			lat: atime,
-		}
-		size, err := res.getItemSize(k)
-		if err != nil {
-			log.Errorf("Error getting file size of %s: %v", path, err)
-			return nil
-		}
-		res.store.Store(k, it)
-		atomic.AddInt64(&res.sizeBytes, size)
-		heap.Push(res.queue, it)
-		return nil
-	})
+	wg.Wait()
 	go res.gc()
 	return res
 }
