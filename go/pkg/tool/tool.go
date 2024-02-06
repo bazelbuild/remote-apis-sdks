@@ -326,6 +326,20 @@ func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string)
 	return err
 }
 
+// UploadDirectory uploads a directory the specified path as a Merkle-tree to the remote cache.
+func (c *Client) UploadDirectory(ctx context.Context, path string) error {
+	log.Infof("Computing Merkle tree rooted at %s.", path)
+	root, blobs, stats, err := c.GrpcClient.ComputeMerkleTree(ctx, path, "", "", &command.InputSpec{Inputs: []string{"."}}, filemetadata.NewNoopCache())
+	if err != nil {
+		return err
+	}
+	log.Infof("Directory root digest: %v", root)
+	log.Infof("Directory stats: %d files, %d directories, %d symlinks, %d total bytes", stats.InputFiles, stats.InputDirectories, stats.InputSymlinks, stats.TotalInputBytes)
+	log.Infof("Uploading directory %v rooted at %s to CAS.", root, path)
+	_, _, err = c.GrpcClient.UploadIfMissing(ctx, blobs...)
+	return err
+}
+
 func (c *Client) writeProto(m proto.Message, baseName string) error {
 	f, err := os.Create(baseName)
 	if err != nil {
