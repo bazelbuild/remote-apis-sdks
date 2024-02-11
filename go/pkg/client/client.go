@@ -363,7 +363,11 @@ type DiskCacheOpts struct {
 func (o *DiskCacheOpts) Apply(c *Client) {
 	if o.Path != "" {
 		capBytes := uint64(o.MaxCapacityGb * 1024 * 1024 * 1024)
-		c.diskCache = diskcache.New(o.Context, o.Path, capBytes)
+		var err error
+		// TODO(ola): propagate errors from Apply.
+		if c.diskCache, err = diskcache.New(o.Context, o.Path, capBytes); err != nil {
+			log.Errorf("Error initializing disk cache on %s: %v", o.Path, err)
+		}
 	}
 }
 
