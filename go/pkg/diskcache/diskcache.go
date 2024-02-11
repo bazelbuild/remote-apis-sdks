@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"golang.org/x/sync/errgroup"
+
 	log "github.com/golang/glog"
 )
 
@@ -100,7 +102,7 @@ type DiskCache struct {
 	testGcTicks      chan uint64
 }
 
-func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
+func New(ctx context.Context, root string, maxCapacityBytes uint64) (*DiskCache, error) {
 	res := &DiskCache{
 		root:             root,
 		maxCapacityBytes: maxCapacityBytes,
@@ -112,21 +114,25 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
 		shutdown: make(chan bool),
 	}
 	heap.Init(res.queue)
-	_ = os.MkdirAll(root, os.ModePerm)
+	if err := os.MkdirAll(root, os.ModePerm); err != nil {
+		return nil, err
+	}
 	// We use Git's directory/file naming structure as inspiration:
 	// https://git-scm.com/book/en/v2/Git-Internals-Git-Objects#:~:text=The%20subdirectory%20is%20named%20with%20the%20first%202%20characters%20of%20the%20SHA%2D1%2C%20and%20the%20filename%20is%20the%20remaining%2038%20characters.
-	var wg sync.WaitGroup
-	wg.Add(256)
+	eg, eCtx := errgroup.WithContext(ctx)
 	for i := 0; i < 256; i++ {
 		prefixDir := filepath.Join(root, fmt.Sprintf("%02x", i))
-		go func() {
-			defer wg.Done()
-			_ = os.MkdirAll(prefixDir, os.ModePerm)
-			_ = filepath.WalkDir(prefixDir, func(path string, d fs.DirEntry, err error) error {
+		eg.Go(func() error {
+			if eCtx.Err() != nil {
+				return eCtx.Err()
+			}
+			if err := os.MkdirAll(prefixDir, os.ModePerm); err != nil {
+				return err
+			}
+			return filepath.WalkDir(prefixDir, func(path string, d fs.DirEntry, err error) error {
 				// We log and continue on all errors, because cache read errors are not critical.
 				if err != nil {
-					log.Errorf("Error reading cache directory: %v", err)
-					return nil
+					return fmt.Errorf("error reading cache directory: %v", err)
 				}
 				if d.IsDir() {
 					return nil
@@ -134,13 +140,11 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
 				subdir := filepath.Base(filepath.Dir(path))
 				k, err := res.getKeyFromFileName(subdir + d.Name())
 				if err != nil {
-					log.Errorf("Error parsing cached file name %s: %v", path, err)
-					return nil
+					return fmt.Errorf("error parsing cached file name %s: %v", path, err)
 				}
-				atime, err := GetLastAccessTime(path)
+				atime, err := getLastAccessTime(path)
 				if err != nil {
-					log.Errorf("Error getting last accessed time of %s: %v", path, err)
-					return nil
+					return fmt.Errorf("error getting last accessed time of %s: %v", path, err)
 				}
 				it := &qitem{
 					key: k,
@@ -148,8 +152,7 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
 				}
 				size, err := res.getItemSize(k)
 				if err != nil {
-					log.Errorf("Error getting file size of %s: %v", path, err)
-					return nil
+					return fmt.Errorf("error getting file size of %s: %v", path, err)
 				}
 				res.store.Store(k, it)
 				atomic.AddInt64(&res.sizeBytes, size)
@@ -158,11 +161,13 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) *DiskCache {
 				res.mu.Unlock()
 				return nil
 			})
-		}()
+		})
 	}
-	wg.Wait()
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
 	go res.gc()
-	return res
+	return res, nil
 }
 
 func (d *DiskCache) getItemSize(k key) (int64, error) {
@@ -284,18 +289,13 @@ func copyFile(src, dst string, size int64) error {
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, in)
+	n, err := io.Copy(out, in)
 	if err != nil {
 		return err
 	}
-	// Required sanity check: sometimes the copy pretends to succeed, but doesn't, if
-	// the file is being concurrently deleted.
-	dstInfo, err := os.Stat(dst)
-	if err != nil {
-		return err
-	}
-	if dstInfo.Size() != size {
-		return fmt.Errorf("copy of %s to %s failed: src/dst size mismatch: wanted %d, got %d", src, dst, size, dstInfo.Size())
+	// Required sanity check: if the file is being concurrently deleted, we may not always copy everything.
+	if n != size {
+		return fmt.Errorf("copy of %s to %s failed: src/dst size mismatch: wanted %d, got %d", src, dst, size, n)
 	}
 	return nil
 }
@@ -309,15 +309,23 @@ func (d *DiskCache) LoadCas(dg digest.Digest, path string) bool {
 	}
 	it := iUntyped.(*qitem)
 	it.mu.RLock()
-	if err := copyFile(d.getPath(k), path, dg.Size); err != nil {
+	err := copyFile(d.getPath(k), path, dg.Size)
+	it.mu.RUnlock()
+	if err != nil {
 		// It is not possible to prevent a race with GC; hence, we return false on copy errors.
-		it.mu.RUnlock()
 		return false
 	}
-	it.mu.RUnlock()
 
 	d.mu.Lock()
 	d.queue.Bump(it)
 	d.mu.Unlock()
 	return true
+}
+
+func getLastAccessTime(path string) (time.Time, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return FileInfoToAccessTime(info), nil
 }

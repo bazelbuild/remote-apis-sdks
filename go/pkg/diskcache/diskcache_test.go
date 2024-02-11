@@ -41,7 +41,10 @@ func TestStoreLoadCasPerm(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			d := New(context.Background(), filepath.Join(root, "cache"), 20)
+			d, err := New(context.Background(), filepath.Join(root, "cache"), 20)
+			if err != nil {
+				t.Errorf("New: %v", err)
+			}
 			defer d.Shutdown()
 			fname, _ := testutil.CreateFile(t, tc.executable, "12345")
 			srcInfo, err := os.Stat(fname)
@@ -79,7 +82,10 @@ func TestStoreLoadCasPerm(t *testing.T) {
 
 func TestLoadCasNotFound(t *testing.T) {
 	root := t.TempDir()
-	d := New(context.Background(), filepath.Join(root, "cache"), 20)
+	d, err := New(context.Background(), filepath.Join(root, "cache"), 20)
+	if err != nil {
+		t.Errorf("New: %v", err)
+	}
 	defer d.Shutdown()
 	newName := filepath.Join(root, "new")
 	dg := digest.NewFromBlob([]byte("bla"))
@@ -90,7 +96,10 @@ func TestLoadCasNotFound(t *testing.T) {
 
 func TestGcOldestCas(t *testing.T) {
 	root := t.TempDir()
-	d := New(context.Background(), filepath.Join(root, "cache"), 20)
+	d, err := New(context.Background(), filepath.Join(root, "cache"), 20)
+	if err != nil {
+		t.Errorf("New: %v", err)
+	}
 	defer d.Shutdown()
 	d.testGcTicks = make(chan uint64, 1)
 	for i := 0; i < 5; i++ {
@@ -123,11 +132,11 @@ func TestGcOldestCas(t *testing.T) {
 func isSystemLastAccessTimeAccurate(t *testing.T) bool {
 	t.Helper()
 	fname, _ := testutil.CreateFile(t, false, "foo")
-	lat, _ := GetLastAccessTime(fname)
+	lat, _ := getLastAccessTime(fname)
 	if _, err := os.ReadFile(fname); err != nil {
 		t.Fatalf("%v", err)
 	}
-	newLat, _ := GetLastAccessTime(fname)
+	newLat, _ := getLastAccessTime(fname)
 	return lat.Before(newLat)
 }
 
@@ -140,7 +149,10 @@ func TestInitFromExistingCas(t *testing.T) {
 		return
 	}
 	root := t.TempDir()
-	d := New(context.Background(), filepath.Join(root, "cache"), 20)
+	d, err := New(context.Background(), filepath.Join(root, "cache"), 20)
+	if err != nil {
+		t.Errorf("New: %v", err)
+	}
 	for i := 0; i < 4; i++ {
 		fname, _ := testutil.CreateFile(t, false, fmt.Sprintf("aaa %d", i))
 		dg, err := digest.NewFromFile(fname)
@@ -159,7 +171,10 @@ func TestInitFromExistingCas(t *testing.T) {
 	d.Shutdown()
 
 	// Re-initialize from existing files.
-	d = New(context.Background(), filepath.Join(root, "cache"), 20)
+	d, err = New(context.Background(), filepath.Join(root, "cache"), 20)
+	if err != nil {
+		t.Errorf("New: %v", err)
+	}
 	defer d.Shutdown()
 	d.testGcTicks = make(chan uint64, 1)
 
@@ -169,7 +184,7 @@ func TestInitFromExistingCas(t *testing.T) {
 		t.Errorf("expected %s to be cached", dg)
 	}
 	fname, _ := testutil.CreateFile(t, false, "aaa 4")
-	dg, err := digest.NewFromFile(fname)
+	dg, err = digest.NewFromFile(fname)
 	if err != nil {
 		t.Fatalf("digest.NewFromFile failed: %v", err)
 	}
@@ -198,7 +213,10 @@ func TestThreadSafetyCas(t *testing.T) {
 	nFiles := 10
 	attempts := 5000
 	// All blobs are size 5 exactly. We will have half the byte capacity we need.
-	d := New(context.Background(), filepath.Join(root, "cache"), uint64(nFiles*5)/2)
+	d, err := New(context.Background(), filepath.Join(root, "cache"), uint64(nFiles*5)/2)
+	if err != nil {
+		t.Errorf("New: %v", err)
+	}
 	d.testGcTicks = make(chan uint64, attempts)
 	defer d.Shutdown()
 	var files []string

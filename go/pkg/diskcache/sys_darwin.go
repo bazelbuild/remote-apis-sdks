@@ -2,15 +2,11 @@
 package diskcache
 
 import (
-	"os"
+	"io/fs"
 	"syscall"
 	"time"
 )
 
-func GetLastAccessTime(path string) (time.Time, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.Unix(info.Sys().(*syscall.Stat_t).Atimespec.Unix()), nil
+func FileInfoToAccessTime(info fs.FileInfo) time.Time {
+	return time.Unix(info.Sys().(*syscall.Stat_t).Atimespec.Unix())
 }
