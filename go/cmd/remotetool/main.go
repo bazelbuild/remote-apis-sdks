@@ -2,7 +2,7 @@
 //
 // This tool supports common debugging operations concerning remotely executed
 // actions:
-// 1. Download a file or directory from remote cache by its digest.
+// 1. Download/upload a file or directory from/to remote cache by its digest.
 // 2. Display details of a remotely executed action.
 // 3. Download action results by the action digest.
 // 4. Re-execute remote action (with optional inputs override).
@@ -46,6 +46,7 @@ const (
 	checkDeterminism     OpType = "check_determinism"
 	uploadBlob           OpType = "upload_blob"
 	uploadBlobV2         OpType = "upload_blob_v2"
+	uploadDir            OpType = "upload_dir"
 )
 
 var supportedOps = []OpType{
@@ -57,6 +58,7 @@ var supportedOps = []OpType{
 	executeAction,
 	checkDeterminism,
 	uploadBlob,
+	uploadDir,
 }
 
 var (
@@ -140,6 +142,11 @@ func main() {
 	case uploadBlobV2:
 		if err := c.UploadBlobV2(ctx, getPathFlag()); err != nil {
 			log.Exitf("error uploading blob for digest %v: %v", getDigestFlag(), err)
+		}
+
+	case uploadDir:
+		if err := c.UploadDirectory(ctx, getPathFlag()); err != nil {
+			log.Exitf("error uploading directory for path %s: %v", getPathFlag(), err)
 		}
 
 	default:
