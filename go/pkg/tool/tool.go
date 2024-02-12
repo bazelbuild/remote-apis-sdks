@@ -326,9 +326,9 @@ func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string)
 	return err
 }
 
-// UploadDirectory uploads a directory the specified path as a Merkle-tree to the remote cache.
+// UploadDirectory uploads a directory from the specified path as a Merkle-tree to the remote cache.
 func (c *Client) UploadDirectory(ctx context.Context, path string) error {
-	log.Infof("Computing Merkle tree rooted at %s.", path)
+	log.Infof("Computing Merkle tree rooted at %s", path)
 	root, blobs, stats, err := c.GrpcClient.ComputeMerkleTree(ctx, path, "", "", &command.InputSpec{Inputs: []string{"."}}, filemetadata.NewNoopCache())
 	if err != nil {
 		return err
