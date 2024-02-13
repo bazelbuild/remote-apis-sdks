@@ -69,7 +69,7 @@ var (
 	overwrite    = flag.Bool("overwrite", false, "Overwrite the output path if it already exist.")
 	actionRoot   = flag.String("action_root", "", "For execute_action: the root of the action spec, containing ac.textproto (Action proto), cmd.textproto (Command proto), and input/ (root of the input tree).")
 	execAttempts = flag.Int("exec_attempts", 10, "For check_determinism: the number of times to remotely execute the action and check for mismatches.")
-	jsonOutput   = flag.Bool("json", false, "If set, output operation result as JSON. Currently supported for \"upload_dir\": includes the \"digest\" key for the root digest of the uploaded directory.")
+	jsonOutput   = flag.Bool("json", false, "If set, output operation result as JSON. Currently supported for \"upload_dir\", and includes various upload metadata (see UploadStats).")
 	_            = flag.String("input_root", "", "Deprecated. Use action root instead.")
 )
 
@@ -147,13 +147,13 @@ func main() {
 		}
 
 	case uploadDir:
-		dg, err := c.UploadDirectory(ctx, getPathFlag())
+		us, err := c.UploadDirectory(ctx, getPathFlag())
 		if err != nil {
 			log.Exitf("error uploading directory for path %s: %v", getPathFlag(), err)
 		}
 		if *jsonOutput {
-			d, _ := json.Marshal(map[string]string{"digest": dg.String()})
-			fmt.Printf("%s\n", d)
+			js, _ := json.MarshalIndent(us, "", "  ")
+			fmt.Printf("%s\n", js)
 		}
 
 	default:
