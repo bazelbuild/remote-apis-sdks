@@ -148,12 +148,12 @@ func main() {
 
 	case uploadDir:
 		us, err := c.UploadDirectory(ctx, getPathFlag())
-		if err != nil {
-			log.Exitf("error uploading directory for path %s: %v", getPathFlag(), err)
-		}
 		if *jsonOutput {
 			js, _ := json.MarshalIndent(us, "", "  ")
 			fmt.Printf("%s\n", js)
+		}
+		if err != nil {
+			log.Exitf("error uploading directory for path %s: %v", getPathFlag(), err)
 		}
 
 	default:

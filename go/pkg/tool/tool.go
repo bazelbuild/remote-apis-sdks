@@ -329,11 +329,12 @@ func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string)
 // UploadStats contains various metadata of a directory upload.
 type UploadStats struct {
 	rc.TreeStats
-	RootDigest              digest.Digest
-	TotalNumBlobs           int64
-	NumCacheMisses          int64
-	CompressedBytesUploaded int64
-	CacheMissesBytes        int64
+	RootDigest       digest.Digest
+	TotalNumBlobs    int64
+	NumCacheMisses   int64
+	BytesTransferred int64
+	CacheMissesBytes int64
+	Error            string
 }
 
 // UploadDirectory uploads a directory from the specified path as a Merkle-tree to the remote cache.
@@ -341,27 +342,28 @@ func (c *Client) UploadDirectory(ctx context.Context, path string) (*UploadStats
 	log.Infof("Computing Merkle tree rooted at %s", path)
 	root, blobs, stats, err := c.GrpcClient.ComputeMerkleTree(ctx, path, "", "", &command.InputSpec{Inputs: []string{"."}}, filemetadata.NewNoopCache())
 	if err != nil {
-		return nil, err
+		return &UploadStats{Error: err.Error()}, err
+	}
+	us := &UploadStats{
+		TreeStats:     *stats,
+		RootDigest:    root,
+		TotalNumBlobs: int64(len(blobs)),
 	}
 	log.Infof("Directory root digest: %v", root)
 	log.Infof("Directory stats: %d files, %d directories, %d symlinks, %d total bytes", stats.InputFiles, stats.InputDirectories, stats.InputSymlinks, stats.TotalInputBytes)
 	log.Infof("Uploading directory %v rooted at %s to CAS.", root, path)
 	missing, n, err := c.GrpcClient.UploadIfMissing(ctx, blobs...)
 	if err != nil {
-		return nil, err
+		us.Error = err.Error()
+		return us, err
 	}
 	var sumMissingBytes int64
 	for _, d := range missing {
 		sumMissingBytes += d.Size
 	}
-	us := &UploadStats{
-		TreeStats:               *stats,
-		RootDigest:              root,
-		TotalNumBlobs:           int64(len(blobs)),
-		NumCacheMisses:          int64(len(missing)),
-		CompressedBytesUploaded: n,
-		CacheMissesBytes:        sumMissingBytes,
-	}
+	us.NumCacheMisses = int64(len(missing))
+	us.BytesTransferred = n
+	us.CacheMissesBytes = sumMissingBytes
 	return us, nil
 }
 
