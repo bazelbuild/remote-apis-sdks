@@ -69,7 +69,7 @@ var (
 	overwrite    = flag.Bool("overwrite", false, "Overwrite the output path if it already exist.")
 	actionRoot   = flag.String("action_root", "", "For execute_action: the root of the action spec, containing ac.textproto (Action proto), cmd.textproto (Command proto), and input/ (root of the input tree).")
 	execAttempts = flag.Int("exec_attempts", 10, "For check_determinism: the number of times to remotely execute the action and check for mismatches.")
-	jsonOutput   = flag.String("json_output", "", "Path to output operation result as JSON. Currently supported for \"upload_dir\", and includes various upload metadata (see UploadStats).")
+	jsonOutput   = flag.String("json", "", "Path to output operation result as JSON. Currently supported for \"upload_dir\", and includes various upload metadata (see UploadStats).")
 	_            = flag.String("input_root", "", "Deprecated. Use action root instead.")
 )
 
@@ -150,9 +150,13 @@ func main() {
 		us, err := c.UploadDirectory(ctx, getPathFlag())
 		if *jsonOutput != "" {
 			js, _ := json.MarshalIndent(us, "", "  ")
-			log.Infof("Outputting JSON results to %s", *jsonOutput)
-			if err := os.WriteFile(*jsonOutput, []byte(js), 0o666); err != nil {
-				log.Exitf("Error writing JSON output to file: %v", err)
+			if *jsonOutput == "-" {
+				fmt.Printf("%s\n", js)
+			} else {
+				log.Infof("Outputting JSON results to %s", *jsonOutput)
+				if err := os.WriteFile(*jsonOutput, []byte(js), 0o666); err != nil {
+					log.Exitf("Error writing JSON output to file: %v", err)
+				}
 			}
 		}
 		if err != nil {
