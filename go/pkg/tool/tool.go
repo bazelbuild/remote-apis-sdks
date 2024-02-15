@@ -330,10 +330,10 @@ func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string)
 type UploadStats struct {
 	rc.TreeStats
 	RootDigest       digest.Digest
-	TotalNumBlobs    int64
-	NumCacheMisses   int64
+	CountBlobs       int64
+	CountCacheMisses int64
 	BytesTransferred int64
-	CacheMissesBytes int64
+	BytesCacheMisses int64
 	Error            string
 }
 
@@ -345,9 +345,9 @@ func (c *Client) UploadDirectory(ctx context.Context, path string) (*UploadStats
 		return &UploadStats{Error: err.Error()}, err
 	}
 	us := &UploadStats{
-		TreeStats:     *stats,
-		RootDigest:    root,
-		TotalNumBlobs: int64(len(blobs)),
+		TreeStats:  *stats,
+		RootDigest: root,
+		CountBlobs: int64(len(blobs)),
 	}
 	log.Infof("Directory root digest: %v", root)
 	log.Infof("Directory stats: %d files, %d directories, %d symlinks, %d total bytes", stats.InputFiles, stats.InputDirectories, stats.InputSymlinks, stats.TotalInputBytes)
@@ -361,9 +361,9 @@ func (c *Client) UploadDirectory(ctx context.Context, path string) (*UploadStats
 	for _, d := range missing {
 		sumMissingBytes += d.Size
 	}
-	us.NumCacheMisses = int64(len(missing))
+	us.CountCacheMisses = int64(len(missing))
 	us.BytesTransferred = n
-	us.CacheMissesBytes = sumMissingBytes
+	us.BytesCacheMisses = sumMissingBytes
 	return us, nil
 }
 
