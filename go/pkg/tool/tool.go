@@ -326,18 +326,45 @@ func (c *Client) DownloadDirectory(ctx context.Context, rootDigest, path string)
 	return err
 }
 
+// UploadStats contains various metadata of a directory upload.
+type UploadStats struct {
+	rc.TreeStats
+	RootDigest       digest.Digest
+	CountBlobs       int64
+	CountCacheMisses int64
+	BytesTransferred int64
+	BytesCacheMisses int64
+	Error            string
+}
+
 // UploadDirectory uploads a directory from the specified path as a Merkle-tree to the remote cache.
-func (c *Client) UploadDirectory(ctx context.Context, path string) error {
+func (c *Client) UploadDirectory(ctx context.Context, path string) (*UploadStats, error) {
 	log.Infof("Computing Merkle tree rooted at %s", path)
 	root, blobs, stats, err := c.GrpcClient.ComputeMerkleTree(ctx, path, "", "", &command.InputSpec{Inputs: []string{"."}}, filemetadata.NewNoopCache())
 	if err != nil {
-		return err
+		return &UploadStats{Error: err.Error()}, err
+	}
+	us := &UploadStats{
+		TreeStats:  *stats,
+		RootDigest: root,
+		CountBlobs: int64(len(blobs)),
 	}
 	log.Infof("Directory root digest: %v", root)
 	log.Infof("Directory stats: %d files, %d directories, %d symlinks, %d total bytes", stats.InputFiles, stats.InputDirectories, stats.InputSymlinks, stats.TotalInputBytes)
 	log.Infof("Uploading directory %v rooted at %s to CAS.", root, path)
-	_, _, err = c.GrpcClient.UploadIfMissing(ctx, blobs...)
-	return err
+	missing, n, err := c.GrpcClient.UploadIfMissing(ctx, blobs...)
+	if err != nil {
+		us.Error = err.Error()
+		return us, err
+	}
+	var sumMissingBytes int64
+	for _, d := range missing {
+		sumMissingBytes += d.Size
+	}
+	us.CountCacheMisses = int64(len(missing))
+	us.BytesTransferred = n
+	us.BytesCacheMisses = sumMissingBytes
+	return us, nil
 }
 
 func (c *Client) writeProto(m proto.Message, baseName string) error {
