@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -485,6 +484,12 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 	return nil
 }
 
+// shellSprintf is intended to add args sanitization before using them.
+func shellSprintf(format string, args ...any) string {
+	// TODO: check args for flag injection
+	return fmt.Sprintf(format, args...)
+}
+
 func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filename string) error {
 	if cmd == nil {
 		return fmt.Errorf("invalid comment (nil)")
@@ -494,23 +499,23 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 	runActionFilename := filepath.Join(filepath.Dir(filename), "run_command.sh")
 	wd := cmd.WorkingDirectory
 	execCmd := strings.Join(cmd.GetArguments(), " ")
-	runActionScript.WriteString(fmt.Sprintf("#!/bin/bash\n\n"))
-	runActionScript.WriteString(fmt.Sprintf("# This script is meant to be called by %v.\n", filename))
+	runActionScript.WriteString(shellSprintf("#!/bin/bash\n\n"))
+	runActionScript.WriteString(shellSprintf("# This script is meant to be called by %v.\n", filename))
 	if wd != "" {
-		runActionScript.WriteString(fmt.Sprintf("cd %v\n", wd))
+		runActionScript.WriteString(shellSprintf("cd %v\n", wd))
 	}
 	for _, od := range cmd.GetOutputDirectories() {
-		runActionScript.WriteString(fmt.Sprintf("mkdir -p %v\n", od))
+		runActionScript.WriteString(shellSprintf("mkdir -p %v\n", od))
 	}
 	for _, of := range cmd.GetOutputFiles() {
-		runActionScript.WriteString(fmt.Sprintf("mkdir -p %v\n", filepath.Dir(of)))
+		runActionScript.WriteString(shellSprintf("mkdir -p %v\n", filepath.Dir(of)))
 	}
 	for _, e := range cmd.GetEnvironmentVariables() {
-		runActionScript.WriteString(fmt.Sprintf("export %v=%v\n", e.GetName(), e.GetValue()))
+		runActionScript.WriteString(shellSprintf("export %v=%v\n", e.GetName(), e.GetValue()))
 	}
-	runActionScript.WriteString(fmt.Sprintf("%v\n", execCmd))
-	runActionScript.WriteString(fmt.Sprintf("bash\n"))
-	if err := ioutil.WriteFile(runActionFilename, runActionScript.Bytes(), 0755); err != nil {
+	runActionScript.WriteString(shellSprintf("%v\n", execCmd))
+	runActionScript.WriteString(shellSprintf("bash\n"))
+	if err := os.WriteFile(runActionFilename, runActionScript.Bytes(), 0755); err != nil {
 		return err
 	}
 
@@ -524,14 +529,14 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 		return fmt.Errorf("container-image platform property missing from command proto: %v", cmd)
 	}
 	var execScript bytes.Buffer
-	dockerCmd := fmt.Sprintf("docker run -i -t -w /b/f/w -v `pwd`/input:/b/f/w -v `pwd`/run_command.sh:/b/f/w/run_command.sh %v ./run_command.sh\n", container)
-	execScript.WriteString(fmt.Sprintf("#!/bin/bash\n\n"))
-	execScript.WriteString(fmt.Sprintf("# This script can be used to run the action locally on\n"))
-	execScript.WriteString(fmt.Sprintf("# this machine.\n"))
-	execScript.WriteString(fmt.Sprintf("echo \"WARNING: The results from executing the action through this script may differ from results from RBE.\"\n"))
-	execScript.WriteString(fmt.Sprintf("set -x\n"))
+	dockerCmd := shellSprintf("docker run -i -t -w /b/f/w -v `pwd`/input:/b/f/w -v `pwd`/run_command.sh:/b/f/w/run_command.sh %v ./run_command.sh\n", container)
+	execScript.WriteString(shellSprintf("#!/bin/bash\n\n"))
+	execScript.WriteString(shellSprintf("# This script can be used to run the action locally on\n"))
+	execScript.WriteString(shellSprintf("# this machine.\n"))
+	execScript.WriteString(shellSprintf("echo \"WARNING: The results from executing the action through this script may differ from results from RBE.\"\n"))
+	execScript.WriteString(shellSprintf("set -x\n"))
 	execScript.WriteString(dockerCmd)
-	return ioutil.WriteFile(filename, execScript.Bytes(), 0755)
+	return os.WriteFile(filename, execScript.Bytes(), 0755)
 }
 
 func (c *Client) prepProtos(ctx context.Context, actionRoot string) (string, error) {
