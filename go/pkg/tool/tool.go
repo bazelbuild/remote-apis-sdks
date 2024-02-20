@@ -513,7 +513,8 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 	for _, e := range cmd.GetEnvironmentVariables() {
 		runActionScript.WriteString(shellSprintf("export %v=%v\n", e.GetName(), e.GetValue()))
 	}
-	runActionScript.WriteString(shellSprintf("%v\n", execCmd))
+	runActionScript.WriteString(execCmd)
+	runActionScript.WriteRune('\n')
 	runActionScript.WriteString(shellSprintf("bash\n"))
 	if err := os.WriteFile(runActionFilename, runActionScript.Bytes(), 0755); err != nil {
 		return err
