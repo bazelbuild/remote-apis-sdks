@@ -13,7 +13,10 @@ gofiles=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$')
 # Precommit hook to rebuild generated go code. Fails if building or
 # copying the files fails.
 ########################################################################
-bazel build go/api/command:command_go_proto
-GEN_CMD_PATH="go/api/command/command.pb.go"
-cp -f "$(find $(bazel info bazel-bin) -path "*/$GEN_CMD_PATH")" "$GEN_CMD_PATH"
-git add "$GEN_CMD_PATH"
+bazelisk build //go/api/command:command_go_proto //go/api/fakes:auxiliary_metadata_go_proto
+GEN_CMD_PATHS=("go/api/command/command.pb.go" "go/api/fakes/auxiliary_metadata.pb.go")
+for path in "${GEN_CMD_PATHS[@]}"; do
+    echo $path "$(find $(bazelisk info bazel-bin) -path "*/${path}")"
+    cp -f "$(find $(bazelisk info bazel-bin) -path "*/${path}")" "${path}"
+    git add "${path}"
+done

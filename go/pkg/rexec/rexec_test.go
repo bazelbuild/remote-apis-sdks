@@ -94,7 +94,7 @@ func TestExecCacheHit(t *testing.T) {
 				if diff := cmp.Diff(wantRes, res); diff != "" {
 					t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 				}
-				if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "EventTimes")); diff != "" {
+				if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "EventTimes", "AuxiliaryMetadata")); diff != "" {
 					t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 				}
 				var eventNames []string
@@ -156,7 +156,7 @@ func TestExecNotAcceptCached(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(wantMeta, meta, cmpopts.EquateEmpty(), cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes", "MissingDigests")); diff != "" {
+	if diff := cmp.Diff(wantMeta, meta, cmpopts.EquateEmpty(), cmpopts.IgnoreFields(command.Metadata{}, "CommandDigest", "TotalInputBytes", "EventTimes", "MissingDigests", "AuxiliaryMetadata")); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
 	var eventNames []string
@@ -179,6 +179,9 @@ func TestExecNotAcceptCached(t *testing.T) {
 	}
 	if diff := cmp.Diff(wantNames, eventNames, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
 		t.Errorf("Run gave different events: want %v, got %v", wantNames, eventNames)
+	}
+	if len(meta.AuxiliaryMetadata) != 1 {
+		t.Errorf("Run gave incorrect auxiliary metadata entries: want %v, got %v", len(meta.AuxiliaryMetadata), 1)
 	}
 
 	if diff := cmp.Diff(wantRes, res); diff != "" {
@@ -632,7 +635,7 @@ func TestOutputSymlinks(t *testing.T) {
 	if diff := cmp.Diff(wantRes, res); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "EventTimes")); diff != "" {
+	if diff := cmp.Diff(wantMeta, meta, cmpopts.IgnoreFields(command.Metadata{}, "EventTimes", "AuxiliaryMetadata")); diff != "" {
 		t.Errorf("Run() gave result diff (-want +got):\n%s", diff)
 	}
 }
