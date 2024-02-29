@@ -26,6 +26,7 @@ type Metadata struct {
 	MTime        time.Time
 	Err          error
 	Symlink      *SymlinkMetadata
+	DirChildren  []string
 }
 
 // FileError is the error returned by the Compute function.
@@ -73,6 +74,10 @@ func isSymlink(filename string) (bool, error) {
 // Compute computes a Metadata from a given file path.
 // If an error is returned, it will be of type *FileError.
 func Compute(filename string) *Metadata {
+	return compute(filename, false)
+}
+
+func compute(filename string, withDirContent bool) *Metadata {
 	md := &Metadata{Digest: digest.Empty}
 	file, err := os.Stat(filename)
 	if isSym, _ := isSymlink(filename); isSym {
@@ -104,6 +109,21 @@ func Compute(filename string) *Metadata {
 	md.IsExecutable = (mode & 0100) != 0
 	if mode.IsDir() {
 		md.IsDirectory = true
+		if withDirContent {
+			f, err := os.Open(filename)
+			if err != nil {
+				md.Err = &FileError{Err: err}
+				return md
+			}
+
+			names, err := f.Readdirnames(-1)
+			f.Close()
+			if err != nil {
+				md.Err = &FileError{Err: err}
+				return md
+			}
+			md.DirChildren = names
+		}
 		return md
 	}
 

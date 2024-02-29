@@ -15,16 +15,33 @@ func ResetGlobalCache() {
 	globalCache.Reset()
 }
 
-// Cache is a store for file digests that supports invalidation.
+// Cache is a store for file digests and directory listings that supports invalidation.
 type fmCache struct {
-	Backend     *cache.SingleFlight
-	cacheHits   uint64
-	cacheMisses uint64
+	Backend        *cache.SingleFlight
+	cacheHits      uint64
+	cacheMisses    uint64
+	withDirContent bool
+}
+
+type Option func(*fmCache)
+
+// WithDirContent adds the list of files under a directory to the metadata.
+// for directories that are known to change their content during the lifetime
+// of the cache.
+// Experimental: this may be changed or removed without notice.
+func WithDirContent() Option {
+	return func(c *fmCache) {
+		c.withDirContent = true
+	}
 }
 
 // NewSingleFlightCache returns a singleton-backed in-memory cache, with no validation.
-func NewSingleFlightCache() Cache {
-	return &fmCache{Backend: &globalCache}
+func NewSingleFlightCache(opts ...Option) Cache {
+	c := &fmCache{Backend: &globalCache}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // Get retrieves the metadata of the file with the given filename, whether from cache or by
@@ -76,7 +93,7 @@ func (c *fmCache) loadMetadata(filename string) (*Metadata, bool, error) {
 	cacheHit := true
 	val, err := c.Backend.LoadOrStore(filename, func() (interface{}, error) {
 		cacheHit = false
-		return Compute(filename), nil
+		return compute(filename, c.withDirContent), nil
 	})
 	if err != nil {
 		return nil, false, err

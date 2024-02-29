@@ -1,7 +1,9 @@
 package filemetadata
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -110,5 +112,59 @@ func TestLoadAfterChangeWithoutValidation(t *testing.T) {
 	}
 	if c.GetCacheMisses() != 1 {
 		t.Errorf("Cache has wrong num of CacheMisses, want 1, got %v", c.GetCacheMisses())
+	}
+}
+
+func createTempFile(t *testing.T, dirpath string, content []byte) string {
+	tmpFile, err := os.CreateTemp(dirpath, "")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	if _, err = fmt.Fprint(tmpFile, content); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	if err = tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
+	return tmpFile.Name()
+}
+
+func TestWithDirContent(t *testing.T) {
+	c := NewSingleFlightCache()
+	dir := t.TempDir()
+	_ = createTempFile(t, dir, []byte("content"))
+	got := c.Get(dir)
+	if got.Err != nil {
+		t.Fatalf("Get(%v) failed. Got error: %v", dir, got.Err)
+	}
+	want := &Metadata{
+		Digest:       digest.Empty,
+		IsDirectory:  true,
+		IsExecutable: true,
+	}
+	if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
+		t.Fatalf("Get(%v) returned diff. (-want +got)\n%s", dir, diff)
+	}
+
+	c = NewSingleFlightCache(WithDirContent())
+	dir = t.TempDir()
+	filename := createTempFile(t, dir, []byte("content2"))
+	got = c.Get(dir)
+	if got.Err != nil {
+		t.Fatalf("Get(%v) failed. Got error: %v", dir, got.Err)
+	}
+	want = &Metadata{
+		Digest:       digest.Empty,
+		IsDirectory:  true,
+		IsExecutable: true,
+		DirChildren:  []string{filepath.Base(filename)},
+	}
+	if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
+		t.Fatalf("Get(%v) returned diff. (-want +got)\n%s", dir, diff)
+	}
+	_ = createTempFile(t, dir, []byte("content3"))
+	got = c.Get(dir)
+	if diff := cmp.Diff(want, got, ignoreMtime); diff != "" {
+		t.Fatalf("Get(%v) returned diff. (-want +got)\n%s", dir, diff)
 	}
 }

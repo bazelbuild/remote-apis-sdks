@@ -366,15 +366,18 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 				return meta.Err
 			}
 
-			f, err := os.Open(absPath)
-			if err != nil {
-				return err
-			}
+			files := meta.DirChildren
+			if files == nil {
+				f, err := os.Open(absPath)
+				if err != nil {
+					return err
+				}
 
-			files, err := f.Readdirnames(-1)
-			f.Close()
-			if err != nil {
-				return err
+				files, err = f.Readdirnames(-1)
+				f.Close()
+				if err != nil {
+					return err
+				}
 			}
 
 			if len(files) == 0 {
