@@ -1,0 +1,9 @@
+// Proto definition for Auxiliary Metadata returned by fake RBE server.
+syntax = "proto3";
+
+package auxpb;
+
+// FakeAuxiliaryMetadata proto for the purposes of testing.
+message AuxiliaryMetadata {
+    double fake_memory_percentage_peak = 1;
+}

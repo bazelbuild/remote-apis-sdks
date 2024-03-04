@@ -16,6 +16,7 @@ import (
 
 	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	tspb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -513,6 +514,8 @@ type Metadata struct {
 	TotalInputBytes int64
 	// Event times for remote events, by event name.
 	EventTimes map[string]*TimeInterval
+
+	AuxiliaryMetadata []*anypb.Any
 	// The total number of output files (incl symlinks).
 	OutputFiles int
 	// The total number of output directories (incl symlinks, but not recursive).

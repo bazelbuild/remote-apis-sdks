@@ -680,6 +680,7 @@ func (ec *Context) ExecuteRemotely() {
 	}
 	ec.resPb = resp.Result
 	setTimingMetadata(ec.Metadata, resp.Result.GetExecutionMetadata())
+	setAuxiliaryMetadata(ec.Metadata, resp.Result.GetExecutionMetadata())
 	st := status.FromProto(resp.Status)
 	message := resp.Message
 	if message != "" && (st.Code() != codes.OK || ec.resPb != nil && ec.resPb.ExitCode != 0) {
@@ -824,6 +825,13 @@ func setTimingMetadata(cm *command.Metadata, em *repb.ExecutedActionMetadata) {
 	setEventTimes(cm, command.EventServerWorkerInputFetch, em.InputFetchStartTimestamp, em.InputFetchCompletedTimestamp)
 	setEventTimes(cm, command.EventServerWorkerExecution, em.ExecutionStartTimestamp, em.ExecutionCompletedTimestamp)
 	setEventTimes(cm, command.EventServerWorkerOutputUpload, em.OutputUploadStartTimestamp, em.OutputUploadCompletedTimestamp)
+}
+
+func setAuxiliaryMetadata(cm *command.Metadata, em *repb.ExecutedActionMetadata) {
+	if em == nil {
+		return
+	}
+	cm.AuxiliaryMetadata = em.GetAuxiliaryMetadata()
 }
 
 // Run executes a command remotely.

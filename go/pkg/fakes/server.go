@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/api/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
@@ -27,6 +28,7 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 	tspb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -174,6 +176,11 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		e.t.Fatalf("command validation failed: %v", err)
 	}
 
+	auxMeta := &fakes.AuxiliaryMetadata{FakeMemoryPercentagePeak: 50.0}
+	anyAuxMeta, err := anypb.New(auxMeta)
+	if err != nil {
+		e.t.Fatalf("unable to create fake auxiliary anypb metadata: %v", err)
+	}
 	t, _ := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
 	ar := &repb.ActionResult{
 		ExitCode: int32(res.ExitCode),
@@ -187,6 +194,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 			ExecutionCompletedTimestamp:    timeToProto(t.Add(7 * time.Millisecond)),
 			OutputUploadStartTimestamp:     timeToProto(t.Add(8 * time.Millisecond)),
 			OutputUploadCompletedTimestamp: timeToProto(t.Add(9 * time.Millisecond)),
+			AuxiliaryMetadata:              []*anypb.Any{anyAuxMeta},
 		},
 	}
 	for _, o := range opts {
