@@ -278,6 +278,7 @@ func loadIntermediateSymlinks(symlinks []string, execRoot, workingDir, remoteWor
 
 // loadFiles reads all files specified by the given InputSpec (descending into subdirectories
 // recursively), and loads their contents into the provided map.
+// fs is populated with a flattened list of file paths.
 func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts, nodeProperties map[string]*cpb.NodeProperties) error {
 	if opts == nil {
 		opts = DefaultTreeSymlinkOpts()
@@ -460,7 +461,7 @@ func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, re
 	if log.V(5) {
 		tree = make(map[string]digest.Digest)
 	}
-	root, blobs, err = packageTree(ft, stats, "", tree)
+	root, blobs, err = packageTree(ft, stats, tree)
 	if log.V(5) {
 		if s, ok := ctx.Value("cl_tree").(*string); ok {
 			treePaths := make([]string, 0, len(tree))
@@ -484,6 +485,7 @@ func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, re
 	return root, inputs, stats, nil
 }
 
+// buildTree rebuilds filesystem tree from the flattened list of files.
 func buildTree(files map[string]*fileSysNode) (*treeNode, error) {
 	root := &treeNode{}
 	for name, fn := range files {
@@ -521,68 +523,102 @@ func buildTree(files map[string]*fileSysNode) (*treeNode, error) {
 	return root, nil
 }
 
+// namedTreeNode is used in the iterative DFS-style traversal implementation of packageTree below.
+type namedTreeNode struct {
+	*treeNode
+	name  string
+	depth int
+}
+
+// packageTree constructs a merkle tree from the provided filesystem tree.
+// Returns the digest of the tree root and a map of digest->blob for the tree content.
 // If tree is not nil, it will be populated with a flattened tree of path->digest.
-// prefix should always be provided as an empty string which will be used to accumolate path prefixes during recursion.
-func packageTree(t *treeNode, stats *TreeStats, prefix string, tree map[string]digest.Digest) (root digest.Digest, blobs map[digest.Digest]*uploadinfo.Entry, err error) {
-	dir := &repb.Directory{}
+func packageTree(t *treeNode, stats *TreeStats, tree map[string]digest.Digest) (root digest.Digest, blobs map[digest.Digest]*uploadinfo.Entry, err error) {
 	blobs = make(map[digest.Digest]*uploadinfo.Entry)
 
-	var path string
-	for name, child := range t.children {
-		if tree != nil {
-			path = prefix + "/" + name
-		}
+	stack := []*namedTreeNode{{t, "", 0}}
+	var childrenStack [][]*repb.DirectoryNode
+	var children []*repb.DirectoryNode
+	childrenDepth := 0
+	prefix := ""
+	for len(stack) > 0 {
+		namedNode := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
 
-		dg, childBlobs, err := packageTree(child, stats, path, tree)
-		if err != nil {
-			return digest.Empty, nil, err
-		}
+		// Depth first.
+		if len(namedNode.children) > 0 {
+			stack = append(stack, namedNode)
+			childrenStack = append(childrenStack, children)
+			children = nil
+			childrenDepth = namedNode.depth + 1
+			for name, child := range namedNode.children {
+				stack = append(stack, &namedTreeNode{child, name, childrenDepth})
+			}
+			// Mark the node as visited.
+			namedNode.children = nil
 
-		if tree != nil {
-			tree[path] = dg
-		}
-
-		dir.Directories = append(dir.Directories, &repb.DirectoryNode{Name: name, Digest: dg.ToProto()})
-		for d, b := range childBlobs {
-			blobs[d] = b
-		}
-	}
-	sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
-
-	for name, n := range t.leaves {
-		// A node can have exactly one of file/symlink/emptyDirectoryMarker.
-		if n.file != nil {
-			dg := n.file.ue.Digest
-			dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: command.NodePropertiesToAPI(n.nodeProperties)})
-			blobs[dg] = n.file.ue
-			stats.InputFiles++
-			stats.TotalInputBytes += dg.Size
+			// For debugging purposes.
 			if tree != nil {
-				tree[prefix+"/"+name] = dg
+				prefix += "/" + namedNode.name
 			}
 			continue
 		}
-		if n.symlink != nil {
-			dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target, NodeProperties: command.NodePropertiesToAPI(n.nodeProperties)})
-			stats.InputSymlinks++
+
+		dir := &repb.Directory{}
+		// If this visit is the return to a parent node, claim the children.
+		if namedNode.depth < childrenDepth {
+			dir.Directories = children
+			sort.Slice(dir.Directories, func(i, j int) bool { return dir.Directories[i].Name < dir.Directories[j].Name })
+			childrenDepth = namedNode.depth
+			children = childrenStack[len(childrenStack)-1]
+			childrenStack = childrenStack[:len(childrenStack)-1]
+			// For debugging purposes.
+			if tree != nil {
+				prefix = prefix[:strings.LastIndex(prefix, "/")]
+			}
+		}
+
+		for name, n := range namedNode.leaves {
+			// A node can have exactly one of file/symlink/emptyDirectoryMarker.
+			if n.file != nil {
+				dg := n.file.ue.Digest
+				dir.Files = append(dir.Files, &repb.FileNode{Name: name, Digest: dg.ToProto(), IsExecutable: n.file.isExecutable, NodeProperties: command.NodePropertiesToAPI(n.nodeProperties)})
+				blobs[dg] = n.file.ue
+				stats.InputFiles++
+				stats.TotalInputBytes += dg.Size
+
+				// For debugging purposes.
+				if tree != nil {
+					tree[prefix+"/"+name] = dg
+				}
+
+				continue
+			}
+			if n.symlink != nil {
+				dir.Symlinks = append(dir.Symlinks, &repb.SymlinkNode{Name: name, Target: n.symlink.target, NodeProperties: command.NodePropertiesToAPI(n.nodeProperties)})
+				stats.InputSymlinks++
+			}
+		}
+		sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
+		sort.Slice(dir.Symlinks, func(i, j int) bool { return dir.Symlinks[i].Name < dir.Symlinks[j].Name })
+
+		ue, err := uploadinfo.EntryFromProto(dir)
+		if err != nil {
+			return digest.Empty, nil, err
+		}
+		dg := ue.Digest
+		blobs[dg] = ue
+		stats.TotalInputBytes += dg.Size
+		stats.InputDirectories++
+		children = append(children, &repb.DirectoryNode{Name: namedNode.name, Digest: dg.ToProto()})
+		root = dg
+
+		// For debugging purposes.
+		if tree != nil {
+			tree[prefix+"/"+namedNode.name] = dg
 		}
 	}
-
-	sort.Slice(dir.Files, func(i, j int) bool { return dir.Files[i].Name < dir.Files[j].Name })
-	sort.Slice(dir.Symlinks, func(i, j int) bool { return dir.Symlinks[i].Name < dir.Symlinks[j].Name })
-
-	ue, err := uploadinfo.EntryFromProto(dir)
-	if err != nil {
-		return digest.Empty, nil, err
-	}
-	dg := ue.Digest
-	if tree != nil {
-		tree[prefix] = dg
-	}
-	blobs[dg] = ue
-	stats.TotalInputBytes += dg.Size
-	stats.InputDirectories++
-	return dg, blobs, nil
+	return root, blobs, nil
 }
 
 // TreeOutput represents a leaf output node in a nested directory structure (a file, a symlink, or an empty directory).
