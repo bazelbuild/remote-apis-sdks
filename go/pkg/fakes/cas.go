@@ -542,27 +542,12 @@ func (f *CAS) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressable
 	rootDir := &repb.Directory{}
 	proto.Unmarshal(blob, rootDir)
 
-	res := []*repb.Directory{rootDir}
+	res := []*repb.Directory{}
 	queue := []*repb.Directory{rootDir}
 	for len(queue) > 0 {
 		ele := queue[0]
 		res = append(res, ele)
 		queue = queue[1:]
-
-		for _, inpFile := range ele.GetFiles() {
-			fd, err := digest.NewFromProto(inpFile.GetDigest())
-			if err != nil {
-				return fmt.Errorf("unable to parse file digest %v", inpFile.GetDigest())
-			}
-			blob, ok := f.Get(fd)
-			if !ok {
-				return fmt.Errorf("file digest %v not found", fd)
-			}
-			dir := &repb.Directory{}
-			proto.Unmarshal(blob, dir)
-			queue = append(queue, dir)
-			res = append(res, dir)
-		}
 
 		for _, dir := range ele.GetDirectories() {
 			fd, err := digest.NewFromProto(dir.GetDigest())
@@ -576,7 +561,6 @@ func (f *CAS) GetTree(req *repb.GetTreeRequest, stream regrpc.ContentAddressable
 			directory := &repb.Directory{}
 			proto.Unmarshal(blob, directory)
 			queue = append(queue, directory)
-			res = append(res, directory)
 		}
 	}
 
