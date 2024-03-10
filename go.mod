@@ -3,6 +3,7 @@ module github.com/bazelbuild/remote-apis-sdks
 go 1.20
 
 require (
+	github.com/EngFlow/credential-helper-go v0.0.0-20230928231836-1ae22fe3da4b
 	github.com/bazelbuild/remote-apis v0.0.0-20230411132548-35aee1c4a425
 	github.com/golang/glog v1.1.0
 	github.com/google/go-cmp v0.5.9
@@ -17,7 +18,7 @@ require (
 	google.golang.org/genproto v0.0.0-20230803162519-f966b187b2e5
 	google.golang.org/genproto/googleapis/bytestream v0.0.0-20230807174057-1744710a1577
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230731190214-cbb8c96f2d6d
-	google.golang.org/grpc v1.58.0-dev.0.20230804151048-7aceafcc52f9
+	google.golang.org/grpc v1.58.0
 	google.golang.org/protobuf v1.31.0
 )
 

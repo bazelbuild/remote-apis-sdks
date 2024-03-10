@@ -50,6 +50,13 @@ def remote_apis_sdks_go_deps():
         version = "v1.1.0",
     )
     go_repository(
+        name = "com_github_engflow_credential_helper_go",
+        importpath = "github.com/EngFlow/credential-helper-go",
+        sum = "h1:mf0b15Wn/T7RzMXjyDW+TKyO80CR1BnM9/B9u05TJ5Q=",
+        version = "v0.0.0-20230928231836-1ae22fe3da4b",
+    )
+
+    go_repository(
         name = "com_github_envoyproxy_go_control_plane",
         importpath = "github.com/envoyproxy/go-control-plane",
         sum = "h1:xvqufLtNVwAhN8NMyWklVgxnWohi+wtMGQMhtxexlm0=",
