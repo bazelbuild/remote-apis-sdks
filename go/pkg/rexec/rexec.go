@@ -769,10 +769,20 @@ func (ec *Context) DownloadSpecifiedOutputs(outs map[string]*rc.TreeOutput, outD
 	}
 }
 
-// GetFlattenedOutputs flattens the outputs from the ActionResult of the context and returns
-// a map of output paths relative to the working directory and their corresponding TreeOutput
+// GetFlattenedOutputs flattens the outputs from the deep copy of an
+// ActionResult of the context and returns a map of output paths relative to the
+// working directory and their corresponding TreeOutput.
 func (ec *Context) GetFlattenedOutputs() (map[string]*rc.TreeOutput, error) {
-	out, err := ec.client.GrpcClient.FlattenActionOutputs(ec.ctx, ec.resPb)
+	resPb := &repb.ActionResult{}
+	data, err := prototext.Marshal(ec.resPb)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ec.resPb %v: %v", ec.resPb, err)
+	}
+	err = prototext.Unmarshal(data, resPb)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ec.resPb %v: %v", ec.resPb, err)
+	}
+	out, err := ec.client.GrpcClient.FlattenActionOutputs(ec.ctx, resPb)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to flatten outputs: %v", err)
 	}
