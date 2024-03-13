@@ -708,8 +708,8 @@ func (f *CAS) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) e
 	dg := digest.TestNew(path[2+indexOffset], int64(size))
 	f.maybeSleep()
 	f.maybeBlock(dg)
-	blob, ok := f.blobs[dg]
 	f.mu.Lock()
+	blob, ok := f.blobs[dg]
 	f.reads[dg]++
 	f.mu.Unlock()
 	if !ok {
