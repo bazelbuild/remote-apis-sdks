@@ -16,9 +16,9 @@ const (
 // Should be created using constructor. Only Contents or Path must be set.
 // In case of a malformed entry, Contents takes precedence over Path.
 type Entry struct {
-	Digest   digest.Digest
-	Contents []byte
-	Path     string
+	Digest         digest.Digest
+	Contents       []byte
+	Path           string
 	IsVirtualInput bool
 
 	ueType int

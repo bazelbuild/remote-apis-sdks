@@ -445,7 +445,7 @@ func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, re
 		}
 		entry := uploadinfo.EntryFromBlob(i.Contents)
 		if i.InputDigest != "" {
-			dg, err := digest.NewFromString(i.InputDigest);
+			dg, err := digest.NewFromString(i.InputDigest)
 			if err != nil {
 				return digest.Empty, nil, nil, err
 			}
