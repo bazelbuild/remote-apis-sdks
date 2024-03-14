@@ -19,6 +19,7 @@ type Entry struct {
 	Digest   digest.Digest
 	Contents []byte
 	Path     string
+	IsVirtualInput bool
 
 	ueType int
 }
