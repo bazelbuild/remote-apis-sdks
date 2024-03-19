@@ -1590,7 +1590,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
 			}
 			for _, ue := range inputs {
-				if ue.IsVirtualInput && ue.IsFile() {
+				if ue.IsVirtualInputWithDigest() {
 					gotBlobs[ue.Digest] = tc.digesttoBlob[ue.Digest]
 					continue
 				}

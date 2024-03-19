@@ -34,6 +34,12 @@ func (ue *Entry) IsFile() bool {
 	return ue.ueType == uePath
 }
 
+// IsVirtualInputWithDigest returns whether this Entry is a
+// VirtualInput that was provided with a digest and no Content.
+func (ue *Entry) IsVirtualInputWithDigest() bool {
+	return ue.IsVirtualInput && !(len(ue.Contents) > 0)
+}
+
 // EntryFromBlob creates an Entry from an in memory blob.
 func EntryFromBlob(blob []byte) *Entry {
 	return &Entry{
@@ -58,5 +64,15 @@ func EntryFromFile(dg digest.Digest, path string) *Entry {
 		Digest: dg,
 		Path:   path,
 		ueType: uePath,
+	}
+}
+
+// EntryFromRemoteFile creates an entry from a file not on disk.
+// The digest is expected to exist in the CAS.
+func EntryFromRemoteFile(dg digest.Digest, path string) *Entry {
+	return &Entry{
+		Digest: dg,
+		Path:   path,
+		ueType: ueBlob,
 	}
 }
