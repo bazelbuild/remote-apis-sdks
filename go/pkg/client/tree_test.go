@@ -1467,8 +1467,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Virtual inputs with digests",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "fooDir/foo", InputDigest: fooDg.String(), IsExecutable: true},
-					&command.VirtualInput{Path: "barDir/bar", InputDigest: barDg.String()},
+					&command.VirtualInput{Path: "fooDir/foo", Digest: fooDg.String(), IsExecutable: true},
+					&command.VirtualInput{Path: "barDir/bar", Digest: barDg.String()},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1590,7 +1590,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
 			}
 			for _, ue := range inputs {
-				if ue.IsVirtualInputWithDigest() {
+				if ue.IsVirtualFile() {
 					gotBlobs[ue.Digest] = tc.digesttoBlob[ue.Digest]
 					continue
 				}
@@ -1654,7 +1654,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			desc: "virtual input specifies content and digest",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "", Contents: fooBlob, InputDigest: fooDg.String()},
+					&command.VirtualInput{Path: "", Contents: fooBlob, Digest: fooDg.String()},
 				},
 			},
 		},
@@ -1662,7 +1662,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			desc: "virtual input has invalid digest",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "", InputDigest: "Not a real digest"},
+					&command.VirtualInput{Path: "", Digest: "Not a real digest"},
 				},
 			},
 		},

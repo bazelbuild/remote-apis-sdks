@@ -16,12 +16,12 @@ const (
 // Should be created using constructor. Only Contents or Path must be set.
 // In case of a malformed entry, Contents takes precedence over Path.
 type Entry struct {
-	Digest         digest.Digest
-	Contents       []byte
-	Path           string
-	IsVirtualInput bool
+	Digest   digest.Digest
+	Contents []byte
+	Path     string
 
-	ueType int
+	ueType      int
+	virtualFile bool
 }
 
 // IsBlob returns whether this Entry is for a blob in memory.
@@ -34,10 +34,9 @@ func (ue *Entry) IsFile() bool {
 	return ue.ueType == uePath
 }
 
-// IsVirtualInputWithDigest returns whether this Entry is a
-// VirtualInput that was provided with a digest and no Content.
-func (ue *Entry) IsVirtualInputWithDigest() bool {
-	return ue.IsVirtualInput && !(len(ue.Contents) > 0)
+// IsVirtualFile returns whether this Entry is a virtual file.
+func (ue *Entry) IsVirtualFile() bool {
+	return ue.virtualFile
 }
 
 // EntryFromBlob creates an Entry from an in memory blob.
@@ -67,12 +66,13 @@ func EntryFromFile(dg digest.Digest, path string) *Entry {
 	}
 }
 
-// EntryFromRemoteFile creates an entry from a file not on disk.
+// EntryFromVirtualFile creates an entry from a file not on disk.
 // The digest is expected to exist in the CAS.
-func EntryFromRemoteFile(dg digest.Digest, path string) *Entry {
+func EntryFromVirtualFile(dg digest.Digest, path string) *Entry {
 	return &Entry{
-		Digest: dg,
-		Path:   path,
-		ueType: ueBlob,
+		Digest:      dg,
+		Path:        path,
+		ueType:      ueBlob,
+		virtualFile: true,
 	}
 }

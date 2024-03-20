@@ -90,7 +90,7 @@ type VirtualInput struct {
 
 	// The digest of the virtual input that is expected to exist in the CAS.
 	// Should not be used together with Contents.
-	InputDigest string
+	Digest string
 
 	// Whether the file should be staged as executable.
 	IsExecutable bool
