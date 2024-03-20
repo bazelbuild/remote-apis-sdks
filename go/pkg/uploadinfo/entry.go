@@ -10,6 +10,7 @@ import (
 const (
 	ueBlob = iota
 	uePath
+	ueFile
 )
 
 // Entry should remain immutable upon creation.
@@ -72,7 +73,7 @@ func EntryFromVirtualFile(dg digest.Digest, path string) *Entry {
 	return &Entry{
 		Digest:      dg,
 		Path:        path,
-		ueType:      ueBlob,
+		ueType:      ueFile,
 		virtualFile: true,
 	}
 }

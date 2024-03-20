@@ -1476,7 +1476,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "barDir", Digest: barDirDgPb},
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
-			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, barDirBlob},
+			additionalBlobs: [][]byte{fooDirBlob, barDirBlob},
 			digesttoBlob: map[digest.Digest][]byte{
 				fooDg: fooBlob,
 				barDg: barBlob,
@@ -1591,7 +1591,6 @@ func TestComputeMerkleTree(t *testing.T) {
 			}
 			for _, ue := range inputs {
 				if ue.IsVirtualFile() {
-					gotBlobs[ue.Digest] = tc.digesttoBlob[ue.Digest]
 					continue
 				}
 				ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
