@@ -462,7 +462,6 @@ func TestComputeMerkleTree(t *testing.T) {
 		// blobs.
 		rootDir         *repb.Directory
 		additionalBlobs [][]byte
-		digesttoBlob    map[digest.Digest][]byte
 		wantCacheCalls  map[string]int
 		// The expected wantStats.TotalInputBytes is calculated by adding the marshalled rootDir size.
 		wantStats *client.TreeStats
@@ -1477,10 +1476,6 @@ func TestComputeMerkleTree(t *testing.T) {
 				{Name: "fooDir", Digest: fooDirDgPb},
 			}},
 			additionalBlobs: [][]byte{fooDirBlob, barDirBlob},
-			digesttoBlob: map[digest.Digest][]byte{
-				fooDg: fooBlob,
-				barDg: barBlob,
-			},
 			wantStats: &client.TreeStats{
 				InputDirectories: 3,
 				InputFiles:       2,
