@@ -288,7 +288,7 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 			continue
 		}
 		if ue.IsVirtualFile() {
-			return nil, 0, fmt.Errorf("virtual input with digest: %s provided, but does not exist in CAS", ue.Digest)
+			return nil, 0, fmt.Errorf("virtual input with digest %q provided, but does not exist in CAS", ue.Digest)
 		}
 		req := &uploadRequest{
 			ue:   ue,

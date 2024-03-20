@@ -449,7 +449,8 @@ func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, re
 			if err != nil {
 				return digest.Empty, nil, nil, err
 			}
-			entry = uploadinfo.EntryFromVirtualFile(dg, normPath)
+			absPath := filepath.Join(execRoot, normPath)
+			entry = uploadinfo.EntryFromVirtualFile(dg, absPath)
 		} else {
 			entry = uploadinfo.EntryFromBlob(i.Contents)
 		}
