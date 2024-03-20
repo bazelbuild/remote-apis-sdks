@@ -1463,6 +1463,26 @@ func TestComputeMerkleTree(t *testing.T) {
 			},
 		},
 		{
+			desc: "Virtual inputs with digests",
+			spec: &command.InputSpec{
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "fooDir/foo", Digest: fooDg.String(), IsExecutable: true},
+					&command.VirtualInput{Path: "barDir/bar", Digest: barDg.String()},
+				},
+				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
+			},
+			rootDir: &repb.Directory{Directories: []*repb.DirectoryNode{
+				{Name: "barDir", Digest: barDirDgPb},
+				{Name: "fooDir", Digest: fooDirDgPb},
+			}},
+			additionalBlobs: [][]byte{fooDirBlob, barDirBlob},
+			wantStats: &client.TreeStats{
+				InputDirectories: 3,
+				InputFiles:       2,
+				TotalInputBytes:  fooDg.Size + fooDirDg.Size + barDg.Size + barDirDg.Size,
+			},
+		},
+		{
 			// NOTE: The use of maps in our implementation means that the traversal order is unstable. The
 			// outputs are required to be in lexicographic order, so if ComputeMerkleTree is not sorting
 			// correctly, this test will fail (except in the rare occasion the traversal order is
@@ -1565,6 +1585,9 @@ func TestComputeMerkleTree(t *testing.T) {
 				t.Errorf("ComputeMerkleTree(...) = gave error %q, want success", err)
 			}
 			for _, ue := range inputs {
+				if ue.IsVirtualFile() {
+					continue
+				}
 				ch, err := chunker.New(ue, false, int(e.Client.GrpcClient.ChunkMaxSize))
 				if err != nil {
 					t.Fatalf("chunker.New(ue): failed to create chunker from UploadEntry: %v", err)
@@ -1618,6 +1641,22 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
 					&command.VirtualInput{Path: "", Contents: []byte("foo")},
+				},
+			},
+		},
+		{
+			desc: "virtual input specifies content and digest",
+			spec: &command.InputSpec{
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "", Contents: fooBlob, Digest: fooDg.String()},
+				},
+			},
+		},
+		{
+			desc: "virtual input has invalid digest",
+			spec: &command.InputSpec{
+				VirtualInputs: []*command.VirtualInput{
+					&command.VirtualInput{Path: "", Digest: "Not a real digest"},
 				},
 			},
 		},

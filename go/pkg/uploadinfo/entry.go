@@ -20,7 +20,8 @@ type Entry struct {
 	Contents []byte
 	Path     string
 
-	ueType int
+	ueType      int
+	virtualFile bool
 }
 
 // IsBlob returns whether this Entry is for a blob in memory.
@@ -31,6 +32,11 @@ func (ue *Entry) IsBlob() bool {
 // IsFile returns whether this Entry is for a file in disk.
 func (ue *Entry) IsFile() bool {
 	return ue.ueType == uePath
+}
+
+// IsVirtualFile returns whether this Entry is a virtual file.
+func (ue *Entry) IsVirtualFile() bool {
+	return ue.virtualFile
 }
 
 // EntryFromBlob creates an Entry from an in memory blob.
@@ -57,5 +63,16 @@ func EntryFromFile(dg digest.Digest, path string) *Entry {
 		Digest: dg,
 		Path:   path,
 		ueType: uePath,
+	}
+}
+
+// EntryFromVirtualFile creates an entry from a file not on disk.
+// The digest is expected to exist in the CAS.
+func EntryFromVirtualFile(dg digest.Digest, path string) *Entry {
+	return &Entry{
+		Digest:      dg,
+		Path:        path,
+		ueType:      uePath,
+		virtualFile: true,
 	}
 }

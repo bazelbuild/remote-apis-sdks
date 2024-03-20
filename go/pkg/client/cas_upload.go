@@ -287,6 +287,9 @@ func (c *Client) uploadUnified(ctx context.Context, entries ...*uploadinfo.Entry
 			contextmd.Infof(ctx, log.Level(2), "Skipping upload of empty entry %s", ue.Digest)
 			continue
 		}
+		if ue.IsVirtualFile() {
+			return nil, 0, fmt.Errorf("virtual input with digest %q provided, but does not exist in CAS", ue.Digest)
+		}
 		req := &uploadRequest{
 			ue:   ue,
 			meta: meta,

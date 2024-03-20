@@ -440,9 +440,23 @@ func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, re
 			}
 			continue
 		}
+		if i.Digest != "" && len(i.Contents) > 0 {
+			return digest.Empty, nil, nil, errors.New("digest and file content cannot be provided for the same virtual input")
+		}
+		var entry *uploadinfo.Entry
+		if i.Digest != "" {
+			dg, err := digest.NewFromString(i.Digest)
+			if err != nil {
+				return digest.Empty, nil, nil, err
+			}
+			absPath := filepath.Join(execRoot, normPath)
+			entry = uploadinfo.EntryFromVirtualFile(dg, absPath)
+		} else {
+			entry = uploadinfo.EntryFromBlob(i.Contents)
+		}
 		fs[remoteNormPath] = &fileSysNode{
 			file: &fileNode{
-				ue:           uploadinfo.EntryFromBlob(i.Contents),
+				ue:           entry,
 				isExecutable: i.IsExecutable,
 			},
 			nodeProperties: np,
