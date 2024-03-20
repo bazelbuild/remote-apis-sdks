@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"math"
 	"net/http"
 	"os"
 	"os/user"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
@@ -120,14 +118,12 @@ type Client struct {
 	// RBE: "projects/<foo>/instances/default_instance".
 	// It should NOT be used to construct resource names, but rather only for reusing the instance name as is.
 	// Use the ResourceName method to create correctly formatted resource names.
-	InstanceName  string
-	actionCache   regrpc.ActionCacheClient
-	byteStream    bsgrpc.ByteStreamClient
-	cas           regrpc.ContentAddressableStorageClient
-	useCasNg      bool
-	ngCasUploader *casng.BatchingUploader
-	execution     regrpc.ExecutionClient
-	operations    opgrpc.OperationsClient
+	InstanceName string
+	actionCache  regrpc.ActionCacheClient
+	byteStream   bsgrpc.ByteStreamClient
+	cas          regrpc.ContentAddressableStorageClient
+	execution    regrpc.ExecutionClient
+	operations   opgrpc.OperationsClient
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
 	// These fields are logically "protected" and are intended for use by extensions of Client.
@@ -450,14 +446,6 @@ func (p *PerRPCCreds) Apply(c *Client) {
 	c.creds = p.Creds
 }
 
-// UseCASNG is a feature flag for the casng package.
-type UseCASNG bool
-
-// Apply sets the feature flag value in the Client.
-func (o UseCASNG) Apply(c *Client) {
-	c.useCasNg = bool(o)
-}
-
 func getImpersonatedRPCCreds(ctx context.Context, actAs string, cred credentials.PerRPCCredentials) credentials.PerRPCCredentials {
 	// Wrap in a ReuseTokenSource to cache valid tokens in memory (i.e., non-nil, with a non-expired
 	// access token).
@@ -761,7 +749,6 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 		UnifiedDownloadTickDuration:   DefaultUnifiedDownloadTickDuration,
 		UnifiedDownloadBufferSize:     DefaultUnifiedDownloadBufferSize,
 		Retrier:                       RetryTransient(),
-		useCasNg:                      false,
 	}
 	for _, o := range opts {
 		o.Apply(client)
@@ -773,53 +760,6 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 	}
 	if client.casConcurrency < 1 {
 		return nil, fmt.Errorf("CASConcurrency should be at least 1")
-	}
-	if client.useCasNg {
-		queryCfg := casng.GRPCConfig{
-			ConcurrentCallsLimit: int(client.casConcurrency),
-			BytesLimit:           int(client.MaxBatchSize),
-			ItemsLimit:           int(client.MaxQueryBatchDigests),
-			BundleTimeout:        10 * time.Millisecond, // Low value to fast track queries.
-			// Timeout:              DefaultRPCTimeouts["FindMissingBlobs"],
-			Timeout:        DefaultRPCTimeouts["default"],
-			RetryPolicy:    client.Retrier.Backoff,
-			RetryPredicate: client.Retrier.ShouldRetry,
-		}
-		batchCfg := casng.GRPCConfig{
-			ConcurrentCallsLimit: int(client.casConcurrency),
-			BytesLimit:           int(client.MaxBatchSize),
-			ItemsLimit:           int(client.UnifiedUploadBufferSize),
-			BundleTimeout:        time.Duration(client.UnifiedUploadTickDuration), // Low value to fast track queries.
-			Timeout:              DefaultRPCTimeouts["BatchUpdateBlobs"],
-			RetryPolicy:          client.Retrier.Backoff,
-			RetryPredicate:       client.Retrier.ShouldRetry,
-		}
-		streamCfg := casng.GRPCConfig{
-			ConcurrentCallsLimit: int(client.casConcurrency),
-			BytesLimit:           1,                // Unused.
-			ItemsLimit:           1,                // Unused.
-			BundleTimeout:        time.Millisecond, // Unused.
-			Timeout:              DefaultRPCTimeouts["default"],
-			RetryPolicy:          client.Retrier.Backoff,
-			RetryPredicate:       client.Retrier.ShouldRetry,
-		}
-		ioCfg := casng.IOConfig{
-			ConcurrentWalksLimit:     int(client.casConcurrency),
-			OpenFilesLimit:           casng.DefaultOpenFilesLimit,
-			OpenLargeFilesLimit:      casng.DefaultOpenLargeFilesLimit,
-			SmallFileSizeThreshold:   casng.DefaultSmallFileSizeThreshold,
-			LargeFileSizeThreshold:   casng.DefaultLargeFileSizeThreshold,
-			CompressionSizeThreshold: int64(client.CompressedBytestreamThreshold),
-			BufferSize:               int(client.ChunkMaxSize),
-		}
-		if client.CompressedBytestreamThreshold < 0 {
-			ioCfg.CompressionSizeThreshold = math.MaxInt64
-		}
-		var err error
-		client.ngCasUploader, err = casng.NewBatchingUploader(ctx, client.cas, client.byteStream, instanceName, queryCfg, batchCfg, streamCfg, ioCfg)
-		if err != nil {
-			return nil, fmt.Errorf("error initializing CASNG: %w", err)
-		}
 	}
 	client.RunBackgroundTasks(ctx)
 	return client, nil
