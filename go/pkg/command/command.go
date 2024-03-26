@@ -79,8 +79,8 @@ type InputExclusion struct {
 	Type InputType
 }
 
-// VirtualInput represents an input that does not actually exist on disk, but we want
-// to stage it on disk for the command execution.
+// VirtualInput represents an input that may exist on disk but shouldn't be accessed.
+// We want to stage it on disk for the command execution.
 type VirtualInput struct {
 	// The path for the input to be staged at, relative to the ExecRoot.
 	Path string
