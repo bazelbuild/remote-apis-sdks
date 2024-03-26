@@ -93,10 +93,10 @@ message VirtualInput {
   bool is_empty_directory = 4;
   // The digest of the virtual input that is expected to exist in the CAS.
   string digest = 5;
-  // Mtime of the virtual input.
+  // Mtime of the virtual input represented as a Unix Timestamp.
   int64 mtime = 6;
   // The virtual inputs' mode and permissions bits.
-  int32 filemode = 7;
+  uint32 filemode = 7;
 }
 
 message SymlinkBehaviorType {
