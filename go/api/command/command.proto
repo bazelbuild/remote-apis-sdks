@@ -91,6 +91,12 @@ message VirtualInput {
   bool is_executable = 3;
   // Whether the input is an empty directory.
   bool is_empty_directory = 4;
+  // The digest of the virtual input that is expected to exist in the CAS.
+  string digest = 5;
+  // Mtime of the virtual input.
+  int64 mtime = 6;
+  // The virtual inputs' mode and permissions bits.
+  int32 filemode = 7;
 }
 
 message SymlinkBehaviorType {

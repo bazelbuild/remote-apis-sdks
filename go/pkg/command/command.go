@@ -99,6 +99,12 @@ type VirtualInput struct {
 	// empty directory inputs. When this is set, Contents and IsExecutable are
 	// ignored.
 	IsEmptyDirectory bool
+
+	// Mtime of the virtual input.
+	Mtime time.Time
+
+	// The virtual inputs' mode and permissions bits.
+	FileMode os.FileMode
 }
 
 // InputSpec represents all the required inputs to a remote command.
@@ -666,6 +672,9 @@ func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
 			Contents:         contents,
 			IsExecutable:     vi.IsExecutable,
 			IsEmptyDirectory: vi.IsEmptyDirectory,
+			Digest:           vi.Digest,
+			Mtime:            time.Unix(vi.Mtime, 0),
+			FileMode:         os.FileMode(vi.Filemode),
 		})
 	}
 	return &InputSpec{
