@@ -401,7 +401,7 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 
 	// Directory already exists, ask the user for confirmation before overwrite it.
 	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
-		fmt.Printf("Directory '%s' already exists. Do you want to overwrite it? (yes/no): ", outputPath)
+		fmt.Printf("Directory '%s' already exists. Do you want to overwrite it? (yes/no): \n", outputPath)
 		if !overwrite {
 			reader := bufio.NewReader(os.Stdin)
 			input, err := reader.ReadString('\n')
@@ -813,10 +813,14 @@ func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, []strin
 			path = "."
 			outputs[path] = outputs[""]
 		}
+		if output := outputs[path]; output.SymlinkTarget != "" {
+			path = path + "->" + output.SymlinkTarget
+		}
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
 	for _, path := range paths {
+		path = strings.Split(path, "->")[0]
 		output := outputs[path]
 		var np string
 		if output.NodeProperties != nil {
@@ -847,4 +851,59 @@ func (c *Client) getActionResult(ctx context.Context, actionDigest string) (*rep
 		return nil, err
 	}
 	return resPb, nil
+}
+
+type IO struct {
+	inputs  []string
+	outputs []string
+}
+
+func (c *Client) GetIO(ctx context.Context, actionDigest string) (*IO, error) {
+	acDg, err := digest.NewFromString(actionDigest)
+	if err != nil {
+		return nil, err
+	}
+	actionProto := &repb.Action{}
+	if _, err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
+		return nil, err
+	}
+	cmdDg, err := digest.NewFromProto(actionProto.GetCommandDigest())
+	if err != nil {
+		return nil, err
+	}
+	commandProto := &repb.Command{}
+	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
+		return nil, err
+	}
+	_, inputs, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
+	if err != nil {
+		return nil, err
+	}
+
+	resPb, err := c.getActionResult(ctx, actionDigest)
+	if err != nil {
+		return nil, err
+	}
+	var outputs []string
+	symlinks := append(resPb.GetOutputFileSymlinks(), resPb.GetOutputDirectorySymlinks()...)
+	for _, s := range symlinks {
+		if s != nil {
+			outputs = append(outputs, s.GetPath()+"->"+s.GetTarget())
+		}
+	}
+	for _, f := range resPb.GetOutputFiles() {
+		if f != nil {
+			outputs = append(outputs, f.GetPath())
+		}
+	}
+	for _, d := range resPb.GetOutputDirectories() {
+		if d != nil {
+			outputs = append(outputs, d.GetPath())
+		}
+	}
+	sort.Strings(outputs)
+	return &IO{
+		inputs,
+		outputs,
+	}, nil
 }

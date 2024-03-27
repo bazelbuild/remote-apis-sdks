@@ -166,7 +166,7 @@ func TestTool_DownloadAction(t *testing.T) {
 		OutputFiles: []string{"a/b/out"},
 		Platform: &repb.Platform{
 			Properties: []*repb.Platform_Property{
-				&repb.Platform_Property{
+				{
 					Name:  "container-image",
 					Value: "foo",
 				},
@@ -443,4 +443,46 @@ func TestTool_UploadBlob(t *testing.T) {
 	if cas.BlobWrites(dg) != 1 {
 		t.Fatalf("Expected 1 write for blob '%v', got %v", dg.String(), cas.BlobWrites(dg))
 	}
+}
+
+func TestTool_GetIO(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	cmd := &command.Command{
+		Args:     []string{"tool"},
+		ExecRoot: e.ExecRoot,
+		InputSpec: &command.InputSpec{
+			Inputs:          []string{"foo.c", "bar.h", "baz.c"},
+			SymlinkBehavior: command.PreserveSymlink,
+		},
+	}
+	opt := command.DefaultExecutionOptions()
+	_, acDg, _, _ := e.Set(
+		cmd,
+		opt,
+		&command.Result{Status: command.CacheHitResultStatus},
+		&fakes.InputFile{Path: "foo.c", Contents: "this is a input file"},
+		&fakes.InputFile{Path: "bar.h", Contents: "this is a header file"},
+		&fakes.OutputFile{Path: "a/b/out", Contents: "output"},
+		&fakes.OutputSymlink{Path: "a/b/sl", Target: "a/b/out"},
+		&fakes.InputSymlink{Path: "baz.c", Content: "Hello", Target: "previous_dir/old_file"},
+	)
+	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
+	tmpDir := t.TempDir()
+	io, err := toolClient.GetIO(context.Background(), acDg.String())
+	if err != nil {
+		t.Fatalf("DownloadActionResult(%v,%v) failed: %v", acDg.String(), tmpDir, err)
+	}
+	getInputs := io.inputs
+	getOutputs := io.outputs
+	//The inputs and outputs should be shorted.
+	wantInputs := []string{"bar.h", "baz.c->previous_dir/old_file", "foo.c", "previous_dir/old_file"}
+	wantOutputs := []string{"a/b/out", "a/b/sl->a/b/out"}
+	if diff := cmp.Diff(wantInputs, getInputs); diff != "" {
+		t.Errorf("GetIO returned diff in inputs' list: (-want +got)\n%s", diff)
+	}
+	if diff := cmp.Diff(wantOutputs, getOutputs); diff != "" {
+		t.Errorf("GetIO returned diff in outputs' list: (-want +got)\n%s", diff)
+	}
+
 }
