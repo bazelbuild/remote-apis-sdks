@@ -94,7 +94,7 @@ message VirtualInput {
   // The digest of the virtual input that is expected to exist in the CAS.
   string digest = 5;
   // Mtime of the virtual input represented as a Unix Timestamp.
-  int64 mtime = 6;
+  google.protobuf.Timestamp mtime = 6;
   // The virtual inputs' mode and permissions bits.
   uint32 filemode = 7;
 }
