@@ -79,8 +79,8 @@ type InputExclusion struct {
 	Type InputType
 }
 
-// VirtualInput represents an input that does not actually exist on disk, but we want
-// to stage it on disk for the command execution.
+// VirtualInput represents an input that may exist on disk but shouldn't be accessed.
+// We want to stage it on disk for the command execution.
 type VirtualInput struct {
 	// The path for the input to be staged at, relative to the ExecRoot.
 	Path string
@@ -99,6 +99,12 @@ type VirtualInput struct {
 	// empty directory inputs. When this is set, Contents and IsExecutable are
 	// ignored.
 	IsEmptyDirectory bool
+
+	// Mtime of the virtual input.
+	Mtime time.Time
+
+	// The virtual inputs' mode and permissions bits.
+	FileMode os.FileMode
 }
 
 // InputSpec represents all the required inputs to a remote command.
@@ -666,6 +672,9 @@ func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
 			Contents:         contents,
 			IsExecutable:     vi.IsExecutable,
 			IsEmptyDirectory: vi.IsEmptyDirectory,
+			Digest:           vi.Digest,
+			Mtime:            vi.Mtime.AsTime(),
+			FileMode:         os.FileMode(vi.Filemode),
 		})
 	}
 	return &InputSpec{
@@ -735,6 +744,9 @@ func inputSpecToProto(is *InputSpec) *cpb.InputSpec {
 			Contents:         contents,
 			IsExecutable:     vi.IsExecutable,
 			IsEmptyDirectory: vi.IsEmptyDirectory,
+			Digest:           vi.Digest,
+			Mtime:            tspb.New(vi.Mtime),
+			Filemode:         uint32(vi.FileMode),
 		})
 	}
 	return &cpb.InputSpec{

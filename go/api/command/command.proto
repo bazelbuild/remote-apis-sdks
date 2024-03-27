@@ -80,8 +80,8 @@ message ExcludeInput {
   InputType.Value type = 2;
 }
 
-// VirtualInput represents an input that does not actually exist on disk, but we
-// want to stage it on disk for the command execution.
+// VirtualInput represents an input that may exist on disk but shouldn't be accessed.
+// We want to stage it on disk for the command execution.
 message VirtualInput {
   // The path for the input file to be staged at, relative to the ExecRoot.
   string path = 1;
@@ -91,6 +91,12 @@ message VirtualInput {
   bool is_executable = 3;
   // Whether the input is an empty directory.
   bool is_empty_directory = 4;
+  // The digest of the virtual input that is expected to exist in the CAS.
+  string digest = 5;
+  // Mtime of the virtual input represented as a Unix Timestamp.
+  google.protobuf.Timestamp mtime = 6;
+  // The virtual inputs' mode and permissions bits.
+  uint32 filemode = 7;
 }
 
 message SymlinkBehaviorType {

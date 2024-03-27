@@ -470,14 +470,17 @@ func TestToFromProto(t *testing.T) {
 				&VirtualInput{
 					Path:         "empty_file",
 					IsExecutable: true,
+					Mtime:        time.Unix(1711556358, 123456789),
 				},
 				&VirtualInput{
 					Path:             "foo/empty_dir",
 					IsEmptyDirectory: true,
+					Mtime:            time.Unix(1711556358, 123456789),
 				},
 				&VirtualInput{
 					Path:     "foo/bar",
 					Contents: []byte("bar-contents"),
+					Mtime:    time.Unix(1711556358, 123456789),
 				},
 			},
 			InputExclusions: []*InputExclusion{
