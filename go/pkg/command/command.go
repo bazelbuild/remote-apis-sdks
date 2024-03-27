@@ -673,7 +673,7 @@ func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
 			IsExecutable:     vi.IsExecutable,
 			IsEmptyDirectory: vi.IsEmptyDirectory,
 			Digest:           vi.Digest,
-			Mtime:            time.Unix(vi.Mtime.Seconds, int64(vi.Mtime.Nanos)),
+			Mtime:            vi.Mtime.AsTime(),
 			FileMode:         os.FileMode(vi.Filemode),
 		})
 	}
