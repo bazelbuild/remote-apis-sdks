@@ -744,6 +744,9 @@ func inputSpecToProto(is *InputSpec) *cpb.InputSpec {
 			Contents:         contents,
 			IsExecutable:     vi.IsExecutable,
 			IsEmptyDirectory: vi.IsEmptyDirectory,
+			Digest:           vi.Digest,
+			Mtime:            tspb.New(vi.Mtime),
+			Filemode:         uint32(vi.FileMode),
 		})
 	}
 	return &cpb.InputSpec{
