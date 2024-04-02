@@ -28,7 +28,7 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
-	anypb "google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/anypb"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 	tspb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -301,6 +301,26 @@ func (f *InputFile) apply(ac *repb.ActionResult, s *Server, execRoot string) err
 		return fmt.Errorf("failed to setup file %v under temp exec root %v: %v", f.Path, execRoot, err)
 	}
 	s.CAS.Put(bytes)
+	return nil
+}
+
+// InputSymlink to be made available to the fake action.
+type InputSymlink struct {
+	Path    string // newname
+	Content string
+	Target  string // oldname
+}
+
+// Apply puts the target file in the fake CAS and create a symlink in OS.
+func (ins *InputSymlink) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+	inf := InputFile{Path: ins.Target, Contents: ins.Content}
+	if err := inf.apply(ac, s, execRoot); err != nil {
+		return err
+	}
+	// create a symlink from old name (target) to new name (path)
+	if err := os.Symlink(filepath.Join(execRoot, ins.Target), filepath.Join(execRoot, ins.Path)); err != nil {
+		return fmt.Errorf("error creating symlink: %w", err)
+	}
 	return nil
 }
 

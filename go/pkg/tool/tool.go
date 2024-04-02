@@ -692,7 +692,7 @@ func (c *Client) formatAction(ctx context.Context, actionProto *repb.Action, res
 	}
 	showActionRes.WriteString("\nInputs\n======\n")
 	log.Infof("Fetching input tree from input root digest..")
-	inpTree, _, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
+	inpTree, _, _, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
 	if err != nil {
 		showActionRes.WriteString("Failed to fetch input tree:\n")
 		showActionRes.WriteString(err.Error())
@@ -759,7 +759,7 @@ func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (
 			return "", err
 		}
 
-		outputs, _, err := c.flattenTree(ctx, outDirTree)
+		outputs, _, _, err := c.flattenTree(ctx, outDirTree)
 		if err != nil {
 			return "", err
 		}
@@ -770,41 +770,41 @@ func (c *Client) getOutputs(ctx context.Context, actionRes *repb.ActionResult) (
 	return res.String(), nil
 }
 
-func (c *Client) getInputTree(ctx context.Context, root *repb.Digest) (string, []string, error) {
+func (c *Client) getInputTree(ctx context.Context, root *repb.Digest) (string, map[string]string, map[string]string, error) {
 	var res bytes.Buffer
 
 	dg, err := digest.NewFromProto(root)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	res.WriteString(fmt.Sprintf("[Root directory digest: %v]", dg))
 
 	dirs, err := c.GrpcClient.GetDirectoryTree(ctx, root)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if len(dirs) == 0 {
-		return "", nil, fmt.Errorf("Empty directories returned by GetTree for %v", dg)
+		return "", nil, nil, fmt.Errorf("Empty directories returned by GetTree for %v", dg)
 	}
 	t := &repb.Tree{
 		Root:     dirs[0],
 		Children: dirs,
 	}
-	inputs, paths, err := c.flattenTree(ctx, t)
+	inputs, paths, symlinks, err := c.flattenTree(ctx, t)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	res.WriteString("\n")
 	res.WriteString(inputs)
 
-	return res.String(), paths, nil
+	return res.String(), paths, symlinks, nil
 }
 
-func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, []string, error) {
+func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, map[string]string, map[string]string, error) {
 	var res bytes.Buffer
 	outputs, err := c.GrpcClient.FlattenTree(t, "")
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	// Sort the values by path.
 	paths := make([]string, 0, len(outputs))
@@ -816,8 +816,11 @@ func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, []strin
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
+	pathToDgs := make(map[string]string, len(paths))
+	symToDgs := map[string]string{}
 	for _, path := range paths {
 		output := outputs[path]
+		dg := output.Digest
 		var np string
 		if output.NodeProperties != nil {
 			np = fmt.Sprintf(" [Node properties: %v]", prototext.MarshalOptions{Multiline: false}.Format(output.NodeProperties))
@@ -826,11 +829,18 @@ func (c *Client) flattenTree(ctx context.Context, t *repb.Tree) (string, []strin
 			res.WriteString(fmt.Sprintf("%v: [Directory digest: %v]%s\n", path, output.Digest, np))
 		} else if output.SymlinkTarget != "" {
 			res.WriteString(fmt.Sprintf("%v: [Symlink digest: %v, Symlink Target: %v]%s\n", path, output.Digest, output.SymlinkTarget, np))
+			path = path + "->" + output.SymlinkTarget
+			if o, ok := outputs[output.SymlinkTarget]; ok {
+				dg = o.Digest
+			}
+			symToDgs[path] = fmt.Sprintf("%v", dg)
+			continue
 		} else {
 			res.WriteString(fmt.Sprintf("%v: [File digest: %v]%s\n", path, output.Digest, np))
 		}
+		pathToDgs[path] = fmt.Sprintf("%v", dg)
 	}
-	return res.String(), paths, nil
+	return res.String(), pathToDgs, symToDgs, nil
 }
 
 func (c *Client) getActionResult(ctx context.Context, actionDigest string) (*repb.ActionResult, error) {
@@ -847,4 +857,93 @@ func (c *Client) getActionResult(ctx context.Context, actionDigest string) (*rep
 		return nil, err
 	}
 	return resPb, nil
+}
+
+// IO is a collection input root Digest, Inputs, and Outputs for an action.
+type IO struct {
+	RootDg  string
+	Inputs  *Inputs
+	Outputs *Outputs
+}
+
+// Inputs are input Paths (with digests) of an action. For a symlink, the key is
+// `<path>-><target>`, the value is the dg of the target file.
+type Inputs struct {
+	Paths        map[string]string
+	PathSymlinks map[string]string
+}
+
+// Outputs are output Files/Dirs (with digests) of an action. For a symlink, the
+// key is `<path>-><target>`, the value is the dg of the target file.
+type Outputs struct {
+	Files        map[string]string
+	Dirs         map[string]string
+	FileSymlinks map[string]string
+	DirSymlinks  map[string]string
+}
+
+// GetIO returns the Inputs and Outputs of an action Digest.
+func (c *Client) GetIO(ctx context.Context, actionDigest string) (*IO, error) {
+	acDg, err := digest.NewFromString(actionDigest)
+	if err != nil {
+		return nil, fmt.Errorf("error creating action digest: %w", err)
+	}
+	actionProto := &repb.Action{}
+	// Get all the Inputs.
+	if _, err := c.GrpcClient.ReadProto(ctx, acDg, actionProto); err != nil {
+		return nil, fmt.Errorf("error reading from proto: %w", err)
+	}
+	rootDg, err := digest.NewFromProto(actionProto.GetInputRootDigest())
+	if err != nil {
+		return nil, fmt.Errorf("error getting input root digest: %w", err)
+	}
+	_, inputPaths, inputSymlinks, err := c.getInputTree(ctx, actionProto.GetInputRootDigest())
+	if err != nil {
+		return nil, err
+	}
+	// Get all the Outputs.
+	resPb, err := c.getActionResult(ctx, actionDigest)
+	if err != nil {
+		return nil, err
+	}
+
+	files := map[string]string{}
+	dirs := map[string]string{}
+	fileSymlinks := map[string]string{}
+	dirSymlinks := map[string]string{}
+	for _, f := range resPb.GetOutputFiles() {
+		if f != nil {
+			dg, err := digest.NewFromProto(f.GetDigest())
+			if err != nil {
+				log.Errorf("error creating Digest from proto %v: %w", f.GetDigest(), err)
+			}
+			files[f.GetPath()] = fmt.Sprintf("%v", dg)
+		}
+	}
+	for _, d := range resPb.GetOutputDirectories() {
+		if d != nil {
+			dg, err := digest.NewFromProto(d.GetTreeDigest())
+			if err != nil {
+				log.Errorf("error creating Digest from proto %v: %w", d.GetTreeDigest(), err)
+			}
+			dirs[d.GetPath()] = fmt.Sprintf("%v", dg)
+		}
+	}
+	for _, fs := range resPb.GetOutputFileSymlinks() {
+		if fs != nil {
+			fileSymlinks[fs.GetPath()+"->"+fs.GetTarget()] = files[fs.GetTarget()]
+		}
+	}
+	for _, ds := range resPb.GetOutputDirectorySymlinks() {
+		if ds != nil {
+			dirSymlinks[ds.GetPath()+"->"+ds.GetTarget()] = dirs[ds.GetTarget()]
+		}
+	}
+
+	return &IO{
+		RootDg:  fmt.Sprintf("%v", rootDg),
+		Inputs:  &Inputs{Paths: inputPaths, PathSymlinks: inputSymlinks},
+		Outputs: &Outputs{Files: files, Dirs: dirs, FileSymlinks: fileSymlinks, DirSymlinks: dirSymlinks},
+	}, nil
+
 }
