@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/api/fakes"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
@@ -24,6 +23,7 @@ import (
 
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
 	rc "github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
+	apb "github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes/auxpb"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
@@ -176,7 +176,7 @@ func (e *TestEnv) Set(cmd *command.Command, opt *command.ExecutionOptions, res *
 		e.t.Fatalf("command validation failed: %v", err)
 	}
 
-	auxMeta := &fakes.AuxiliaryMetadata{FakeMemoryPercentagePeak: 50.0}
+	auxMeta := &apb.AuxiliaryMetadata{FakeMemoryPercentagePeak: 50.0}
 	anyAuxMeta, err := anypb.New(auxMeta)
 	if err != nil {
 		e.t.Fatalf("unable to create fake auxiliary anypb metadata: %v", err)
