@@ -8,11 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
@@ -623,19 +621,4 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 	}
 	st.clients = nil
 	st.ue = nil
-}
-
-// NgUploadTree delegates to UploadTree of the casng package.
-func (c *Client) NgUploadTree(ctx context.Context, execRoot impath.Absolute, workingDir, remoteWorkingDir impath.Relative, reqs ...casng.UploadRequest) (rootDigest digest.Digest, uploaded []digest.Digest, stats casng.Stats, err error) {
-	return c.ngCasUploader.UploadTree(ctx, execRoot, workingDir, remoteWorkingDir, reqs...)
-}
-
-// NgUpload delegates to Upload of the casng package.
-func (c *Client) NgUpload(ctx context.Context, reqs ...casng.UploadRequest) ([]digest.Digest, casng.Stats, error) {
-	return c.ngCasUploader.Upload(ctx, reqs...)
-}
-
-// IsCasNG returns true if casng feature flag is turned on.
-func (c *Client) IsCasNG() bool {
-	return c.useCasNg
 }
