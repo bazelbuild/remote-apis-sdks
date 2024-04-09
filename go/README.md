@@ -46,6 +46,9 @@ bazelisk run //go/cmd/remotetool -- \
 
 1. Download an action to a given `PATH` following the [instructions for downloading an action](#downloading-an-actions-inputs-and-metadata),
 1. modify the input under `PATH/input` as needed,
+1. run the action and be sure to include the `--action_root=PATH` argument.
+
+Alternatively, you could also:
 1. upload the newly formed input directory using `remotetool`:
    ```
    bazelisk run //go/cmd/remotetool -- \
