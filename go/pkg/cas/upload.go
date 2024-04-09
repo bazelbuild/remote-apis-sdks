@@ -559,8 +559,10 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 			node, err := u.visitRegularFile(ctx, absPath, info)
 			return &digested{dirEntry: node, digest: node.GetDigest()}, err
 
+		// Ignore all non-expected modes (e.g. domain sockets as used by git
+		// fsmonitor).
 		default:
-			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
+			return nil, nil
 		}
 	})
 	if err != nil {
