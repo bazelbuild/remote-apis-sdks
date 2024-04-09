@@ -543,7 +543,7 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 			return nil, err
 		}
 	}
-	
+
 	cacheKey := makeFSCacheKey(absPath, info.Mode().IsRegular(), pathExclude)
 	cached, err := u.fsCache.LoadOrStore(cacheKey, func() (interface{}, error) {
 		switch {
