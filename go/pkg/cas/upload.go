@@ -534,7 +534,6 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 	if pathExclude != nil && pathExclude.MatchString(filepath.ToSlash(absPath)) {
 		return nil, nil
 	}
-
 	// Call the Prelude only after checking the pathExclude.
 	if u.Prelude != nil {
 		switch err := u.Prelude(absPath, info.Mode()); {
@@ -543,11 +542,6 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		case err != nil:
 			return nil, err
 		}
-	}
-
-	// Ignore domain sockets (as used by git fsmonitor(.
-	if info.Mode()&os.ModeSocket == os.ModeSocket {
-		return nil, nil
 	}
 	
 	cacheKey := makeFSCacheKey(absPath, info.Mode().IsRegular(), pathExclude)
@@ -565,8 +559,10 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 			node, err := u.visitRegularFile(ctx, absPath, info)
 			return &digested{dirEntry: node, digest: node.GetDigest()}, err
 
+		// Ignore all non-expected modes (e.g. domain sockets as used by git
+		// fsmonitor).
 		default:
-			return nil, fmt.Errorf("unexpected file mode %s", info.Mode())
+			return nil, nil
 		}
 	})
 	if err != nil {
