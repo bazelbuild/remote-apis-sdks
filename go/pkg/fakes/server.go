@@ -304,16 +304,16 @@ func (f *InputFile) apply(ac *repb.ActionResult, s *Server, execRoot string) err
 	return nil
 }
 
-// InputSymlink to be made available to the fake action.
+// InputSymlink (Path -> Target) to be made available to the fake action.
 type InputSymlink struct {
-	Path    string // newname
-	Content string
-	Target  string // oldname
+	Path          string // newname
+	TargetContent string
+	Target        string // oldname
 }
 
 // Apply puts the target file in the fake CAS and create a symlink in OS.
 func (ins *InputSymlink) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
-	inf := InputFile{Path: ins.Target, Contents: ins.Content}
+	inf := InputFile{Path: ins.Target, Contents: ins.TargetContent}
 	if err := inf.apply(ac, s, execRoot); err != nil {
 		return err
 	}
