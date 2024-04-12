@@ -14,8 +14,8 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
+	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
@@ -202,7 +202,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 
 // ResourceNameWrite generates a valid write resource name.
 func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
-	rname, _ := c.ResourceName("uploads", uuid.New(), "blobs", hash, strconv.FormatInt(sizeBytes, 10))
+	rname, _ := c.ResourceName("uploads", uuid.New().String(), "blobs", hash, strconv.FormatInt(sizeBytes, 10))
 	return rname
 }
 
@@ -210,7 +210,7 @@ func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
 // TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
 // that gets merged in.
 func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) string {
-	rname, _ := c.ResourceName("uploads", uuid.New(), "compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
+	rname, _ := c.ResourceName("uploads", uuid.New().String(), "compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
 	return rname
 }
 

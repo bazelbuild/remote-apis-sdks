@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 
 	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -295,10 +295,10 @@ func (c *Command) FillDefaultFieldValues() {
 		c.Identifiers.ToolName = "remote-client"
 	}
 	if c.Identifiers.InvocationID == "" {
-		c.Identifiers.InvocationID = uuid.New()
+		c.Identifiers.InvocationID = uuid.New().String()
 	}
 	if c.Identifiers.ExecutionID == "" {
-		c.Identifiers.ExecutionID = uuid.New()
+		c.Identifiers.ExecutionID = uuid.New().String()
 	}
 	if c.InputSpec == nil {
 		c.InputSpec = &InputSpec{}

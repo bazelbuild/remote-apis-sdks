@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	log "github.com/golang/glog"
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
@@ -79,12 +79,12 @@ func WithMetadata(ctx context.Context, ms ...*Metadata) (context.Context, error)
 	m := MergeMetadata(ms...)
 	actionID := m.ActionID
 	if actionID == "" {
-		actionID = uuid.New()
+		actionID = uuid.New().String()
 		log.V(2).Infof("Generated action_id %s for %s", actionID, m.ToolName)
 	}
 	invocationID := m.InvocationID
 	if invocationID == "" {
-		invocationID = uuid.New()
+		invocationID = uuid.New().String()
 		log.V(2).Infof("Generated invocation_id %s for %s %s", invocationID, m.ToolName, actionID)
 	}
 
