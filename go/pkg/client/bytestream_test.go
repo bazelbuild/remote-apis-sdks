@@ -6,7 +6,6 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
@@ -232,7 +231,7 @@ func (b *ByteStream) Write(stream bsgrpc.ByteStream_WriteServer) error {
 	defer stream.SendAndClose(&bspb.WriteResponse{})
 	req, err := stream.Recv()
 	if err != nil {
-		return errors.Wrap(err, "failed to write")
+		return fmt.Errorf("failed to write: %w", err)
 	}
 
 	ls, ok := b.logStreams[req.GetResourceName()]

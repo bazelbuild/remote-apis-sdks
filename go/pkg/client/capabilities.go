@@ -2,9 +2,10 @@ package client
 
 import (
 	"context"
+	"fmt"
 
+	"errors"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/pkg/errors"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
@@ -22,7 +23,7 @@ func (c *Client) CheckCapabilities(ctx context.Context) (err error) {
 	}
 
 	if err := digest.CheckCapabilities(c.serverCaps); err != nil {
-		return errors.Wrapf(err, "digest function mismatch")
+		return fmt.Errorf("digest function mismatch: %w", err)
 	}
 
 	if c.serverCaps.CacheCapabilities != nil {

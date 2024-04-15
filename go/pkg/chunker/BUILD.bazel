@@ -9,7 +9,6 @@ go_library(
         "//go/pkg/reader",
         "//go/pkg/uploadinfo",
         "@com_github_klauspost_compress//zstd:go_default_library",
-        "@com_github_pkg_errors//:go_default_library",
     ],
 )
 

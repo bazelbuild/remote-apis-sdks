@@ -10,12 +10,12 @@ import (
 	"sort"
 	"strings"
 
+	"errors"
 	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/filemetadata"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/pkg/errors"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
@@ -325,10 +325,10 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 				// error unless materialization of symlinks pointing outside the
 				// exec root is enabled.
 				if !opts.MaterializeOutsideExecRoot {
-					return errors.Wrapf(err, "failed to determine the target of symlink %q as a child of %q", normPath, execRoot)
+					return fmt.Errorf("failed to determine the target of symlink %q as a child of %q: %w", normPath, execRoot, err)
 				}
 				if meta.Symlink.IsDangling {
-					return errors.Errorf("failed to materialize dangling symlink %q with target %q", normPath, meta.Symlink.Target)
+					return fmt.Errorf("failed to materialize dangling symlink %q with target %q", normPath, meta.Symlink.Target)
 				}
 				goto processNonSymlink
 			}

@@ -14,13 +14,13 @@ import (
 	"sync"
 	"time"
 
+	"errors"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
-	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -1140,7 +1140,7 @@ func (c *Client) DeleteOperation(ctx context.Context, req *oppb.DeleteOperationR
 // https://github.com/grpc/grpc-go/issues/3115
 func statusWrap(err error) error {
 	if st, ok := status.FromError(err); ok {
-		return status.Errorf(st.Code(), errors.WithStack(err).Error())
+		return status.Errorf(st.Code(), err.Error())
 	}
-	return errors.WithStack(err)
+	return err
 }

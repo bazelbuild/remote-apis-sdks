@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"errors"
 	"github.com/google/go-cmp/cmp"
-	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"errors"
 	log "github.com/golang/glog"
 	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/support/bundler"
 	"google.golang.org/grpc/status"
@@ -102,7 +102,7 @@ type UploadInput struct {
 // If the file is a danging symlink, then its digest is unknown.
 func (in *UploadInput) Digest(relPath string) (digest.Digest, error) {
 	if in.cleanPath == "" {
-		return digest.Digest{}, errors.Errorf("Digest called too soon")
+		return digest.Digest{}, errors.New("Digest called too soon")
 	}
 
 	relPath = filepath.Clean(relPath)
@@ -118,15 +118,15 @@ func (in *UploadInput) Digest(relPath string) (digest.Digest, error) {
 	// TODO(nodir): cache this syscall, perhaps using filemetadata package.
 	info, err := os.Lstat(absPath)
 	if err != nil {
-		return digest.Digest{}, errors.WithStack(err)
+		return digest.Digest{}, fmt.Errorf("failed to digest %q: %w", relPath, err)
 	}
 
 	key := makeFSCacheKey(absPath, info.Mode().IsRegular(), in.Exclude)
 	switch val, err, loaded := in.u.fsCache.Load(key); {
 	case !loaded:
-		return digest.Digest{}, errors.Wrapf(ErrDigestUnknown, "digest not found for %#v", absPath)
+		return digest.Digest{}, fmt.Errorf("digest not found for %#v: %w", absPath, ErrDigestUnknown)
 	case err != nil:
-		return digest.Digest{}, errors.WithStack(err)
+		return digest.Digest{}, fmt.Errorf("lookup failed for %q: %w", relPath, err)
 	default:
 		return digest.NewFromProtoUnvalidated(val.(*digested).digest), nil
 	}
@@ -155,14 +155,14 @@ func (in *UploadInput) init(u *uploader) error {
 	in.u = u
 
 	if !filepath.IsAbs(in.Path) {
-		return errors.Errorf("%q is not absolute", in.Path)
+		return fmt.Errorf("%q is not absolute", in.Path)
 	}
 	in.cleanPath = filepath.Clean(in.Path)
 
 	// Do not use os.Stat() here. We want to know if it is a symlink.
 	var err error
 	if in.pathInfo, err = os.Lstat(in.cleanPath); err != nil {
-		return errors.WithStack(err)
+		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
 	// Process the allowlist.
@@ -172,18 +172,18 @@ func (in *UploadInput) init(u *uploader) error {
 		in.cleanAllowlist = oneDot
 
 	case in.pathInfo.Mode().IsRegular():
-		return errors.Errorf("the Allowlist is not supported for regular files")
+		return errors.New("the Allowlist is not supported for regular files")
 
 	default:
 		in.cleanAllowlist = make([]string, len(in.Allowlist))
 		for i, subPath := range in.Allowlist {
 			if filepath.IsAbs(subPath) {
-				return errors.Errorf("the allowlisted path %q is not relative", subPath)
+				return fmt.Errorf("the allowlisted path %q is not relative", subPath)
 			}
 
 			cleanSubPath := filepath.Clean(subPath)
 			if cleanSubPath == ".." || strings.HasPrefix(cleanSubPath, parentDirPrefix) {
-				return errors.Errorf("the allowlisted path %q is not contained by %q", subPath, in.Path)
+				return fmt.Errorf("the allowlisted path %q is not contained by %q", subPath, in.Path)
 			}
 			in.cleanAllowlist[i] = cleanSubPath
 		}
@@ -392,7 +392,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 		}
 	})
 
-	return &UploadResult{Stats: u.stats, u: u}, errors.WithStack(eg.Wait())
+	return &UploadResult{Stats: u.stats, u: u}, eg.Wait()
 }
 
 // uploader implements a concurrent multi-stage pipeline to read blobs from the
@@ -433,11 +433,11 @@ type uploader struct {
 // startProcessing adds the item to the appropriate stage depending on its type.
 func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 	if !filepath.IsAbs(in.Path) {
-		return errors.Errorf("%q is not absolute", in.Path)
+		return fmt.Errorf("%q is not absolute", in.Path)
 	}
 
 	if err := in.init(u); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	// Schedule a file system walk.
@@ -463,13 +463,13 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 					var err error
 					// TODO(nodir): cache this syscall too.
 					if info, err = os.Lstat(absPath); err != nil {
-						return errors.WithStack(err)
+						return fmt.Errorf("failed to access %q: %w", absPath, err)
 					}
 				}
 
 				switch dig, err := u.visitPath(ctx, absPath, info, in.Exclude); {
 				case err != nil:
-					return errors.Wrapf(err, "%q", absPath)
+					return fmt.Errorf("%q: %w", absPath, err)
 				case dig != nil:
 					treeMu.Lock()
 					in.tree[relPath] = dig
@@ -479,7 +479,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 			})
 		}
 		if err := localEg.Wait(); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		log.Infof("done localEg %s", in.Path)
 		// At this point, all allowlisted paths are digest'ed, and we only need to
@@ -596,7 +596,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	if isLarge {
 		// Read only a few large files at a time.
 		if err := u.semLargeFile.Acquire(ctx, 1); err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		defer u.semLargeFile.Release(1)
 	}
@@ -640,7 +640,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 	dig, err := digest.NewFromReader(f)
 	region.End()
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to compute hash")
+		return nil, fmt.Errorf("failed to compute hash: %w", err)
 	}
 	log.Infof("compute digest %s: %s", info.Name(), time.Since(now))
 	ret.Digest = dig.ToProto()
@@ -658,7 +658,7 @@ func (u *uploader) visitRegularFile(ctx context.Context, absPath string, info os
 		// https://github.com/bazelbuild/remote-apis/blob/0cd22f7b466ced15d7803e8845d08d3e8d2c51bc/build/bazel/remote/execution/v2/remote_execution.proto#L250-L254
 
 		if res, err := u.findMissingBlobs(ctx, []*uploadItem{item}); err != nil {
-			return nil, errors.Wrapf(err, "failed to check existence")
+			return nil, fmt.Errorf("failed to check existence: %w", err)
 		} else if len(res.MissingBlobDigests) == 0 {
 			log.Infof("the file already exists. do not upload %s", absPath)
 			atomic.AddInt64(&u.stats.CacheHits.Digests, 1)
@@ -756,7 +756,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 
 	wgChildren.Wait()
 	if subErr != nil {
-		return nil, errors.Wrapf(subErr, "failed to read the directory %q entirely", absPath)
+		return nil, fmt.Errorf("failed to read the directory %q entirely: %w", absPath, subErr)
 	}
 
 	item := uploadItemFromDirMsg(absPath, dir)
@@ -778,7 +778,7 @@ func (u *uploader) visitDir(ctx context.Context, absPath string, pathExclude *re
 func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude *regexp.Regexp) (*digested, error) {
 	target, err := os.Readlink(absPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "os.ReadLink")
+		return nil, fmt.Errorf("os.ReadLink: %w", err)
 	}
 
 	// Determine absolute and relative paths of the target.
@@ -809,7 +809,7 @@ func (u *uploader) visitSymlink(ctx context.Context, absPath string, pathExclude
 	// Need to check symlink if AllowDanglingSymlinks is not set.
 	targetInfo, err := os.Lstat(absTarget)
 	if err != nil {
-		return nil, errors.Wrapf(err, "lstat to target of symlink (%s -> %s) has error", absPath, relTarget)
+		return nil, fmt.Errorf("lstat to target of symlink (%s -> %s) has error: %w", absPath, relTarget, err)
 	}
 
 	// TODO: detect cycles by symlink if needs to follow symlinks in this case.
@@ -853,7 +853,7 @@ func (u *uploader) scheduleCheck(ctx context.Context, item *uploadItem) error {
 
 func (u *uploader) findMissingBlobs(ctx context.Context, items []*uploadItem) (res *repb.FindMissingBlobsResponse, err error) {
 	if err := u.semFindMissingBlobs.Acquire(ctx, 1); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	defer u.semFindMissingBlobs.Release(1)
 
@@ -892,7 +892,7 @@ func (u *uploader) check(ctx context.Context, items []*uploadItem) error {
 		missingBytes += d.SizeBytes
 		item := byDigest[digest.NewFromProtoUnvalidated(d)]
 		if err := u.scheduleUpload(ctx, item); err != nil {
-			return errors.Wrapf(err, "%q", item.Title)
+			return fmt.Errorf("%q: %w", item.Title, err)
 		}
 	}
 	atomic.AddInt64(&u.stats.CacheMisses.Digests, int64(len(res.MissingBlobDigests)))
@@ -907,7 +907,7 @@ func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
 	if marshalledRequestSize(item.Digest) > int64(u.batchBundler.BundleByteLimit) {
 		// There is no way this blob can fit in a batch request.
 		u.eg.Go(func() error {
-			return errors.Wrap(u.stream(ctx, item, false), item.Title)
+			return fmt.Errorf("%q: %w", item.Title, u.stream(ctx, item, false))
 		})
 		return nil
 	}
@@ -915,7 +915,7 @@ func (u *uploader) scheduleUpload(ctx context.Context, item *uploadItem) error {
 	// Since this blob is small enough, just read it entirely.
 	contents, err := item.ReadAll()
 	if err != nil {
-		return errors.Wrapf(err, "failed to read the item")
+		return fmt.Errorf("failed to read the item: %w", err)
 	}
 	req := &repb.BatchUpdateBlobsRequest_Request{Digest: item.Digest, Data: contents}
 	return u.batchBundler.AddWait(ctx, req, proto.Size(req))
@@ -1033,11 +1033,11 @@ func (u *uploader) stream(ctx context.Context, item *uploadItem, updateCacheStat
 				// here.
 				return nil
 			case err != nil:
-				return errors.Wrapf(err, "failed to read the file/blob")
+				return fmt.Errorf("failed to read the file/blob: %w", err)
 			}
 
 			if err := enc.Close(); err != nil {
-				return errors.Wrapf(err, "failed to close the zstd encoder")
+				return fmt.Errorf("failed to close the zstd encoder: %w", err)
 			}
 			return pw.Close()
 		})

@@ -8,7 +8,6 @@ require (
 	github.com/google/go-cmp v0.5.9
 	github.com/google/uuid v1.3.0
 	github.com/klauspost/compress v1.17.8
-	github.com/pkg/errors v0.9.1
 	github.com/pkg/xattr v0.4.4
 	golang.org/x/oauth2 v0.10.0
 	golang.org/x/sync v0.6.0

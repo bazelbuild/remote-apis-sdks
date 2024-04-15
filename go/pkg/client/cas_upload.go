@@ -16,7 +16,6 @@ import (
 	log "github.com/golang/glog"
 	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -568,7 +567,7 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 					}
 
 					if dg.Size != int64(len(data)) {
-						return errors.Errorf("blob size changed while uploading, given:%d now:%d for %s", dg.Size, int64(len(data)), ue.Path)
+						return fmt.Errorf("blob size changed while uploading, given:%d now:%d for %s", dg.Size, int64(len(data)), ue.Path)
 					}
 
 					bchMap[dg] = data

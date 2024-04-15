@@ -8,7 +8,6 @@ import (
 	"os"
 
 	log "github.com/golang/glog"
-	"github.com/pkg/errors"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -34,7 +33,7 @@ func (c *Client) WriteBytesAtRemoteOffset(ctx context.Context, name string, data
 	ue := uploadinfo.EntryFromBlob(data)
 	ch, err := chunker.New(ue, false, int(c.ChunkMaxSize))
 	if err != nil {
-		return 0, errors.Wrap(err, "failed to create a chunk")
+		return 0, fmt.Errorf("failed to create a chunk: %w", err)
 	}
 	writtenBytes, err := c.writeChunked(ctx, name, ch, doNotFinalize, initialOffset)
 	if err != nil {
@@ -49,7 +48,7 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 	closure := func() error {
 		// Retry by starting the stream from the beginning.
 		if err := ch.Reset(); err != nil {
-			return errors.Wrap(err, "failed to Reset")
+			return fmt.Errorf("failed to Reset: %w", err)
 		}
 		totalBytes = int64(0)
 		// TODO(olaola): implement resumable uploads. initialOffset passed in allows to

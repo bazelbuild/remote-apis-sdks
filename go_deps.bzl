@@ -122,12 +122,6 @@ def remote_apis_sdks_go_deps():
         version = "v1.17.8",
     )
     go_repository(
-        name = "com_github_pkg_errors",
-        importpath = "github.com/pkg/errors",
-        sum = "h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=",
-        version = "v0.9.1",
-    )
-    go_repository(
         name = "com_github_pkg_xattr",
         importpath = "github.com/pkg/xattr",
         sum = "h1:FSoblPdYobYoKCItkqASqcrKCxRn9Bgurz0sCBwzO5g=",
