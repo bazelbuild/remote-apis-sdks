@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/user"
@@ -128,8 +129,8 @@ type Client struct {
 	//
 	// These fields are logically "protected" and are intended for use by extensions of Client.
 	Retrier       *Retrier
-	Connection    *grpc.ClientConn
-	CASConnection *grpc.ClientConn // Can be different from Connection a separate CAS endpoint is provided.
+	Connection    grpc.ClientConnInterface
+	CASConnection grpc.ClientConnInterface // Can be different from Connection a separate CAS endpoint is provided.
 	// StartupCapabilities denotes whether to load ServerCapabilities on startup.
 	StartupCapabilities StartupCapabilities
 	// LegacyExecRootRelativeOutputs denotes whether outputs are relative to the exec root.
@@ -213,12 +214,16 @@ func (c *Client) Close() error {
 	// Close the channels & stop background operations.
 	UnifiedUploads(false).Apply(c)
 	UnifiedDownloads(false).Apply(c)
-	err := c.Connection.Close()
-	if err != nil {
-		return err
+	if closer, ok := c.Connection.(io.Closer); ok {
+		err := closer.Close()
+		if err != nil {
+			return err
+		}
 	}
 	if c.CASConnection != c.Connection {
-		return c.CASConnection.Close()
+		if closer, ok := c.CASConnection.(io.Closer); ok {
+			return closer.Close()
+		}
 	}
 	return nil
 }
@@ -537,6 +542,12 @@ type DialParams struct {
 	//
 	// If this is specified, TLSClientAuthCert must also be specified.
 	TLSClientAuthKey string
+
+	// RoundRobinBalancer enables the simplified gRPC balancer instead of the default one.
+	RoundRobinBalancer bool
+
+	// RoundRobinPoolSize specifies the pool size for the round robin load balancer.
+	RoundRobinPoolSize int
 }
 
 func createGRPCInterceptor(p DialParams) *balancer.GCPInterceptor {
@@ -593,7 +604,7 @@ func createTLSConfig(params DialParams) (*tls.Config, error) {
 }
 
 // Dial dials a given endpoint and returns the grpc connection that is established.
-func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, AuthType, error) {
+func Dial(ctx context.Context, endpoint string, params DialParams) (grpc.ClientConnInterface, AuthType, error) {
 	var authUsed AuthType
 
 	var opts []grpc.DialOption
@@ -661,6 +672,18 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
+
+	if params.RoundRobinBalancer {
+		dialFn := func(ctx context.Context) (*grpc.ClientConn, error) {
+			return grpc.DialContext(ctx, endpoint, opts...)
+		}
+		conn, err := balancer.NewRoundRobinBalancer(ctx, params.RoundRobinPoolSize, dialFn)
+		if err != nil {
+			return nil, authUsed, fmt.Errorf("couldn't create round robin load balancer: %w", err)
+		}
+		return conn, authUsed, nil
+	}
+
 	grpcInt := createGRPCInterceptor(params)
 	opts = append(opts, grpc.WithDisableServiceConfig())
 	opts = append(opts, grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":{}}]}`, balancer.Name)))
@@ -676,7 +699,7 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 
 // DialRaw dials a remote execution service and returns the grpc connection that is established.
 // TODO(olaola): remove this overload when all clients use Dial.
-func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, AuthType, error) {
+func DialRaw(ctx context.Context, params DialParams) (grpc.ClientConnInterface, AuthType, error) {
 	if params.Service == "" {
 		return nil, UnknownAuth, fmt.Errorf("service needs to be specified")
 	}
@@ -712,7 +735,7 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 }
 
 // NewClientFromConnection creates a client from gRPC connections to a remote execution service and a cas service.
-func NewClientFromConnection(ctx context.Context, instanceName string, conn, casConn *grpc.ClientConn, opts ...Opt) (*Client, error) {
+func NewClientFromConnection(ctx context.Context, instanceName string, conn, casConn grpc.ClientConnInterface, opts ...Opt) (*Client, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("connection to remote execution service may not be nil")
 	}
@@ -1022,7 +1045,7 @@ func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionReque
 
 // GetBackendCapabilities returns the capabilities for a specific server connection
 // (either the main connection or the CAS connection).
-func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientConn, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
+func (c *Client) GetBackendCapabilities(ctx context.Context, conn grpc.ClientConnInterface, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "GetCapabilities", func(ctx context.Context) (e error) {

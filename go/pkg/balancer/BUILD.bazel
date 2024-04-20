@@ -6,6 +6,7 @@ go_library(
         "gcp_balancer.go",
         "gcp_interceptor.go",
         "gcp_picker.go",
+        "roundrobin.go",
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer",
     visibility = ["//visibility:public"],

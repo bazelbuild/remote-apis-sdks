@@ -74,6 +74,11 @@ var (
 	KeepAliveTimeout = flag.Duration("grpc_keepalive_timeout", 20*time.Second, "After having pinged for keepalive check, the client waits for a duration of Timeout and if no activity is seen even after that the connection is closed. Default is 20s.")
 	// KeepAlivePermitWithoutStream specifies gRPCs keepalive permitWithoutStream parameter.
 	KeepAlivePermitWithoutStream = flag.Bool("grpc_keepalive_permit_without_stream", false, "If true, client sends keepalive pings even with no active RPCs; otherwise, doesn't send pings even if time and timeout are set. Default is false.")
+	// UseRoundRobinBalancer is a temporary feature flag to rollout a simplified load balancer.
+	// See http://go/remote-apis-sdks/issues/499
+	UseRoundRobinBalancer = flag.Bool("use_simple_balancer", false, "If true, a simple round-robin connection bool is used for gRPC. Otherwise, the existing load balancer is used.")
+	// RoundRobinBalancerPoolSize specifies the pool size for the round robin balancer.
+	RoundRobinBalancerPoolSize = flag.Int("round_robin_balancer_pool_size", client.DefaultMaxConcurrentRequests, "pool size for round robin grpc balacner")
 )
 
 func init() {
@@ -145,5 +150,7 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		TLSClientAuthKey:      *TLSClientAuthKey,
 		MaxConcurrentRequests: uint32(*MaxConcurrentRequests),
 		MaxConcurrentStreams:  uint32(*MaxConcurrentStreams),
+		RoundRobinBalancer:    *UseRoundRobinBalancer,
+		RoundRobinPoolSize:    *RoundRobinBalancerPoolSize,
 	}, opts...)
 }
