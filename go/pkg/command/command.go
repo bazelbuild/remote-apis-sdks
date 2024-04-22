@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	log "github.com/golang/glog"
 	"github.com/google/uuid"
 
 	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
@@ -295,10 +296,18 @@ func (c *Command) FillDefaultFieldValues() {
 		c.Identifiers.ToolName = "remote-client"
 	}
 	if c.Identifiers.InvocationID == "" {
-		c.Identifiers.InvocationID = uuid.New().String()
+		if id, err := uuid.NewRandom(); err == nil {
+			c.Identifiers.InvocationID = id.String()
+		} else {
+			log.Warningf("Failed to generate InvocationID: %s", err)
+		}
 	}
 	if c.Identifiers.ExecutionID == "" {
-		c.Identifiers.ExecutionID = uuid.New().String()
+		if id, err := uuid.NewRandom(); err == nil {
+			c.Identifiers.ExecutionID = id.String()
+		} else {
+			log.Warningf("Failed to generate ExecutionID: %s", err)
+		}
 	}
 	if c.InputSpec == nil {
 		c.InputSpec = &InputSpec{}

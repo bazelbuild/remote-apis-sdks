@@ -108,7 +108,11 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 	if err != nil {
 		return dg, err
 	}
-	_, err = c.writeChunked(ctx, c.writeRscName(ue), ch, false, 0)
+	rscName, err := c.writeRscName(ue)
+	if err != nil {
+		return dg, err
+	}
+	_, err = c.writeChunked(ctx, rscName, ch, false, 0)
 	return dg, err
 }
 
@@ -201,20 +205,26 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 }
 
 // ResourceNameWrite generates a valid write resource name.
-func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
-	rname, _ := c.ResourceName("uploads", uuid.New().String(), "blobs", hash, strconv.FormatInt(sizeBytes, 10))
-	return rname
+func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return c.ResourceName("uploads", id.String(), "blobs", hash, strconv.FormatInt(sizeBytes, 10))
 }
 
 // ResourceNameCompressedWrite generates a valid write resource name.
 // TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
 // that gets merged in.
-func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) string {
-	rname, _ := c.ResourceName("uploads", uuid.New().String(), "compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
-	return rname
+func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return c.ResourceName("uploads", id.String(), "compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
 }
 
-func (c *Client) writeRscName(ue *uploadinfo.Entry) string {
+func (c *Client) writeRscName(ue *uploadinfo.Entry) (string, error) {
 	if c.shouldCompressEntry(ue) {
 		return c.ResourceNameCompressedWrite(ue.Digest.Hash, ue.Digest.Size)
 	}
@@ -485,7 +495,11 @@ func (c *Client) upload(ctx context.Context, reqs []*uploadRequest) {
 				if err != nil {
 					updateAndNotify(st, 0, err, true)
 				}
-				totalBytes, err := c.writeChunked(cCtx, c.writeRscName(st.ue), ch, false, 0)
+				rscName, err := c.writeRscName(st.ue)
+				if err != nil {
+					updateAndNotify(st, 0, err, true)
+				}
+				totalBytes, err := c.writeChunked(cCtx, rscName, ch, false, 0)
 				updateAndNotify(st, totalBytes, err, true)
 			}
 		}()
@@ -570,7 +584,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				if err != nil {
 					return err
 				}
-				written, err := c.writeChunked(eCtx, c.writeRscName(ue), ch, false, 0)
+				rscName, err := c.writeRscName(ue)
+				if err != nil {
+					return err
+				}
+				written, err := c.writeChunked(eCtx, rscName, ch, false, 0)
 				if err != nil {
 					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
 				}
