@@ -116,7 +116,7 @@ func shouldIgnoreErr(err error) bool {
 	if e, ok := err.(*filemetadata.FileError); ok {
 		return os.IsPermission(e.Err)
 	}
-	return false
+	return os.IsPermission(err)
 }
 
 func getRelPath(base, path string) (string, error) {
@@ -367,6 +367,9 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 
 			f, err := os.Open(absPath)
 			if err != nil {
+				if shouldIgnoreErr(err) {
+					continue
+				}
 				return err
 			}
 
