@@ -798,6 +798,8 @@ var DefaultRPCTimeouts = map[string]time.Duration{
 	"GetCapabilities":  5 * time.Second,
 	"BatchUpdateBlobs": time.Minute,
 	"BatchReadBlobs":   time.Minute,
+	"Read":             time.Minute,
+	"Write":            time.Minute,
 	"GetTree":          time.Minute,
 	// Note: due to an implementation detail, WaitExecution will use the same
 	// per-RPC timeout as Execute. It is extremely ill-advised to set the Execute
