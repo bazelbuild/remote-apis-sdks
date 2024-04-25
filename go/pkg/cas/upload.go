@@ -15,8 +15,8 @@ import (
 	"time"
 
 	log "github.com/golang/glog"
+	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/support/bundler"
@@ -1068,10 +1068,14 @@ func (u *uploader) streamFromReader(ctx context.Context, r io.Reader, digest *re
 	if instanceSegment == "/" {
 		instanceSegment = ""
 	}
+	uploadID, err := uuid.NewRandom()
+	if err != nil {
+		return err
+	}
 	if compressed {
-		req.ResourceName = fmt.Sprintf("%suploads/%s/compressed-blobs/zstd/%s/%d", instanceSegment, uuid.New(), digest.Hash, digest.SizeBytes)
+		req.ResourceName = fmt.Sprintf("%suploads/%s/compressed-blobs/zstd/%s/%d", instanceSegment, uploadID.String(), digest.Hash, digest.SizeBytes)
 	} else {
-		req.ResourceName = fmt.Sprintf("%suploads/%s/blobs/%s/%d", instanceSegment, uuid.New(), digest.Hash, digest.SizeBytes)
+		req.ResourceName = fmt.Sprintf("%suploads/%s/blobs/%s/%d", instanceSegment, uploadID.String(), digest.Hash, digest.SizeBytes)
 	}
 
 	buf := u.streamBufs.Get().(*[]byte)
