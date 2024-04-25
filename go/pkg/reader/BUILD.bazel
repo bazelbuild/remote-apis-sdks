@@ -6,8 +6,8 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/reader",
     visibility = ["//visibility:public"],
     deps = [
+        "@com_github_golang_glog//:go_default_library",
         "@com_github_klauspost_compress//zstd:go_default_library",
-        "@com_github_mostynb_zstdpool_syncpool//:go_default_library",
     ],
 )
 

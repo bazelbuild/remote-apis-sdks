@@ -18,7 +18,6 @@ import (
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
 	"github.com/klauspost/compress/zstd"
-	syncpool "github.com/mostynb/zstdpool-syncpool"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -536,11 +535,20 @@ func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
 	r, nw := io.Pipe()
 
 	decoderInit.Do(func() {
-		decoders = syncpool.NewDecoderPool(zstd.WithDecoderConcurrency(1))
+		decoders = &sync.Pool{
+			New: func() interface{} {
+				d, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+				if err != nil {
+					log.Errorf("Error creating new decoder: %v", err)
+					return nil
+				}
+				return d
+			},
+		}
 	})
 
 	decdIntf := decoders.Get()
-	decoderW, ok := decdIntf.(*syncpool.DecoderWrapper)
+	decoderW, ok := decdIntf.(*zstd.Decoder)
 	if !ok || decoderW == nil {
 		return nil, nil, fmt.Errorf("failed creating new decoder")
 	}
@@ -562,8 +570,12 @@ func NewCompressedWriteBuffer(w io.Writer) (io.WriteCloser, chan error, error) {
 			// have to go somewhere or they'll block execution.
 			io.Copy(io.Discard, r)
 		}
-		// DecoderWrapper.Close moves the decoder back to the Pool.
-		decoderW.Close()
+		// Reset and move the decoder back to the Pool.
+		if rerr := decoderW.Reset(nil); rerr == nil {
+			decoders.Put(decoderW)
+		} else {
+			log.Warningf("Error resetting decoder: %v", rerr)
+		}
 		done <- err
 	}()
 

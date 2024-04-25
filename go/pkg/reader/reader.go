@@ -9,8 +9,8 @@ import (
 	"os"
 	"sync"
 
+	log "github.com/golang/glog"
 	"github.com/klauspost/compress/zstd"
-	syncpool "github.com/mostynb/zstdpool-syncpool"
 )
 
 // errNotInitialized is the error returned from Read() by a ReedSeeker that
@@ -156,7 +156,7 @@ func (sb *syncedBuffer) Reset() {
 
 type compressedSeeker struct {
 	fs    ReadSeeker
-	encdW *syncpool.EncoderWrapper
+	encdW *zstd.Encoder
 	// This keeps the compressed data
 	buf *syncedBuffer
 }
@@ -176,14 +176,23 @@ func NewCompressedSeeker(fs ReadSeeker) (ReadSeeker, error) {
 	}
 
 	encoderInit.Do(func() {
-		encoders = syncpool.NewEncoderPool(zstd.WithEncoderConcurrency(1))
+		encoders = &sync.Pool{
+			New: func() interface{} {
+				e, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+				if err != nil {
+					log.Errorf("Error creating new encoder: %v", err)
+					return nil
+				}
+				return e
+			},
+		}
 	})
 
 	buf := bytes.NewBuffer(nil)
 	sb := &syncedBuffer{buf: buf}
 
 	encdIntf := encoders.Get()
-	encdW, ok := encdIntf.(*syncpool.EncoderWrapper)
+	encdW, ok := encdIntf.(*zstd.Encoder)
 	if !ok || encdW == nil {
 		return nil, errors.New("failed creating new encoder")
 	}
@@ -245,7 +254,7 @@ func (cfs *compressedSeeker) SeekOffset(offset int64) error {
 	if cfs.encdW == nil {
 		encdIntf := encoders.Get()
 		var ok bool
-		cfs.encdW, ok = encdIntf.(*syncpool.EncoderWrapper)
+		cfs.encdW, ok = encdIntf.(*zstd.Encoder)
 		if !ok || cfs.encdW == nil {
 			return errors.New("failed to get a new encoder")
 		}
