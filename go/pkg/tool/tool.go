@@ -287,7 +287,7 @@ func (c *Client) UploadBlob(ctx context.Context, path string) error {
 
 // UploadBlobV2 uploads a blob from the specified path into the remote cache using newer cas implementation.
 func (c *Client) UploadBlobV2(ctx context.Context, path string) error {
-	casC, err := cas.NewClient(ctx, c.GrpcClient.Connection, c.GrpcClient.InstanceName)
+	casC, err := cas.NewClient(ctx, c.GrpcClient.Connection(), c.GrpcClient.InstanceName)
 	if err != nil {
 		return errors.WithStack(err)
 	}

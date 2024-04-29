@@ -9,7 +9,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-type roundRobinConnPool struct {
+// RRConnPool is a pool of *grpc.ClientConn that are selected in a round-robin fashion.
+type RRConnPool struct {
 	grpc.ClientConnInterface
 	io.Closer
 
@@ -17,12 +18,14 @@ type roundRobinConnPool struct {
 	idx   uint32 // access via sync/atomic
 }
 
-func (p *roundRobinConnPool) Conn() *grpc.ClientConn {
+// Conn picks the next connection from the pool in a round-robin fasion.
+func (p *RRConnPool) Conn() *grpc.ClientConn {
 	i := atomic.AddUint32(&p.idx, 1)
 	return p.conns[i%uint32(len(p.conns))]
 }
 
-func (p *roundRobinConnPool) Close() error {
+// Close closes all connections in the bool.
+func (p *RRConnPool) Close() error {
 	var errs error
 	for _, conn := range p.conns {
 		if err := conn.Close(); err != nil {
@@ -32,18 +35,23 @@ func (p *roundRobinConnPool) Close() error {
 	return errs
 }
 
-func (p *roundRobinConnPool) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
+// Invoke picks up a connection from the pool and delegates the call to it.
+func (p *RRConnPool) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
 	return p.Conn().Invoke(ctx, method, args, reply, opts...)
 }
 
-func (p *roundRobinConnPool) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+// NewStream picks up a connection from the pool and delegates the call to it.
+func (p *RRConnPool) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	return p.Conn().NewStream(ctx, desc, method, opts...)
 }
 
+// DialFunc defines the dial function used in creating the pool.
 type DialFunc func(ctx context.Context) (*grpc.ClientConn, error)
 
-func NewRoundRobinBalancer(ctx context.Context, poolSize int, dialFn DialFunc) (grpc.ClientConnInterface, error) {
-	pool := &roundRobinConnPool{}
+// NewRRConnPool makes a new instance of the round-robin connection pool and dials as many as poolSize connections
+// using the provided dialFn.
+func NewRRConnPool(ctx context.Context, poolSize int, dialFn DialFunc) (*RRConnPool, error) {
+	pool := &RRConnPool{}
 	for i := 0; i < poolSize; i++ {
 		conn, err := dialFn(ctx)
 		if err != nil {

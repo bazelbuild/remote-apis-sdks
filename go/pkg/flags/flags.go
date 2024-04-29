@@ -76,7 +76,7 @@ var (
 	KeepAlivePermitWithoutStream = flag.Bool("grpc_keepalive_permit_without_stream", false, "If true, client sends keepalive pings even with no active RPCs; otherwise, doesn't send pings even if time and timeout are set. Default is false.")
 	// UseRoundRobinBalancer is a temporary feature flag to rollout a simplified load balancer.
 	// See http://go/remote-apis-sdks/issues/499
-	UseRoundRobinBalancer = flag.Bool("use_simple_balancer", false, "If true, a simple round-robin connection bool is used for gRPC. Otherwise, the existing load balancer is used.")
+	UseRoundRobinBalancer = flag.Bool("use_round_robin_balancer", false, "If true, a round-robin connection bool is used for gRPC. Otherwise, the existing load balancer is used.")
 	// RoundRobinBalancerPoolSize specifies the pool size for the round robin balancer.
 	RoundRobinBalancerPoolSize = flag.Int("round_robin_balancer_pool_size", client.DefaultMaxConcurrentRequests, "pool size for round robin grpc balacner")
 )
