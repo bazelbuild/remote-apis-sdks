@@ -140,6 +140,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 	cmd := command.FromREProto(commandProto)
 	cmd.InputSpec.Inputs = inputPaths
 	cmd.InputSpec.InputNodeProperties = nodeProperties
+	cmd.InputSpec.SymlinkBehavior = command.PreserveSymlink
 	cmd.ExecRoot = inputRoot
 	if actionProto.Timeout != nil {
 		cmd.Timeout = actionProto.Timeout.AsDuration()
