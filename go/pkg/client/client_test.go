@@ -3,14 +3,12 @@ package client
 import (
 	"context"
 	"errors"
-	"net"
 	"os"
 	"path"
 	"testing"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	svpb "github.com/bazelbuild/remote-apis/build/bazel/semver"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -204,33 +202,20 @@ func TestNewClient(t *testing.T) {
 	defer c.Close()
 }
 
-func TestNewClientFromConnection(t *testing.T) {
+func TestNewClientRR(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	l, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("Cannot listen: %v", err)
-	}
-	conn, err := grpc.Dial(l.Addr().String(), grpc.WithInsecure())
-	if err != nil {
-		t.Fatalf("Cannot establish gRPC connection: %v", err)
-	}
 
-	c, err := NewClientFromConnection(ctx, instance, conn, conn, StartupCapabilities(false))
+	c, err := NewClient(ctx, instance, DialParams{
+		Service:            "server",
+		NoSecurity:         true,
+		RoundRobinBalancer: true,
+		RoundRobinPoolSize: 25,
+	}, StartupCapabilities(false))
 	if err != nil {
 		t.Fatalf("Error creating client: %v", err)
 	}
 	defer c.Close()
-
-	_, err = NewClientFromConnection(ctx, instance, nil, conn, StartupCapabilities(false))
-	if err == nil {
-		t.Fatalf("Expected error got nil")
-	}
-
-	_, err = NewClientFromConnection(ctx, instance, conn, nil, StartupCapabilities(false))
-	if err == nil {
-		t.Fatalf("Expected error got nil")
-	}
 }
 
 func TestResourceName(t *testing.T) {

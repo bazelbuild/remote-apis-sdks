@@ -65,12 +65,12 @@ func (c *Client) GetCapabilities(ctx context.Context) (res *repb.ServerCapabilit
 // be determined from that; ExecutionCapabilities will always come from the main URL.
 func (c *Client) GetCapabilitiesForInstance(ctx context.Context, instance string) (res *repb.ServerCapabilities, err error) {
 	req := &repb.GetCapabilitiesRequest{InstanceName: instance}
-	caps, err := c.GetBackendCapabilities(ctx, c.Connection, req)
+	caps, err := c.GetBackendCapabilities(ctx, c.Connection(), req)
 	if err != nil {
 		return nil, err
 	}
-	if c.CASConnection != c.Connection {
-		casCaps, err := c.GetBackendCapabilities(ctx, c.CASConnection, req)
+	if c.CASConnection() != c.Connection() {
+		casCaps, err := c.GetBackendCapabilities(ctx, c.CASConnection(), req)
 		if err != nil {
 			return nil, err
 		}

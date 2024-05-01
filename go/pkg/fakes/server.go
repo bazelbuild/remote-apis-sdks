@@ -85,8 +85,11 @@ func (s *Server) NewTestClient(ctx context.Context) (*rc.Client, error) {
 // NewClientConn returns a gRPC client connction to the server.
 func (s *Server) NewClientConn(ctx context.Context) (*grpc.ClientConn, error) {
 	p := s.dialParams()
-	conn, _, err := client.Dial(ctx, p.Service, p)
-	return conn, err
+	opts, _, err := client.OptsFromParams(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return grpc.Dial(p.Service, opts...)
 }
 
 func (s *Server) dialParams() rc.DialParams {
