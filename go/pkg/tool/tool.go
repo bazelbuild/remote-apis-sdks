@@ -544,13 +544,16 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 		return fmt.Errorf("container-image platform property missing from command proto: %v", cmd)
 	}
 	var execScript bytes.Buffer
-	dockerCmd := shellSprintf("docker run -i -t -w /b/f/w -v `pwd`/input:/b/f/w -v `pwd`/run_command.sh:/b/f/w/run_command.sh %s %s ./run_command.sh\n", dockerParams, container)
 	execScript.WriteString(shellSprintf("#!/bin/bash\n\n"))
 	execScript.WriteString(shellSprintf("# This script can be used to run the action locally on\n"))
 	execScript.WriteString(shellSprintf("# this machine.\n"))
 	execScript.WriteString(shellSprintf("echo \"WARNING: The results from executing the action through this script may differ from results from RBE.\"\n"))
 	execScript.WriteString(shellSprintf("set -x\n"))
-	execScript.WriteString(dockerCmd)
+	execScript.WriteString("docker run -i -t -w /b/f/w -v `pwd`/input:/b/f/w -v `pwd`/run_command.sh:/b/f/w/run_command.sh ")
+	execScript.WriteString(dockerParams)
+	execScript.WriteString(" ")
+	execScript.WriteString(container)
+	execScript.WriteString(" ./run_command.sh\n")
 	return os.WriteFile(filename, execScript.Bytes(), 0755)
 }
 
