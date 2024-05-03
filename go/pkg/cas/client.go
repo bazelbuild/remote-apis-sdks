@@ -28,7 +28,7 @@ import (
 //
 // All fields are considered immutable, and should not be changed.
 type Client struct {
-	conn *grpc.ClientConn
+	conn grpc.ClientConnInterface
 	// InstanceName is the full name of the RBE instance.
 	InstanceName string
 
@@ -234,12 +234,12 @@ func (c *RPCConfig) validate() error {
 
 // NewClient creates a new client with the default configuration.
 // Use client.Dial to create a connection.
-func NewClient(ctx context.Context, conn *grpc.ClientConn, instanceName string) (*Client, error) {
+func NewClient(ctx context.Context, conn grpc.ClientConnInterface, instanceName string) (*Client, error) {
 	return NewClientWithConfig(ctx, conn, instanceName, DefaultClientConfig())
 }
 
 // NewClientWithConfig creates a new client and accepts a configuration.
-func NewClientWithConfig(ctx context.Context, conn *grpc.ClientConn, instanceName string, config ClientConfig) (*Client, error) {
+func NewClientWithConfig(ctx context.Context, conn grpc.ClientConnInterface, instanceName string, config ClientConfig) (*Client, error) {
 	switch err := config.Validate(); {
 	case err != nil:
 		return nil, errors.Wrap(err, "invalid config")
