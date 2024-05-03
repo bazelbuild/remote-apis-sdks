@@ -108,9 +108,11 @@ func (ce *InitError) Error() string {
 	return fmt.Sprintf("%v, authentication type (identity) used=%q", ce.Err.Error(), ce.AuthUsed)
 }
 
-// Temporary interface definition until the gcp balancer is removed in favour of
-// the round-robin balancer.
-type grpcClientConn interface {
+// GrpcClientConn allows accepting pre-created connections to be used when creating clients.
+// It is only intended to be used by methods in this package.
+// It is not intended for SDK users to depend on.
+// It might be removed in future update.
+type GrpcClientConn interface {
 	grpc.ClientConnInterface
 	io.Closer
 }
@@ -136,8 +138,8 @@ type Client struct {
 	//
 	// These fields are logically "protected" and are intended for use by extensions of Client.
 	Retrier       *Retrier
-	connection    grpcClientConn
-	casConnection grpcClientConn
+	connection    GrpcClientConn
+	casConnection GrpcClientConn
 	// StartupCapabilities denotes whether to load ServerCapabilities on startup.
 	StartupCapabilities StartupCapabilities
 	// LegacyExecRootRelativeOutputs denotes whether outputs are relative to the exec root.
@@ -216,18 +218,16 @@ const (
 	DefaultRegularMode = 0644
 )
 
-func (c *Client) Connection() *grpc.ClientConn {
-	if conn, ok := c.connection.(*grpc.ClientConn); ok {
-		return conn
-	}
-	return c.connection.(*balancer.RRConnPool).Conn()
+// Connection is meant to be used with generated methods that accept
+// grpc.ClientConnInterface
+func (c *Client) Connection() grpc.ClientConnInterface {
+	return c.connection
 }
 
-func (c *Client) CASConnection() *grpc.ClientConn {
-	if conn, ok := c.casConnection.(*grpc.ClientConn); ok {
-		return conn
-	}
-	return c.casConnection.(*balancer.RRConnPool).Conn()
+// CASConnection is meant to be used with generated methods that accept
+// grpc.ClientConnInterface
+func (c *Client) CASConnection() grpc.ClientConnInterface {
+	return c.casConnection
 }
 
 // Close closes the underlying gRPC connection(s).
@@ -715,7 +715,7 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		return nil, fmt.Errorf("failed to prepare gRPC dial options: %v", err)
 	}
 
-	var conn, casConn grpcClientConn
+	var conn, casConn GrpcClientConn
 	if params.RoundRobinBalancer {
 		dial := func(ctx context.Context) (*grpc.ClientConn, error) {
 			return grpc.DialContext(ctx, params.Service, dialOpts...)
@@ -744,6 +744,21 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		return nil, &InitError{Err: statusWrap(err), AuthUsed: authUsed}
 	}
 
+	client, err := NewClientFromConnection(ctx, instanceName, conn, casConn, opts...)
+	if err != nil {
+		return nil, &InitError{Err: err, AuthUsed: authUsed}
+	}
+	return client, nil
+}
+
+// NewClientFromConnection creates a client from gRPC connections to a remote execution service and a cas service.
+func NewClientFromConnection(ctx context.Context, instanceName string, conn, casConn GrpcClientConn, opts ...Opt) (*Client, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connection to remote execution service may not be nil")
+	}
+	if casConn == nil {
+		return nil, fmt.Errorf("connection to CAS service may not be nil")
+	}
 	client := &Client{
 		InstanceName:                  instanceName,
 		actionCache:                   regrpc.NewActionCacheClient(casConn),
@@ -787,7 +802,6 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		return nil, fmt.Errorf("CASConcurrency should be at least 1")
 	}
 	client.RunBackgroundTasks(ctx)
-
 	return client, nil
 }
 
@@ -1048,7 +1062,7 @@ func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionReque
 
 // GetBackendCapabilities returns the capabilities for a specific server connection
 // (either the main connection or the CAS connection).
-func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientConn, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
+func (c *Client) GetBackendCapabilities(ctx context.Context, conn grpc.ClientConnInterface, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "GetCapabilities", func(ctx context.Context) (e error) {
