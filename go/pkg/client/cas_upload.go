@@ -8,16 +8,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/io/impath"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
+	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
@@ -110,7 +108,11 @@ func (c *Client) WriteBlob(ctx context.Context, blob []byte) (digest.Digest, err
 	if err != nil {
 		return dg, err
 	}
-	_, err = c.writeChunked(ctx, c.writeRscName(ue), ch, false, 0)
+	rscName, err := c.writeRscName(ue)
+	if err != nil {
+		return dg, err
+	}
+	_, err = c.writeChunked(ctx, rscName, ch, false, 0)
 	return dg, err
 }
 
@@ -203,20 +205,26 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 }
 
 // ResourceNameWrite generates a valid write resource name.
-func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) string {
-	rname, _ := c.ResourceName("uploads", uuid.New(), "blobs", hash, strconv.FormatInt(sizeBytes, 10))
-	return rname
+func (c *Client) ResourceNameWrite(hash string, sizeBytes int64) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return c.ResourceName("uploads", id.String(), "blobs", hash, strconv.FormatInt(sizeBytes, 10))
 }
 
 // ResourceNameCompressedWrite generates a valid write resource name.
 // TODO(rubensf): Converge compressor to proto in https://github.com/bazelbuild/remote-apis/pull/168 once
 // that gets merged in.
-func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) string {
-	rname, _ := c.ResourceName("uploads", uuid.New(), "compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
-	return rname
+func (c *Client) ResourceNameCompressedWrite(hash string, sizeBytes int64) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return c.ResourceName("uploads", id.String(), "compressed-blobs", "zstd", hash, strconv.FormatInt(sizeBytes, 10))
 }
 
-func (c *Client) writeRscName(ue *uploadinfo.Entry) string {
+func (c *Client) writeRscName(ue *uploadinfo.Entry) (string, error) {
 	if c.shouldCompressEntry(ue) {
 		return c.ResourceNameCompressedWrite(ue.Digest.Hash, ue.Digest.Size)
 	}
@@ -487,7 +495,11 @@ func (c *Client) upload(ctx context.Context, reqs []*uploadRequest) {
 				if err != nil {
 					updateAndNotify(st, 0, err, true)
 				}
-				totalBytes, err := c.writeChunked(cCtx, c.writeRscName(st.ue), ch, false, 0)
+				rscName, err := c.writeRscName(st.ue)
+				if err != nil {
+					updateAndNotify(st, 0, err, true)
+				}
+				totalBytes, err := c.writeChunked(cCtx, rscName, ch, false, 0)
 				updateAndNotify(st, totalBytes, err, true)
 			}
 		}()
@@ -572,7 +584,11 @@ func (c *Client) uploadNonUnified(ctx context.Context, data ...*uploadinfo.Entry
 				if err != nil {
 					return err
 				}
-				written, err := c.writeChunked(eCtx, c.writeRscName(ue), ch, false, 0)
+				rscName, err := c.writeRscName(ue)
+				if err != nil {
+					return err
+				}
+				written, err := c.writeChunked(eCtx, rscName, ch, false, 0)
 				if err != nil {
 					return fmt.Errorf("failed to upload %s: %w", ue.Path, err)
 				}
@@ -623,19 +639,4 @@ func updateAndNotify(st *uploadState, bytesMoved int64, err error, missing bool)
 	}
 	st.clients = nil
 	st.ue = nil
-}
-
-// NgUploadTree delegates to UploadTree of the casng package.
-func (c *Client) NgUploadTree(ctx context.Context, execRoot impath.Absolute, workingDir, remoteWorkingDir impath.Relative, reqs ...casng.UploadRequest) (rootDigest digest.Digest, uploaded []digest.Digest, stats casng.Stats, err error) {
-	return c.ngCasUploader.UploadTree(ctx, execRoot, workingDir, remoteWorkingDir, reqs...)
-}
-
-// NgUpload delegates to Upload of the casng package.
-func (c *Client) NgUpload(ctx context.Context, reqs ...casng.UploadRequest) ([]digest.Digest, casng.Stats, error) {
-	return c.ngCasUploader.Upload(ctx, reqs...)
-}
-
-// IsCasNG returns true if casng feature flag is turned on.
-func (c *Client) IsCasNG() bool {
-	return c.useCasNg
 }

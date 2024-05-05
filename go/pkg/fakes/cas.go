@@ -16,8 +16,8 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
+	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pborman/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -183,7 +183,7 @@ func (f *Writer) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	if e != nil {
 		return status.Error(codes.InvalidArgument, "test fake expected valid digest as part of resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
-	if uuid.Parse(path[2]) == nil {
+	if _, err := uuid.Parse(path[2]); err != nil {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
 
@@ -604,7 +604,7 @@ func (f *CAS) Write(stream bsgrpc.ByteStream_WriteServer) (err error) {
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "test fake expected a valid digest as part of the resource name: \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
-	if uuid.Parse(path[2]) == nil {
+	if _, err := uuid.Parse(path[2]); err != nil {
 		return status.Error(codes.InvalidArgument, "test fake expected resource name of the form \"instance/uploads/<uuid>/blobs|compressed-blobs/<compressor?>/<hash>/<size>\"")
 	}
 

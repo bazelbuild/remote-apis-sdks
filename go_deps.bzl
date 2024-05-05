@@ -118,20 +118,8 @@ def remote_apis_sdks_go_deps():
     go_repository(
         name = "com_github_klauspost_compress",
         importpath = "github.com/klauspost/compress",
-        sum = "h1:G5AfA94pHPysR56qqrkO2pxEexdDzrpFJ6yt/VqWxVU=",
-        version = "v1.12.3",
-    )
-    go_repository(
-        name = "com_github_mostynb_zstdpool_syncpool",
-        importpath = "github.com/mostynb/zstdpool-syncpool",
-        sum = "h1:meYfUODlzmtOCrFmbJsUVEIt5rbmNUsz+Bu+Vnr95ls=",
-        version = "v0.0.7",
-    )
-    go_repository(
-        name = "com_github_pborman_uuid",
-        importpath = "github.com/pborman/uuid",
-        sum = "h1:J7Q5mO4ysT1dv8hyrUGHb9+ooztCXu1D8MY8DZYsu3g=",
-        version = "v1.2.0",
+        sum = "h1:YcnTYrq7MikUT7k0Yb5eceMmALQPYBW/Xltxn0NAMnU=",
+        version = "v1.17.8",
     )
     go_repository(
         name = "com_github_pkg_errors",

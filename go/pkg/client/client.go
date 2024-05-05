@@ -6,7 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"math"
+	"io"
 	"net/http"
 	"os"
 	"os/user"
@@ -16,7 +16,6 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/casng"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
@@ -109,6 +108,15 @@ func (ce *InitError) Error() string {
 	return fmt.Sprintf("%v, authentication type (identity) used=%q", ce.Err.Error(), ce.AuthUsed)
 }
 
+// GrpcClientConn allows accepting pre-created connections to be used when creating clients.
+// It is only intended to be used by methods in this package.
+// It is not intended for SDK users to depend on.
+// It might be removed in future update.
+type GrpcClientConn interface {
+	grpc.ClientConnInterface
+	io.Closer
+}
+
 // Client is a client to several services, including remote execution and services used in
 // conjunction with remote execution. A Client must be constructed by calling Dial() or NewClient()
 // rather than attempting to assemble it directly.
@@ -120,20 +128,18 @@ type Client struct {
 	// RBE: "projects/<foo>/instances/default_instance".
 	// It should NOT be used to construct resource names, but rather only for reusing the instance name as is.
 	// Use the ResourceName method to create correctly formatted resource names.
-	InstanceName  string
-	actionCache   regrpc.ActionCacheClient
-	byteStream    bsgrpc.ByteStreamClient
-	cas           regrpc.ContentAddressableStorageClient
-	useCasNg      bool
-	ngCasUploader *casng.BatchingUploader
-	execution     regrpc.ExecutionClient
-	operations    opgrpc.OperationsClient
+	InstanceName string
+	actionCache  regrpc.ActionCacheClient
+	byteStream   bsgrpc.ByteStreamClient
+	cas          regrpc.ContentAddressableStorageClient
+	execution    regrpc.ExecutionClient
+	operations   opgrpc.OperationsClient
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
 	// These fields are logically "protected" and are intended for use by extensions of Client.
 	Retrier       *Retrier
-	Connection    *grpc.ClientConn
-	CASConnection *grpc.ClientConn // Can be different from Connection a separate CAS endpoint is provided.
+	connection    GrpcClientConn
+	casConnection GrpcClientConn
 	// StartupCapabilities denotes whether to load ServerCapabilities on startup.
 	StartupCapabilities StartupCapabilities
 	// LegacyExecRootRelativeOutputs denotes whether outputs are relative to the exec root.
@@ -212,17 +218,29 @@ const (
 	DefaultRegularMode = 0644
 )
 
+// Connection is meant to be used with generated methods that accept
+// grpc.ClientConnInterface
+func (c *Client) Connection() grpc.ClientConnInterface {
+	return c.connection
+}
+
+// CASConnection is meant to be used with generated methods that accept
+// grpc.ClientConnInterface
+func (c *Client) CASConnection() grpc.ClientConnInterface {
+	return c.casConnection
+}
+
 // Close closes the underlying gRPC connection(s).
 func (c *Client) Close() error {
 	// Close the channels & stop background operations.
 	UnifiedUploads(false).Apply(c)
 	UnifiedDownloads(false).Apply(c)
-	err := c.Connection.Close()
+	err := c.connection.Close()
 	if err != nil {
 		return err
 	}
-	if c.CASConnection != c.Connection {
-		return c.CASConnection.Close()
+	if c.casConnection != c.connection {
+		return c.casConnection.Close()
 	}
 	return nil
 }
@@ -450,14 +468,6 @@ func (p *PerRPCCreds) Apply(c *Client) {
 	c.creds = p.Creds
 }
 
-// UseCASNG is a feature flag for the casng package.
-type UseCASNG bool
-
-// Apply sets the feature flag value in the Client.
-func (o UseCASNG) Apply(c *Client) {
-	c.useCasNg = bool(o)
-}
-
 func getImpersonatedRPCCreds(ctx context.Context, actAs string, cred credentials.PerRPCCredentials) credentials.PerRPCCredentials {
 	// Wrap in a ReuseTokenSource to cache valid tokens in memory (i.e., non-nil, with a non-expired
 	// access token).
@@ -549,6 +559,12 @@ type DialParams struct {
 	//
 	// If this is specified, TLSClientAuthCert must also be specified.
 	TLSClientAuthKey string
+
+	// RoundRobinBalancer enables the simplified gRPC balancer instead of the default one.
+	RoundRobinBalancer bool
+
+	// RoundRobinPoolSize specifies the pool size for the round-robin load balancer.
+	RoundRobinPoolSize int
 }
 
 func createGRPCInterceptor(p DialParams) *balancer.GCPInterceptor {
@@ -604,8 +620,8 @@ func createTLSConfig(params DialParams) (*tls.Config, error) {
 	return c, nil
 }
 
-// Dial dials a given endpoint and returns the grpc connection that is established.
-func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.ClientConn, AuthType, error) {
+// OptsFromParams prepares a set of grpc dial options based on the provided dial params.
+func OptsFromParams(ctx context.Context, params DialParams) ([]grpc.DialOption, AuthType, error) {
 	var authUsed AuthType
 
 	var opts []grpc.DialOption
@@ -673,27 +689,14 @@ func Dial(ctx context.Context, endpoint string, params DialParams) (*grpc.Client
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
+
 	grpcInt := createGRPCInterceptor(params)
 	opts = append(opts, grpc.WithDisableServiceConfig())
 	opts = append(opts, grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":{}}]}`, balancer.Name)))
 	opts = append(opts, grpc.WithUnaryInterceptor(grpcInt.GCPUnaryClientInterceptor))
 	opts = append(opts, grpc.WithStreamInterceptor(grpcInt.GCPStreamClientInterceptor))
 
-	conn, err := grpc.Dial(endpoint, opts...)
-	if err != nil {
-		return nil, authUsed, fmt.Errorf("couldn't dial gRPC %q: %v", endpoint, err)
-	}
-	return conn, authUsed, nil
-}
-
-// DialRaw dials a remote execution service and returns the grpc connection that is established.
-// TODO(olaola): remove this overload when all clients use Dial.
-func DialRaw(ctx context.Context, params DialParams) (*grpc.ClientConn, AuthType, error) {
-	if params.Service == "" {
-		return nil, UnknownAuth, fmt.Errorf("service needs to be specified")
-	}
-	log.Infof("Connecting to remote execution service %s", params.Service)
-	return Dial(ctx, params.Service, params)
+	return opts, authUsed, nil
 }
 
 // NewClient connects to a remote execution service and returns a client suitable for higher-level
@@ -707,15 +710,40 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
 	log.Infof("Connecting to remote execution service %s", params.Service)
-	conn, authUsed, err := Dial(ctx, params.Service, params)
-	casConn := conn
+	dialOpts, authUsed, err := OptsFromParams(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare gRPC dial options: %v", err)
+	}
+
+	var conn, casConn GrpcClientConn
+	if params.RoundRobinBalancer {
+		dial := func(ctx context.Context) (*grpc.ClientConn, error) {
+			return grpc.DialContext(ctx, params.Service, dialOpts...)
+		}
+		conn, err = balancer.NewRRConnPool(ctx, params.RoundRobinPoolSize, dial)
+	} else {
+		conn, err = grpc.Dial(params.Service, dialOpts...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("couldn't dial gRPC %q: %v", params.Service, err)
+	}
+
+	casConn = conn
 	if params.CASService != "" && params.CASService != params.Service {
 		log.Infof("Connecting to CAS service %s", params.CASService)
-		casConn, authUsed, err = Dial(ctx, params.CASService, params)
+		if params.RoundRobinBalancer {
+			dial := func(ctx context.Context) (*grpc.ClientConn, error) {
+				return grpc.DialContext(ctx, params.CASService, dialOpts...)
+			}
+			casConn, err = balancer.NewRRConnPool(ctx, params.RoundRobinPoolSize, dial)
+		} else {
+			casConn, err = grpc.Dial(params.CASService, dialOpts...)
+		}
 	}
 	if err != nil {
 		return nil, &InitError{Err: statusWrap(err), AuthUsed: authUsed}
 	}
+
 	client, err := NewClientFromConnection(ctx, instanceName, conn, casConn, opts...)
 	if err != nil {
 		return nil, &InitError{Err: err, AuthUsed: authUsed}
@@ -724,7 +752,7 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 }
 
 // NewClientFromConnection creates a client from gRPC connections to a remote execution service and a cas service.
-func NewClientFromConnection(ctx context.Context, instanceName string, conn, casConn *grpc.ClientConn, opts ...Opt) (*Client, error) {
+func NewClientFromConnection(ctx context.Context, instanceName string, conn, casConn GrpcClientConn, opts ...Opt) (*Client, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("connection to remote execution service may not be nil")
 	}
@@ -739,8 +767,8 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 		execution:                     regrpc.NewExecutionClient(conn),
 		operations:                    opgrpc.NewOperationsClient(conn),
 		rpcTimeouts:                   DefaultRPCTimeouts,
-		Connection:                    conn,
-		CASConnection:                 casConn,
+		connection:                    conn,
+		casConnection:                 casConn,
 		CompressedBytestreamThreshold: DefaultCompressedBytestreamThreshold,
 		ChunkMaxSize:                  chunker.DefaultChunkSize,
 		MaxBatchDigests:               DefaultMaxBatchDigests,
@@ -761,7 +789,6 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 		UnifiedDownloadTickDuration:   DefaultUnifiedDownloadTickDuration,
 		UnifiedDownloadBufferSize:     DefaultUnifiedDownloadBufferSize,
 		Retrier:                       RetryTransient(),
-		useCasNg:                      false,
 	}
 	for _, o := range opts {
 		o.Apply(client)
@@ -773,53 +800,6 @@ func NewClientFromConnection(ctx context.Context, instanceName string, conn, cas
 	}
 	if client.casConcurrency < 1 {
 		return nil, fmt.Errorf("CASConcurrency should be at least 1")
-	}
-	if client.useCasNg {
-		queryCfg := casng.GRPCConfig{
-			ConcurrentCallsLimit: int(client.casConcurrency),
-			BytesLimit:           int(client.MaxBatchSize),
-			ItemsLimit:           int(client.MaxQueryBatchDigests),
-			BundleTimeout:        10 * time.Millisecond, // Low value to fast track queries.
-			// Timeout:              DefaultRPCTimeouts["FindMissingBlobs"],
-			Timeout:        DefaultRPCTimeouts["default"],
-			RetryPolicy:    client.Retrier.Backoff,
-			RetryPredicate: client.Retrier.ShouldRetry,
-		}
-		batchCfg := casng.GRPCConfig{
-			ConcurrentCallsLimit: int(client.casConcurrency),
-			BytesLimit:           int(client.MaxBatchSize),
-			ItemsLimit:           int(client.UnifiedUploadBufferSize),
-			BundleTimeout:        time.Duration(client.UnifiedUploadTickDuration), // Low value to fast track queries.
-			Timeout:              DefaultRPCTimeouts["BatchUpdateBlobs"],
-			RetryPolicy:          client.Retrier.Backoff,
-			RetryPredicate:       client.Retrier.ShouldRetry,
-		}
-		streamCfg := casng.GRPCConfig{
-			ConcurrentCallsLimit: int(client.casConcurrency),
-			BytesLimit:           1,                // Unused.
-			ItemsLimit:           1,                // Unused.
-			BundleTimeout:        time.Millisecond, // Unused.
-			Timeout:              DefaultRPCTimeouts["default"],
-			RetryPolicy:          client.Retrier.Backoff,
-			RetryPredicate:       client.Retrier.ShouldRetry,
-		}
-		ioCfg := casng.IOConfig{
-			ConcurrentWalksLimit:     int(client.casConcurrency),
-			OpenFilesLimit:           casng.DefaultOpenFilesLimit,
-			OpenLargeFilesLimit:      casng.DefaultOpenLargeFilesLimit,
-			SmallFileSizeThreshold:   casng.DefaultSmallFileSizeThreshold,
-			LargeFileSizeThreshold:   casng.DefaultLargeFileSizeThreshold,
-			CompressionSizeThreshold: int64(client.CompressedBytestreamThreshold),
-			BufferSize:               int(client.ChunkMaxSize),
-		}
-		if client.CompressedBytestreamThreshold < 0 {
-			ioCfg.CompressionSizeThreshold = math.MaxInt64
-		}
-		var err error
-		client.ngCasUploader, err = casng.NewBatchingUploader(ctx, client.cas, client.byteStream, instanceName, queryCfg, batchCfg, streamCfg, ioCfg)
-		if err != nil {
-			return nil, fmt.Errorf("error initializing CASNG: %w", err)
-		}
 	}
 	client.RunBackgroundTasks(ctx)
 	return client, nil
@@ -1082,7 +1062,7 @@ func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionReque
 
 // GetBackendCapabilities returns the capabilities for a specific server connection
 // (either the main connection or the CAS connection).
-func (c *Client) GetBackendCapabilities(ctx context.Context, conn *grpc.ClientConn, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
+func (c *Client) GetBackendCapabilities(ctx context.Context, conn grpc.ClientConnInterface, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
 	opts := c.RPCOpts()
 	err = c.Retrier.Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "GetCapabilities", func(ctx context.Context) (e error) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	log "github.com/golang/glog"
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
@@ -79,13 +79,21 @@ func WithMetadata(ctx context.Context, ms ...*Metadata) (context.Context, error)
 	m := MergeMetadata(ms...)
 	actionID := m.ActionID
 	if actionID == "" {
-		actionID = uuid.New()
-		log.V(2).Infof("Generated action_id %s for %s", actionID, m.ToolName)
+		if id, err := uuid.NewRandom(); err == nil {
+			actionID = id.String()
+			log.V(2).Infof("Generated action_id %s for %s", actionID, m.ToolName)
+		} else {
+			log.Warningf("Failed to generate action_id: %s", err)
+		}
 	}
 	invocationID := m.InvocationID
 	if invocationID == "" {
-		invocationID = uuid.New()
-		log.V(2).Infof("Generated invocation_id %s for %s %s", invocationID, m.ToolName, actionID)
+		if id, err := uuid.NewRandom(); err == nil {
+			invocationID = id.String()
+			log.V(2).Infof("Generated invocation_id %s for %s %s", invocationID, m.ToolName, actionID)
+		} else {
+			log.Warningf("Failed to generate invocation_id: %s", err)
+		}
 	}
 
 	meta := &repb.RequestMetadata{

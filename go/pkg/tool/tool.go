@@ -140,6 +140,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 	cmd := command.FromREProto(commandProto)
 	cmd.InputSpec.Inputs = inputPaths
 	cmd.InputSpec.InputNodeProperties = nodeProperties
+	cmd.InputSpec.SymlinkBehavior = command.PreserveSymlink
 	cmd.ExecRoot = inputRoot
 	if actionProto.Timeout != nil {
 		cmd.Timeout = actionProto.Timeout.AsDuration()
@@ -286,7 +287,7 @@ func (c *Client) UploadBlob(ctx context.Context, path string) error {
 
 // UploadBlobV2 uploads a blob from the specified path into the remote cache using newer cas implementation.
 func (c *Client) UploadBlobV2(ctx context.Context, path string) error {
-	casC, err := cas.NewClient(ctx, c.GrpcClient.Connection, c.GrpcClient.InstanceName)
+	casC, err := cas.NewClient(ctx, c.GrpcClient.Connection(), c.GrpcClient.InstanceName)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -498,7 +499,15 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 	var runActionScript bytes.Buffer
 	runActionFilename := filepath.Join(filepath.Dir(filename), "run_command.sh")
 	wd := cmd.WorkingDirectory
-	execCmd := strings.Join(cmd.GetArguments(), " ")
+	cmdArgs := make([]string, len(cmd.GetArguments()))
+	for i, arg := range cmd.GetArguments() {
+		if strings.Contains(arg, " ") {
+			cmdArgs[i] = fmt.Sprintf("'%s'", arg)
+			continue
+		}
+		cmdArgs[i] = arg
+	}
+	execCmd := strings.Join(cmdArgs, " ")
 	runActionScript.WriteString(shellSprintf("#!/bin/bash\n\n"))
 	runActionScript.WriteString(shellSprintf("# This script is meant to be called by %v.\n", filename))
 	if wd != "" {
@@ -521,16 +530,21 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 	}
 
 	var container string
+	var dockerParams string
 	for _, property := range cmd.Platform.GetProperties() {
 		if property.Name == "container-image" {
 			container = strings.TrimPrefix(property.Value, "docker://")
+			continue
+		}
+		if property.Name == "dockerPrivileged" {
+			dockerParams = "--privileged"
 		}
 	}
 	if container == "" {
 		return fmt.Errorf("container-image platform property missing from command proto: %v", cmd)
 	}
 	var execScript bytes.Buffer
-	dockerCmd := shellSprintf("docker run -i -t -w /b/f/w -v `pwd`/input:/b/f/w -v `pwd`/run_command.sh:/b/f/w/run_command.sh %v ./run_command.sh\n", container)
+	dockerCmd := shellSprintf("docker run -i -t -w /b/f/w -v `pwd`/input:/b/f/w -v `pwd`/run_command.sh:/b/f/w/run_command.sh %s %s ./run_command.sh\n", dockerParams, container)
 	execScript.WriteString(shellSprintf("#!/bin/bash\n\n"))
 	execScript.WriteString(shellSprintf("# This script can be used to run the action locally on\n"))
 	execScript.WriteString(shellSprintf("# this machine.\n"))

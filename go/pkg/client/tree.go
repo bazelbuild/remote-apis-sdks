@@ -116,7 +116,7 @@ func shouldIgnoreErr(err error) bool {
 	if e, ok := err.(*filemetadata.FileError); ok {
 		return os.IsPermission(e.Err)
 	}
-	return false
+	return os.IsPermission(err)
 }
 
 func getRelPath(base, path string) (string, error) {
@@ -224,7 +224,6 @@ func evalParentSymlinks(execRoot, relPath string, materializeOutsideExecRoot boo
 			targetPathBuilder.Reset()
 		}
 		targetPathBuilder.WriteString(fmd.Symlink.Target)
-		// log.V(5).Infof("eval: relPath=%s, relP=%s, absP=%s, targetPath=%s", relPath, relP, absP, targetPathBuilder.String())
 
 		_, targetRelSymlinkDir, err := getTargetRelPath(execRoot, relP, targetPathBuilder.String())
 		if err != nil {
@@ -368,6 +367,9 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 
 			f, err := os.Open(absPath)
 			if err != nil {
+				if shouldIgnoreErr(err) {
+					continue
+				}
 				return err
 			}
 
@@ -470,25 +472,7 @@ func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, re
 		return digest.Empty, nil, nil, err
 	}
 	var blobs map[digest.Digest]*uploadinfo.Entry
-	var tree map[string]digest.Digest
-	if log.V(5) {
-		tree = make(map[string]digest.Digest)
-	}
-	root, blobs, err = packageTree(ft, stats, "", tree)
-	if log.V(5) {
-		if s, ok := ctx.Value("cl_tree").(*string); ok {
-			treePaths := make([]string, 0, len(tree))
-			for p := range tree {
-				treePaths = append(treePaths, p)
-			}
-			sort.Strings(treePaths)
-			sb := strings.Builder{}
-			for _, p := range treePaths {
-				sb.WriteString(fmt.Sprintf("  %s: %s\n", p, tree[p]))
-			}
-			*s = sb.String()
-		}
-	}
+	root, blobs, err = packageTree(ft, stats)
 	if err != nil {
 		return digest.Empty, nil, nil, err
 	}
@@ -537,23 +521,14 @@ func buildTree(files map[string]*fileSysNode) (*treeNode, error) {
 
 // If tree is not nil, it will be populated with a flattened tree of path->digest.
 // prefix should always be provided as an empty string which will be used to accumolate path prefixes during recursion.
-func packageTree(t *treeNode, stats *TreeStats, prefix string, tree map[string]digest.Digest) (root digest.Digest, blobs map[digest.Digest]*uploadinfo.Entry, err error) {
+func packageTree(t *treeNode, stats *TreeStats) (root digest.Digest, blobs map[digest.Digest]*uploadinfo.Entry, err error) {
 	dir := &repb.Directory{}
 	blobs = make(map[digest.Digest]*uploadinfo.Entry)
 
-	var path string
 	for name, child := range t.children {
-		if tree != nil {
-			path = prefix + "/" + name
-		}
-
-		dg, childBlobs, err := packageTree(child, stats, path, tree)
+		dg, childBlobs, err := packageTree(child, stats)
 		if err != nil {
 			return digest.Empty, nil, err
-		}
-
-		if tree != nil {
-			tree[path] = dg
 		}
 
 		dir.Directories = append(dir.Directories, &repb.DirectoryNode{Name: name, Digest: dg.ToProto()})
@@ -571,9 +546,6 @@ func packageTree(t *treeNode, stats *TreeStats, prefix string, tree map[string]d
 			blobs[dg] = n.file.ue
 			stats.InputFiles++
 			stats.TotalInputBytes += dg.Size
-			if tree != nil {
-				tree[prefix+"/"+name] = dg
-			}
 			continue
 		}
 		if n.symlink != nil {
@@ -590,9 +562,6 @@ func packageTree(t *treeNode, stats *TreeStats, prefix string, tree map[string]d
 		return digest.Empty, nil, err
 	}
 	dg := ue.Digest
-	if tree != nil {
-		tree[prefix] = dg
-	}
 	blobs[dg] = ue
 	stats.TotalInputBytes += dg.Size
 	stats.InputDirectories++

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 
 	grpcbalancer "google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/connectivity"
@@ -16,7 +16,7 @@ func TestGCPBalancer_UpdatingConnectionStateIsMutuallyExclusive(t *testing.T) {
 	builder := newBuilder()
 	var subconns []*fakeSubConn
 	for i := 0; i < MinConnections; i++ {
-		subconns = append(subconns, &fakeSubConn{id: uuid.New()})
+		subconns = append(subconns, &fakeSubConn{id: uuid.New().String()})
 	}
 
 	cc := fakeClientConn{subconns: subconns}
