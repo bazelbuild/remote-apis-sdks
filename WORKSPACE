@@ -44,8 +44,16 @@ go_repository(
     version = "v0.122.0",
 )
 
-# Insert go_repostiry rules before this one to override specific deps.
+# Insert go_repository rules before this one to override specific deps.
 gazelle_dependencies()
+
+# Insert oauth2 before remote_apis_sdks_deps() to override version
+go_repository(
+	name = "org_golang_x_oauth2",
+	importpath = "golang.org/x/oauth2",
+	sum = "h1:4mQdhULixXKP1rwYBW0vAijoXnkTG0BLCDRzfe1idMo=",
+	version = "v0.20.0",
+)
 
 load("//:go_deps.bzl", "remote_apis_sdks_go_deps")
 

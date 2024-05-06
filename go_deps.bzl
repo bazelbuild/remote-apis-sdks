@@ -62,6 +62,12 @@ def remote_apis_sdks_go_deps():
         version = "v0.1.0",
     )
     go_repository(
+	    name = "com_github_hectane_go_acl",
+	    importpath = "github.com/hectane/go-acl",
+	    sum = "h1:PGufWXXDq9yaev6xX1YQauaO1MV90e6Mpoq1I7Lz/VM=",
+	    version = "v0.0.0-20230122075934-ca0b05cb1adb",
+    )
+    go_repository(
         name = "com_github_golang_glog",
         importpath = "github.com/golang/glog",
         sum = "h1:VKtxabqXZkF25pY9ekfRL6a582T4P37/31XEstQ5p58=",
@@ -888,12 +894,6 @@ def remote_apis_sdks_go_deps():
         importpath = "golang.org/x/net",
         sum = "h1:rJrUqqhjsgNp7KqAIc25s9pZnjU7TUcSY7HcVZjdn1g=",
         version = "v0.7.0",
-    )
-    go_repository(
-        name = "org_golang_x_oauth2",
-        importpath = "golang.org/x/oauth2",
-        sum = "h1:nt+Q6cXKz4MosCSpnbMtqiQ8Oz0pxTef2B4Vca2lvfk=",
-        version = "v0.0.0-20221014153046-6fdb5e3db783",
     )
     go_repository(
         name = "org_golang_x_sync",
