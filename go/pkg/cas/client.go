@@ -10,7 +10,6 @@ import (
 	"time"
 
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
-	"github.com/pkg/errors"
 	"golang.org/x/sync/semaphore"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
@@ -209,13 +208,13 @@ func (c *ClientConfig) Validate() error {
 	}
 
 	if err := c.FindMissingBlobs.validate(); err != nil {
-		return errors.Wrap(err, "FindMissingBlobs")
+		return fmt.Errorf("FindMissingBlobs: %w", err)
 	}
 	if err := c.BatchUpdateBlobs.validate(); err != nil {
-		return errors.Wrap(err, "BatchUpdateBlobs")
+		return fmt.Errorf("BatchUpdateBlobs: %w", err)
 	}
 	if err := c.ByteStreamWrite.validate(); err != nil {
-		return errors.Wrap(err, "BatchUpdateBlobs")
+		return fmt.Errorf("BatchUpdateBlobs: %w", err)
 	}
 	return nil
 }
@@ -242,7 +241,7 @@ func NewClient(ctx context.Context, conn grpc.ClientConnInterface, instanceName 
 func NewClientWithConfig(ctx context.Context, conn grpc.ClientConnInterface, instanceName string, config ClientConfig) (*Client, error) {
 	switch err := config.Validate(); {
 	case err != nil:
-		return nil, errors.Wrap(err, "invalid config")
+		return nil, fmt.Errorf("invalid config: %w", err)
 	case conn == nil:
 		return nil, fmt.Errorf("conn is unspecified")
 	case instanceName == "":
@@ -258,7 +257,7 @@ func NewClientWithConfig(ctx context.Context, conn grpc.ClientConnInterface, ins
 	}
 	if !client.Config.IgnoreCapabilities {
 		if err := client.checkCapabilities(ctx); err != nil {
-			return nil, errors.Wrapf(err, "checking capabilities")
+			return nil, fmt.Errorf("checking capabilities: %w", err)
 		}
 	}
 
@@ -315,11 +314,11 @@ func (c *Client) withRetries(ctx context.Context, f func(context.Context) error)
 func (c *Client) checkCapabilities(ctx context.Context) error {
 	caps, err := regrpc.NewCapabilitiesClient(c.conn).GetCapabilities(ctx, &repb.GetCapabilitiesRequest{InstanceName: c.InstanceName})
 	if err != nil {
-		return errors.Wrapf(err, "GetCapabilities RPC")
+		return fmt.Errorf("GetCapabilities RPC: %w", err)
 	}
 
 	if err := digest.CheckCapabilities(caps); err != nil {
-		return errors.Wrapf(err, "digest function mismatch")
+		return fmt.Errorf("digest function mismatch: %w", err)
 	}
 
 	if c.Config.BatchUpdateBlobs.MaxSizeBytes > int(caps.CacheCapabilities.MaxBatchTotalSizeBytes) {

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"errors"
 	log "github.com/golang/glog"
-	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
@@ -289,7 +289,7 @@ func (c *Client) UploadBlob(ctx context.Context, path string) error {
 func (c *Client) UploadBlobV2(ctx context.Context, path string) error {
 	casC, err := cas.NewClient(ctx, c.GrpcClient.Connection(), c.GrpcClient.InstanceName)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	inputC := make(chan *cas.UploadInput)
 
@@ -305,10 +305,10 @@ func (c *Client) UploadBlobV2(ctx context.Context, path string) error {
 
 	eg.Go(func() error {
 		_, err := casC.Upload(ctx, cas.UploadOptions{}, inputC)
-		return errors.WithStack(err)
+		return err
 	})
 
-	return errors.WithStack(eg.Wait())
+	return eg.Wait()
 }
 
 // DownloadDirectory downloads a an input root from the remote cache into the specified path.
@@ -413,7 +413,7 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 			input = strings.ToLower(input)
 
 			if !(input == "yes" || input == "y") {
-				return errors.Errorf("operation aborted.")
+				return errors.New("operation aborted.")
 			}
 		}
 		// If the user confirms, remove the existing directory and create a new one

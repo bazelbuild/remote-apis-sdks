@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sort"
 	"time"
@@ -16,7 +17,6 @@ import (
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	gerrors "github.com/pkg/errors"
 	oppb "google.golang.org/genproto/googleapis/longrunning"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
@@ -85,13 +85,13 @@ func (c *Client) ExecuteAction(ctx context.Context, ac *Action) (*repb.ActionRes
 
 	// Upload any remaining inputs.
 	if err := c.WriteBlobs(ctx, ac.InputFiles); err != nil {
-		return nil, gerrors.WithMessage(err, "uploading input files to the CAS")
+		return nil, fmt.Errorf("uploading input files to the CAS: %w", err)
 	}
 
 	log.V(1).Info("Executing job")
 	res, err = c.executeJob(ctx, ac.SkipCache, acDg)
 	if err != nil {
-		return res, gerrors.WithMessage(err, "executing an action")
+		return res, fmt.Errorf("executing an action: %w", err)
 	}
 
 	return res, nil
@@ -109,7 +109,7 @@ func (c *Client) CheckActionCache(ctx context.Context, acDg *repb.Digest) (*repb
 	case codes.NotFound:
 		return nil, nil
 	default:
-		return nil, gerrors.WithMessage(err, "checking the action cache")
+		return nil, fmt.Errorf("checking the action cache: %w", err)
 	}
 }
 
@@ -121,7 +121,7 @@ func (c *Client) executeJob(ctx context.Context, skipCache bool, acDg *repb.Dige
 	}
 	op, err := c.ExecuteAndWait(ctx, execReq)
 	if err != nil {
-		return nil, gerrors.WithMessage(err, "execution error")
+		return nil, fmt.Errorf("execution error: %w", err)
 	}
 
 	switch r := op.Result.(type) {
@@ -130,10 +130,10 @@ func (c *Client) executeJob(ctx context.Context, skipCache bool, acDg *repb.Dige
 	case *oppb.Operation_Response:
 		res := new(repb.ExecuteResponse)
 		if err := r.Response.UnmarshalTo(res); err != nil {
-			return nil, gerrors.WithMessage(err, "extracting ExecuteResponse from execution operation")
+			return nil, fmt.Errorf("extracting ExecuteResponse from execution operation: %w", err)
 		}
 		if st := status.FromProto(res.Status); st.Code() != codes.OK {
-			return res.Result, gerrors.WithMessage(StatusDetailedError(st), "job failed with error")
+			return res.Result, fmt.Errorf("job failed with error: %w", StatusDetailedError(st))
 		}
 		return res.Result, nil
 	default:
@@ -148,7 +148,7 @@ func (c *Client) executeJob(ctx context.Context, skipCache bool, acDg *repb.Dige
 func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *repb.ActionResult, error) {
 	comDg, err := c.WriteProto(ctx, buildCommand(ac))
 	if err != nil {
-		return nil, nil, gerrors.WithMessage(err, "storing Command proto")
+		return nil, nil, fmt.Errorf("storing Command proto: %w", err)
 	}
 
 	reAc := &repb.Action{
@@ -164,7 +164,7 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 
 	acBlob, err := proto.Marshal(reAc)
 	if err != nil {
-		return nil, nil, gerrors.WithMessage(err, "marshalling Action proto")
+		return nil, nil, fmt.Errorf("marshalling Action proto: %w", err)
 	}
 	acDg := digest.NewFromBlob(acBlob).ToProto()
 
@@ -182,7 +182,7 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 
 	// No cache hit, or we didn't check. Upload the action instead.
 	if _, err := c.WriteBlob(ctx, acBlob); err != nil {
-		return nil, nil, gerrors.WithMessage(err, "uploading action to the CAS")
+		return nil, nil, fmt.Errorf("uploading action to the CAS: %w", err)
 	}
 
 	return acDg, nil, nil

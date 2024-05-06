@@ -7,14 +7,13 @@ package retry
 
 import (
 	"context"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
 	"time"
 
 	log "github.com/golang/glog"
-	"github.com/pkg/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -67,7 +66,7 @@ func Always(error) bool { return true }
 func TransientOnly(err error) bool {
 	// Retry RPC timeouts. Note that we do *not* retry context cancellations (context.Cancelled);
 	// if the user wants to back out of the call we should let them.
-	if stderrors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	s, ok := status.FromError(err)
@@ -113,7 +112,7 @@ func WithPolicy(ctx context.Context, shouldRetry ShouldRetry, bp BackoffPolicy, 
 				spb.Message = fmt.Sprintf("retry budget exhausted (%d attempts): ", bp.maxAttempts) + spb.Message
 				return status.ErrorProto(spb)
 			}
-			return errors.Wrapf(err, "retry budget exhausted (%d attempts)", bp.maxAttempts)
+			return fmt.Errorf("retry budget exhausted (%d attempts): %w", bp.maxAttempts, err)
 		}
 
 		select {

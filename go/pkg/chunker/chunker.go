@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
+	"errors"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pkg/errors"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/reader"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
@@ -110,7 +110,7 @@ func (c *Chunker) ChunkSize() int {
 func (c *Chunker) Reset() error {
 	if c.r != nil {
 		if err := c.r.SeekOffset(0); err != nil {
-			return errors.Wrapf(err, "failed to call SeekOffset(0) for %s", c.ue.Path)
+			return fmt.Errorf("failed to call SeekOffset(0) for %s: %w", c.ue.Path, err)
 		}
 	}
 	c.offset = 0
