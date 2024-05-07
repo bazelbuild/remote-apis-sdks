@@ -874,6 +874,7 @@ func ToProto(cmd *Command) *cpb.Command {
 			CommandId:    cmd.Identifiers.CommandID,
 			InvocationId: cmd.Identifiers.InvocationID,
 			ToolName:     cmd.Identifiers.ToolName,
+			ToolVersion:  cmd.Identifiers.ToolVersion,
 			ExecutionId:  cmd.Identifiers.ExecutionID,
 		}
 	}
