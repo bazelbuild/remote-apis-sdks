@@ -283,6 +283,7 @@ func (ec *Context) GetCachedResult() {
 		ec.resPb = resPb
 	}
 	if ec.resPb != nil {
+		setAuxiliaryMetadata(ec.Metadata, ec.resPb.GetExecutionMetadata())
 		ec.Result = command.NewResultFromExitCode((int)(ec.resPb.ExitCode))
 		ec.setOutputMetadata()
 		cmdID, executionID := ec.cmd.Identifiers.ExecutionID, ec.cmd.Identifiers.CommandID
