@@ -272,7 +272,7 @@ func (ec *Context) GetCachedResult() {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
-	if ec.opt.AcceptCached && !ec.opt.DoNotCache {
+	if ec.opt.AcceptCached {
 		ec.Metadata.EventTimes[command.EventCheckActionCache] = &command.TimeInterval{From: time.Now()}
 		resPb, err := ec.client.GrpcClient.CheckActionCache(ec.ctx, ec.Metadata.ActionDigest.ToProto())
 		ec.Metadata.EventTimes[command.EventCheckActionCache].To = time.Now()
@@ -393,7 +393,7 @@ func (ec *Context) ExecuteRemotely() {
 	var nOutStreamed, nErrStreamed int64
 	op, err := ec.client.GrpcClient.ExecuteAndWaitProgress(ec.ctx, &repb.ExecuteRequest{
 		InstanceName:    ec.client.GrpcClient.InstanceName,
-		SkipCacheLookup: !ec.opt.AcceptCached || ec.opt.DoNotCache,
+		SkipCacheLookup: !ec.opt.AcceptCached,
 		ActionDigest:    ec.Metadata.ActionDigest.ToProto(),
 	}, func(md *repb.ExecuteOperationMetadata) {
 		if !ec.opt.StreamOutErr {
