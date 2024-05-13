@@ -11,5 +11,5 @@ go_test(
     name = "moreflag_test",
     srcs = ["moreflag_test.go"],
     embed = [":moreflag"],
-    deps = ["@com_github_google_go_cmp//cmp:go_default_library"],
+    deps = ["@com_github_google_go_cmp//cmp"],
 )

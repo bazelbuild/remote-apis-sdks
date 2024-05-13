@@ -9,7 +9,7 @@ go_library(
         "//go/pkg/flags",
         "//go/pkg/outerr",
         "//go/pkg/tool",
-        "@com_github_golang_glog//:go_default_library",
+        "@com_github_golang_glog//:glog",
     ],
 )
 

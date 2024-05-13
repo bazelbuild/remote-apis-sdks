@@ -1,6 +1,8 @@
 load("@bazel_gazelle//:def.bzl", "gazelle")
 
 # gazelle:prefix github.com/bazelbuild/remote-apis-sdks
+# gazelle:resolve go github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2 @com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:remote_execution_go_proto
+# gazelle:resolve go github.com/bazelbuild/remote-apis/build/bazel/semver @com_github_bazelbuild_remote_apis//build/bazel/semver:semver_go_proto
 gazelle(name = "gazelle")
 
 gazelle(
