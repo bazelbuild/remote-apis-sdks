@@ -15,11 +15,11 @@ go_library(
         "//go/pkg/outerr",
         "//go/pkg/rexec",
         "//go/pkg/uploadinfo",
-        "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:remote_execution_go_proto",
-        "@com_github_golang_glog//:go_default_library",
-        "@org_golang_google_protobuf//encoding/prototext:go_default_library",
-        "@org_golang_google_protobuf//proto:go_default_library",
-        "@org_golang_x_sync//errgroup:go_default_library",
+        "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:execution",
+        "@com_github_golang_glog//:glog",
+        "@org_golang_google_protobuf//encoding/prototext",
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_x_sync//errgroup",
     ],
 )
 
@@ -28,12 +28,13 @@ go_test(
     srcs = ["tool_test.go"],
     embed = [":tool"],
     deps = [
+        "//go/api/command",
         "//go/pkg/command",
         "//go/pkg/digest",
         "//go/pkg/fakes",
         "//go/pkg/outerr",
-        "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:remote_execution_go_proto",
-        "@com_github_google_go_cmp//cmp:go_default_library",
-        "@org_golang_google_protobuf//encoding/prototext:go_default_library",
+        "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:execution",
+        "@com_github_google_go_cmp//cmp",
+        "@org_golang_google_protobuf//encoding/prototext",
     ],
 )
