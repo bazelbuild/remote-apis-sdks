@@ -185,6 +185,7 @@ func (ec *Context) computeActionDg(rootDg digest.Digest, platform *repb.Platform
 		InputRootDigest: rootDg.ToProto(),
 		DoNotCache:      ec.opt.DoNotCache,
 	}
+	log.Infof("Action cache proto: %+v", acPb)
 	// If supported, we attach a copy of the platform properties list to the Action.
 	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
 		acPb.Platform = platform
