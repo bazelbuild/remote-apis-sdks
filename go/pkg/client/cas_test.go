@@ -435,6 +435,9 @@ func TestMissingBlobs(t *testing.T) {
 }
 
 func TestUploadConcurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test because short is set")
+	}
 	t.Parallel()
 	blobs := make([][]byte, 50)
 	for i := range blobs {

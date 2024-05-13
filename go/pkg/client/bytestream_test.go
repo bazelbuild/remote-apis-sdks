@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -19,6 +21,40 @@ type logStream struct {
 	logStreamID   string
 	logicalOffset int64
 	finalized     bool
+}
+
+func TestReadTimeout(t *testing.T) {
+	s := newServer(t)
+	defer s.shutDown()
+
+	s.client.Retrier = nil
+	s.client.rpcTimeouts["Read"] = 100 * time.Millisecond
+	s.fake.read = func(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
+		time.Sleep(1 * time.Second)
+		return stream.Send(&bspb.ReadResponse{})
+	}
+
+	_, err := s.client.ReadBytes(context.Background(), "test")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected error %v, but got %v", context.DeadlineExceeded, err)
+	}
+}
+
+func TestWriteTimeout(t *testing.T) {
+	s := newServer(t)
+	defer s.shutDown()
+
+	s.client.Retrier = nil
+	s.client.rpcTimeouts["Write"] = 100 * time.Millisecond
+	s.fake.write = func(stream bsgrpc.ByteStream_WriteServer) error {
+		time.Sleep(1 * time.Second)
+		return fmt.Errorf("write should have timed out")
+	}
+
+	err := s.client.WriteBytes(context.Background(), "test", []byte("hello"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected error %v, but got %v", context.DeadlineExceeded, err)
+	}
 }
 
 func TestWriteBytesAtRemoteOffsetSuccess_LogStream(t *testing.T) {
@@ -117,6 +153,9 @@ func TestWriteBytesAtRemoteOffsetSuccess_LogStream(t *testing.T) {
 }
 
 func TestWriteBytesAtRemoteOffsetErrors_LogStream(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test because short is set")
+	}
 	tests := []struct {
 		description   string
 		ls            *logStream
@@ -180,6 +219,8 @@ func TestWriteBytesAtRemoteOffsetErrors_LogStream(t *testing.T) {
 
 type ByteStream struct {
 	logStreams map[string]*logStream
+	read       func(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error
+	write      func(stream bsgrpc.ByteStream_WriteServer) error
 }
 
 type Server struct {
@@ -202,7 +243,7 @@ func newServer(t *testing.T) *Server {
 	bsgrpc.RegisterByteStreamServer(s.server, s.fake)
 
 	go s.server.Serve(s.listener)
-	s.client, err = NewClient(s.ctx, instance, DialParams{
+	s.client, err = NewClient(s.ctx, "test", DialParams{
 		Service:    s.listener.Addr().String(),
 		NoSecurity: true,
 	}, StartupCapabilities(false), ChunkMaxSize(2))
@@ -223,11 +264,18 @@ func (b *ByteStream) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusReq
 }
 
 func (b *ByteStream) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
-	return nil
+	if b.read != nil {
+		return b.read(req, stream)
+	}
+	return stream.Send(&bspb.ReadResponse{Data: logStreamData})
 }
 
 // Write implements the write operation for LogStream Write API.
 func (b *ByteStream) Write(stream bsgrpc.ByteStream_WriteServer) error {
+	if b.write != nil {
+		return b.write(stream)
+	}
+
 	defer stream.SendAndClose(&bspb.WriteResponse{})
 	req, err := stream.Recv()
 	if err != nil {

@@ -306,6 +306,9 @@ func TestWriteRetries(t *testing.T) {
 }
 
 func TestRetryWriteBytesAtRemoteOffset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test because short is set")
+	}
 	tests := []struct {
 		description   string
 		initialOffset int64
@@ -441,6 +444,9 @@ func TestBatchWriteBlobsRpcRetriesExhausted(t *testing.T) {
 }
 
 func TestGetTreeRetries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test because short is set")
+	}
 	t.Parallel()
 	f := setup(t)
 	defer f.shutDown()

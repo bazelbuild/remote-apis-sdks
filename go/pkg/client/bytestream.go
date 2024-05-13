@@ -42,6 +42,20 @@ func (c *Client) WriteBytesAtRemoteOffset(ctx context.Context, name string, data
 	return writtenBytes, nil
 }
 
+// withCtx makes the niladic function f behaves like one that accepts a ctx.
+func withCtx(ctx context.Context, f func() error) error {
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- f()
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errChan:
+		return err
+	}
+}
+
 // writeChunked uploads chunked data with a given resource name to the CAS.
 func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chunker, doNotFinalize bool, initialOffset int64) (int64, error) {
 	var totalBytes int64
@@ -54,6 +68,8 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 		// TODO(olaola): implement resumable uploads. initialOffset passed in allows to
 		// start writing data at an arbitrary offset, but retries still restart from initialOffset.
 
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		stream, err := c.Write(ctx)
 		if err != nil {
 			return err
@@ -70,7 +86,11 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			if !ch.HasNext() && !doNotFinalize {
 				req.FinishWrite = true
 			}
-			err = c.CallWithTimeout(ctx, "Write", func(_ context.Context) error { return stream.Send(req) })
+			err = c.CallWithTimeout(ctx, "Write", func(ctx context.Context) error {
+				return withCtx(ctx, func() error {
+					return stream.Send(req)
+				})
+			})
 			if err == io.EOF {
 				break
 			}
@@ -79,7 +99,12 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 			}
 			totalBytes += int64(len(req.Data))
 		}
-		if _, err := stream.CloseAndRecv(); err != nil {
+		if err := c.CallWithTimeout(ctx, "Write", func(ctx context.Context) error {
+			return withCtx(ctx, func() error {
+				_, err := stream.CloseAndRecv()
+				return err
+			})
+		}); err != nil {
 			return err
 		}
 		return nil
@@ -132,6 +157,8 @@ func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int
 // stream. The limit must be non-negative, although offset+limit may exceed the length of the
 // stream.
 func (c *Client) readStreamed(ctx context.Context, name string, offset, limit int64, w io.Writer) (int64, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	stream, err := c.Read(ctx, &bspb.ReadRequest{
 		ResourceName: name,
 		ReadOffset:   offset,
@@ -144,10 +171,12 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 	var n int64
 	for {
 		var resp *bspb.ReadResponse
-		err := c.CallWithTimeout(ctx, "Read", func(_ context.Context) error {
-			r, err := stream.Recv()
-			resp = r
-			return err
+		err := c.CallWithTimeout(ctx, "Read", func(ctx context.Context) error {
+			return withCtx(ctx, func() error {
+				r, err := stream.Recv()
+				resp = r
+				return err
+			})
 		})
 		if err == io.EOF {
 			break
