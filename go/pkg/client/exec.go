@@ -50,8 +50,9 @@ type Action struct {
 	//
 	// If 0, the server's default timeout is used.
 	Timeout time.Duration
-	// DoNotCache, if true, indicates that the result of this action should never be cached. It
-	// implies SkipCache.
+	// DoNotCache, if true, indicates that the result of this action should never be cached. However,
+	// if the action is already cached, this doesn't prevent accepting the cache entry. Use SkipCache
+	// to not accept a cache hit.
 	DoNotCache bool
 	// SkipCache, if true, indicates that this action should be executed even if there is a copy of
 	// its result in the action cache that could be used instead.
@@ -168,8 +169,8 @@ func (c *Client) PrepAction(ctx context.Context, ac *Action) (*repb.Digest, *rep
 	}
 	acDg := digest.NewFromBlob(acBlob).ToProto()
 
-	// If the result is cacheable, check if it's already in the cache.
-	if !ac.DoNotCache || !ac.SkipCache {
+	// If cache checking is allowed, check if the action is already in the cache.
+	if !ac.SkipCache {
 		log.V(1).Info("Checking cache")
 		res, err := c.CheckActionCache(ctx, acDg)
 		if err != nil {
