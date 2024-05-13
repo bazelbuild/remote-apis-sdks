@@ -8,6 +8,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/diskcache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -98,15 +99,7 @@ func init() {
 // NewClientFromFlags connects to a remote execution service and returns a client suitable for higher-level
 // functionality. It uses the flags from above to configure the connection to remote execution.
 func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client, error) {
-	opts = append(opts, []client.Opt{
-		client.CASConcurrency(*CASConcurrency),
-		client.StartupCapabilities(*StartupCapabilities),
-		&client.DiskCacheOpts{
-			Context:       ctx,
-			Path:          *DiskCachePath,
-			MaxCapacityGb: *DiskCacheCapacityGb,
-		},
-	}...)
+	opts = append(opts, []client.Opt{client.CASConcurrency(*CASConcurrency), client.StartupCapabilities(*StartupCapabilities)}...)
 	if len(RPCTimeouts) > 0 {
 		timeouts := make(map[string]time.Duration)
 		for rpc, d := range client.DefaultRPCTimeouts {
@@ -143,6 +136,14 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 		log.V(1).Infof("KeepAlive params = %v", params)
 		dialOpts = append(dialOpts, grpc.WithKeepaliveParams(params))
+	}
+	if *DiskCachePath != "" {
+		capBytes := uint64(*DiskCacheCapacityGb * 1024 * 1024 * 1024)
+		diskCache, err := diskcache.New(ctx, *DiskCachePath, capBytes)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, &client.DiskCacheOpts{DiskCache: diskCache})
 	}
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,

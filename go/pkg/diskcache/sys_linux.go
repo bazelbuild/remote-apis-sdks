@@ -7,6 +7,6 @@ import (
 	"time"
 )
 
-func FileInfoToAccessTime(info fs.FileInfo) time.Time {
+func fileInfoToAccessTime(info fs.FileInfo) time.Time {
 	return time.Unix(info.Sys().(*syscall.Stat_t).Atim.Unix())
 }

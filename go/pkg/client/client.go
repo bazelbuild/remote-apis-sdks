@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"errors"
+
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -244,6 +245,10 @@ func (c *Client) Close() error {
 	if c.casConnection != c.connection {
 		return c.casConnection.Close()
 	}
+	if c.diskCache != nil {
+		// Waits for local disk GC to complete.
+		c.diskCache.Shutdown()
+	}
 	return nil
 }
 
@@ -354,21 +359,12 @@ func (o *TreeSymlinkOpts) Apply(c *Client) {
 }
 
 type DiskCacheOpts struct {
-	Context       context.Context
-	Path          string
-	MaxCapacityGb float64
+	DiskCache *diskcache.DiskCache
 }
 
 // Apply sets the client's TreeSymlinkOpts.
 func (o *DiskCacheOpts) Apply(c *Client) {
-	if o.Path != "" {
-		capBytes := uint64(o.MaxCapacityGb * 1024 * 1024 * 1024)
-		var err error
-		// TODO(ola): propagate errors from Apply.
-		if c.diskCache, err = diskcache.New(o.Context, o.Path, capBytes); err != nil {
-			log.Errorf("Error initializing disk cache on %s: %v", o.Path, err)
-		}
-	}
+	c.diskCache = o.DiskCache
 }
 
 // MaxBatchDigests is maximum amount of digests to batch in upload and download operations.

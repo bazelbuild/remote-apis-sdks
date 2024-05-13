@@ -88,8 +88,6 @@ func (q *priorityQueue) Bump(item *qitem) {
 	heap.Fix(q, item.index)
 }
 
-const maxConcurrentRequests = 1000
-
 // DiskCache is a local disk LRU CAS and Action Cache cache.
 type DiskCache struct {
 	root             string         // path to the root directory of the disk cache.
@@ -97,12 +95,28 @@ type DiskCache struct {
 	mu               sync.Mutex     // protects the queue.
 	store            sync.Map       // map of keys to qitems.
 	queue            *priorityQueue // keys by last accessed time.
-	sizeBytes        int64          // total size.
 	ctx              context.Context
 	shutdown         chan bool
-	gcTick           uint64
-	gcReq            chan uint64
-	testGcTicks      chan uint64
+	shutdownOnce     sync.Once
+	gcReq            chan bool
+	gcDone           chan bool
+	statMu           sync.Mutex
+	stats            *DiskCacheStats
+}
+
+type DiskCacheStats struct {
+	TotalSizeBytes         int64
+	TotalNumFiles          int64
+	NumFilesStored         int64
+	TotalStoredBytes       int64
+	NumFilesGCed           int64
+	TotalGCedSizeBytes     int64
+	NumCacheHits           int64
+	NumCacheMisses         int64
+	TotalCacheHitSizeBytes int64
+	InitTime               time.Duration
+	TotalGCTime            time.Duration
+	TotalGCDiskOpsTime     time.Duration
 }
 
 func New(ctx context.Context, root string, maxCapacityBytes uint64) (*DiskCache, error) {
@@ -113,9 +127,13 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) (*DiskCache,
 		queue: &priorityQueue{
 			items: make([]*qitem, 1000),
 		},
-		gcReq:    make(chan uint64, maxConcurrentRequests),
+		gcReq:    make(chan bool, 1),
 		shutdown: make(chan bool),
+		gcDone:   make(chan bool),
+		stats:    &DiskCacheStats{},
 	}
+	start := time.Now()
+	defer func() { atomic.AddInt64((*int64)(&res.stats.InitTime), int64(time.Since(start))) }()
 	heap.Init(res.queue)
 	if err := os.MkdirAll(root, os.ModePerm); err != nil {
 		return nil, err
@@ -141,24 +159,25 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) (*DiskCache,
 					return nil
 				}
 				subdir := filepath.Base(filepath.Dir(path))
-				k, err := res.getKeyFromFileName(subdir + d.Name())
+				k, err := getKeyFromFileName(subdir + d.Name())
 				if err != nil {
 					return fmt.Errorf("error parsing cached file name %s: %v", path, err)
 				}
-				atime, err := getLastAccessTime(path)
+				info, err := d.Info()
 				if err != nil {
-					return fmt.Errorf("error getting last accessed time of %s: %v", path, err)
+					return fmt.Errorf("error getting file info of %s: %v", path, err)
 				}
 				it := &qitem{
 					key: k,
-					lat: atime,
+					lat: fileInfoToAccessTime(info),
 				}
 				size, err := res.getItemSize(k)
 				if err != nil {
 					return fmt.Errorf("error getting file size of %s: %v", path, err)
 				}
 				res.store.Store(k, it)
-				atomic.AddInt64(&res.sizeBytes, size)
+				atomic.AddInt64(&res.stats.TotalSizeBytes, size)
+				atomic.AddInt64(&res.stats.TotalNumFiles, 1)
 				res.mu.Lock()
 				heap.Push(res.queue, it)
 				res.mu.Unlock()
@@ -169,7 +188,7 @@ func New(ctx context.Context, root string, maxCapacityBytes uint64) (*DiskCache,
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
-	go res.gc()
+	go res.daemon()
 	return res, nil
 }
 
@@ -180,39 +199,47 @@ func (d *DiskCache) getItemSize(k key) (int64, error) {
 	fname := d.getPath(k)
 	info, err := os.Stat(fname)
 	if err != nil {
-		return 0, fmt.Errorf("Error getting info for %s: %v", fname, err)
+		return 0, fmt.Errorf("error getting info for %s: %v", fname, err)
 	}
 	return info.Size(), nil
 }
 
-// Releases resources and terminates the GC daemon. Should be the last call to the DiskCache.
+// Terminates the GC daemon, waiting for it to complete. No further Store* calls to the DiskCache should be made.
 func (d *DiskCache) Shutdown() {
-	d.shutdown <- true
+	d.shutdownOnce.Do(func() {
+		d.shutdown <- true
+		<-d.gcDone
+		log.Infof("DiskCacheStats: %+v", d.stats)
+	})
 }
 
-func (d *DiskCache) TotalSizeBytes() uint64 {
-	return uint64(atomic.LoadInt64(&d.sizeBytes))
-}
-
-// This function is defined in https://pkg.go.dev/strings#CutSuffix
-// It is copy/pasted here as a hack, because I failed to upgrade the *Reclient* repo to the latest Go 1.20.7.
-func CutSuffix(s, suffix string) (before string, found bool) {
-	if !strings.HasSuffix(s, suffix) {
-		return s, false
+func (d *DiskCache) GetStats() *DiskCacheStats {
+	// Return a copy for safety.
+	return &DiskCacheStats{
+		TotalSizeBytes:         atomic.LoadInt64(&d.stats.TotalSizeBytes),
+		TotalNumFiles:          atomic.LoadInt64(&d.stats.TotalNumFiles),
+		NumFilesStored:         atomic.LoadInt64(&d.stats.NumFilesStored),
+		TotalStoredBytes:       atomic.LoadInt64(&d.stats.TotalStoredBytes),
+		NumFilesGCed:           atomic.LoadInt64(&d.stats.NumFilesGCed),
+		TotalGCedSizeBytes:     atomic.LoadInt64(&d.stats.TotalGCedSizeBytes),
+		NumCacheHits:           atomic.LoadInt64(&d.stats.NumCacheHits),
+		NumCacheMisses:         atomic.LoadInt64(&d.stats.NumCacheMisses),
+		TotalCacheHitSizeBytes: atomic.LoadInt64(&d.stats.TotalCacheHitSizeBytes),
+		InitTime:               time.Duration(atomic.LoadInt64((*int64)(&d.stats.InitTime))),
+		TotalGCTime:            time.Duration(atomic.LoadInt64((*int64)(&d.stats.TotalGCTime))),
 	}
-	return s[:len(s)-len(suffix)], true
 }
 
-func (d *DiskCache) getKeyFromFileName(fname string) (key, error) {
+func getKeyFromFileName(fname string) (key, error) {
 	pair := strings.Split(fname, ".")
 	if len(pair) != 2 {
-		return key{}, fmt.Errorf("expected file name in the form [ac_]hash/size, got %s", fname)
+		return key{}, fmt.Errorf("expected file name in the form hash[_ac].size, got %s", fname)
 	}
 	size, err := strconv.ParseInt(pair[1], 10, 64)
 	if err != nil {
 		return key{}, fmt.Errorf("invalid size in digest %s: %s", fname, err)
 	}
-	hash, isAc := CutSuffix(pair[0], "ac_")
+	hash, isAc := strings.CutSuffix(pair[0], "_ac")
 	dg, err := digest.New(hash, size)
 	if err != nil {
 		return key{}, fmt.Errorf("invalid digest from file name %s: %v", fname, err)
@@ -248,10 +275,16 @@ func (d *DiskCache) StoreCas(dg digest.Digest, path string) error {
 	if err := copyFile(path, d.getPath(it.key), dg.Size); err != nil {
 		return err
 	}
-	newSize := uint64(atomic.AddInt64(&d.sizeBytes, dg.Size))
+	d.statMu.Lock()
+	d.stats.TotalSizeBytes += dg.Size
+	d.stats.TotalStoredBytes += dg.Size
+	newSize := uint64(d.stats.TotalSizeBytes)
+	d.stats.TotalNumFiles++
+	d.stats.NumFilesStored++
+	d.statMu.Unlock()
 	if newSize > d.maxCapacityBytes {
 		select {
-		case d.gcReq <- atomic.AddUint64(&d.gcTick, 1):
+		case d.gcReq <- true:
 		default:
 		}
 	}
@@ -281,10 +314,16 @@ func (d *DiskCache) StoreActionCache(dg digest.Digest, ar *repb.ActionResult) er
 	if err := os.WriteFile(d.getPath(it.key), bytes, 0644); err != nil {
 		return err
 	}
-	newSize := uint64(atomic.AddInt64(&d.sizeBytes, int64(size)))
+	d.statMu.Lock()
+	d.stats.TotalSizeBytes += int64(size)
+	d.stats.TotalStoredBytes += int64(size)
+	newSize := uint64(d.stats.TotalSizeBytes)
+	d.stats.TotalNumFiles++
+	d.stats.NumFilesStored++
+	d.statMu.Unlock()
 	if newSize > d.maxCapacityBytes {
 		select {
-		case d.gcReq <- atomic.AddUint64(&d.gcTick, 1):
+		case d.gcReq <- true:
 		default:
 		}
 	}
@@ -292,38 +331,51 @@ func (d *DiskCache) StoreActionCache(dg digest.Digest, ar *repb.ActionResult) er
 }
 
 func (d *DiskCache) gc() {
+	start := time.Now()
+	// Evict old entries until total size is below cap.
+	var numFilesGCed, totalGCedSizeBytes int64
+	var totalGCDiskOpsTime time.Duration
+	for uint64(atomic.LoadInt64(&d.stats.TotalSizeBytes)) > d.maxCapacityBytes {
+		d.mu.Lock()
+		it := heap.Pop(d.queue).(*qitem)
+		d.mu.Unlock()
+		size, err := d.getItemSize(it.key)
+		if err != nil {
+			log.Errorf("error getting item size for %v: %v", it.key, err)
+			size = 0
+		}
+		atomic.AddInt64(&d.stats.TotalSizeBytes, -size)
+		numFilesGCed++
+		totalGCedSizeBytes += size
+		it.mu.Lock()
+		diskOpsStart := time.Now()
+		// We only delete the files, and not the prefix directories, because the prefixes are not worth worrying about.
+		if err := os.Remove(d.getPath(it.key)); err != nil {
+			log.Errorf("Error removing file: %v", err)
+		}
+		totalGCDiskOpsTime += time.Since(diskOpsStart)
+		d.store.Delete(it.key)
+		it.mu.Unlock()
+	}
+	d.statMu.Lock()
+	d.stats.NumFilesGCed += numFilesGCed
+	d.stats.TotalNumFiles -= numFilesGCed
+	d.stats.TotalGCedSizeBytes += totalGCedSizeBytes
+	d.stats.TotalGCDiskOpsTime += time.Duration(totalGCDiskOpsTime)
+	d.stats.TotalGCTime += time.Since(start)
+	d.statMu.Unlock()
+}
+
+func (d *DiskCache) daemon() {
+	defer func() { d.gcDone <- true }()
 	for {
 		select {
 		case <-d.shutdown:
 			return
 		case <-d.ctx.Done():
 			return
-		case t := <-d.gcReq:
-			// Evict old entries until total size is below cap.
-			for uint64(atomic.LoadInt64(&d.sizeBytes)) > d.maxCapacityBytes {
-				d.mu.Lock()
-				it := heap.Pop(d.queue).(*qitem)
-				d.mu.Unlock()
-				size, err := d.getItemSize(it.key)
-				if err != nil {
-					log.Errorf("error getting item size for %v: %v", it.key, err)
-					size = 0
-				}
-				atomic.AddInt64(&d.sizeBytes, -size)
-				it.mu.Lock()
-				// We only delete the files, and not the prefix directories, because the prefixes are not worth worrying about.
-				if err := os.Remove(d.getPath(it.key)); err != nil {
-					log.Errorf("Error removing file: %v", err)
-				}
-				d.store.Delete(it.key)
-				it.mu.Unlock()
-			}
-			if d.testGcTicks != nil {
-				select {
-				case d.testGcTicks <- t:
-				default:
-				}
-			}
+		case <-d.gcReq:
+			d.gc()
 		}
 	}
 }
@@ -363,6 +415,7 @@ func (d *DiskCache) LoadCas(dg digest.Digest, path string) bool {
 	k := key{digest: dg, isCas: true}
 	iUntyped, loaded := d.store.Load(k)
 	if !loaded {
+		atomic.AddInt64(&d.stats.NumCacheMisses, 1)
 		return false
 	}
 	it := iUntyped.(*qitem)
@@ -371,12 +424,17 @@ func (d *DiskCache) LoadCas(dg digest.Digest, path string) bool {
 	it.mu.RUnlock()
 	if err != nil {
 		// It is not possible to prevent a race with GC; hence, we return false on copy errors.
+		atomic.AddInt64(&d.stats.NumCacheMisses, 1)
 		return false
 	}
 
 	d.mu.Lock()
 	d.queue.Bump(it)
 	d.mu.Unlock()
+	d.statMu.Lock()
+	d.stats.NumCacheHits++
+	d.stats.TotalCacheHitSizeBytes += dg.Size
+	d.statMu.Unlock()
 	return true
 }
 
@@ -384,14 +442,17 @@ func (d *DiskCache) LoadActionCache(dg digest.Digest) (ar *repb.ActionResult, lo
 	k := key{digest: dg, isCas: false}
 	iUntyped, loaded := d.store.Load(k)
 	if !loaded {
+		atomic.AddInt64(&d.stats.NumCacheMisses, 1)
 		return nil, false
 	}
 	it := iUntyped.(*qitem)
 	it.mu.RLock()
 	ar = &repb.ActionResult{}
-	if err := d.loadActionResult(k, ar); err != nil {
+	size, err := d.loadActionResult(k, ar)
+	if err != nil {
 		// It is not possible to prevent a race with GC; hence, we return false on load errors.
 		it.mu.RUnlock()
+		atomic.AddInt64(&d.stats.NumCacheMisses, 1)
 		return nil, false
 	}
 	it.mu.RUnlock()
@@ -399,30 +460,27 @@ func (d *DiskCache) LoadActionCache(dg digest.Digest) (ar *repb.ActionResult, lo
 	d.mu.Lock()
 	d.queue.Bump(it)
 	d.mu.Unlock()
+	d.statMu.Lock()
+	d.stats.NumCacheHits++
+	d.stats.TotalCacheHitSizeBytes += int64(size)
+	d.statMu.Unlock()
 	return ar, true
 }
 
-func (d *DiskCache) loadActionResult(k key, ar *repb.ActionResult) error {
+func (d *DiskCache) loadActionResult(k key, ar *repb.ActionResult) (int, error) {
 	bytes, err := os.ReadFile(d.getPath(k))
 	if err != nil {
-		return err
+		return 0, err
 	}
+	n := len(bytes)
 	// Required sanity check: sometimes the read pretends to succeed, but doesn't, if
 	// the file is being concurrently deleted. Empty ActionResult is advised against in
 	// the RE-API: https://github.com/bazelbuild/remote-apis/blob/main/build/bazel/remote/execution/v2/remote_execution.proto#L1052
-	if len(bytes) == 0 {
-		return fmt.Errorf("read empty ActionResult for %v", k.digest)
+	if n == 0 {
+		return n, fmt.Errorf("read empty ActionResult for %v", k.digest)
 	}
 	if err := proto.Unmarshal(bytes, ar); err != nil {
-		return fmt.Errorf("error unmarshalling %v as ActionResult: %v", bytes, err)
+		return n, fmt.Errorf("error unmarshalling %v as ActionResult: %v", bytes, err)
 	}
-	return nil
-}
-
-func getLastAccessTime(path string) (time.Time, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return FileInfoToAccessTime(info), nil
+	return n, nil
 }

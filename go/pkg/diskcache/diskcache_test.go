@@ -8,25 +8,17 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/testutil"
 	"github.com/google/go-cmp/cmp"
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
-
-// Test utility only. Assumes all modifications are done, and at least one GC is expected.
-func waitForGc(d *DiskCache) {
-	for t := range d.testGcTicks {
-		if t == d.gcTick {
-			return
-		}
-	}
-}
 
 func TestStoreLoadCasPerm(t *testing.T) {
 	tests := []struct {
@@ -49,7 +41,6 @@ func TestStoreLoadCasPerm(t *testing.T) {
 			if err != nil {
 				t.Errorf("New: %v", err)
 			}
-			defer d.Shutdown()
 			fname, _ := testutil.CreateFile(t, tc.executable, "12345")
 			srcInfo, err := os.Stat(fname)
 			if err != nil {
@@ -80,6 +71,41 @@ func TestStoreLoadCasPerm(t *testing.T) {
 			if string(contents) != "12345" {
 				t.Errorf("Cached result did not match: want %q, got %q", "12345", string(contents))
 			}
+			d.Shutdown()
+			stats := d.GetStats()
+			if stats.TotalNumFiles != 1 {
+				t.Errorf("expected TotalNumFiles to be 1, got %d", stats.TotalNumFiles)
+			}
+			if stats.NumFilesStored != 1 {
+				t.Errorf("expected NumFilesStored to be 1, got %d", stats.NumFilesStored)
+			}
+			if stats.TotalStoredBytes != 5 {
+				t.Errorf("expected TotalStoredBytes to be 5, got %d", stats.TotalStoredBytes)
+			}
+			if stats.NumCacheHits != 1 {
+				t.Errorf("expected NumCacheHits to be 1, got %d", stats.NumCacheHits)
+			}
+			if stats.TotalCacheHitSizeBytes != 5 {
+				t.Errorf("expected TotalCacheHitSizeBytes to be 5, got %d", stats.TotalCacheHitSizeBytes)
+			}
+			if stats.NumCacheMisses != 0 {
+				t.Errorf("expected NumCacheMisses to be 0, got %d", stats.NumCacheMisses)
+			}
+			if stats.TotalSizeBytes != 5 {
+				t.Errorf("expected TotalSizeBytes to be 5, got %d", stats.TotalSizeBytes)
+			}
+			if stats.NumFilesGCed != 0 {
+				t.Errorf("expected NumFilesGCed to be 0, got %d", stats.NumFilesGCed)
+			}
+			if stats.TotalGCedSizeBytes != 0 {
+				t.Errorf("expected TotalGCedSizeBytes to be 0, got %d", stats.TotalGCedSizeBytes)
+			}
+			if stats.InitTime == 0 {
+				t.Errorf("expected InitTime to be > 0")
+			}
+			if stats.TotalGCTime != 0 {
+				t.Errorf("expected TotalGCTime to be 0")
+			}
 		})
 	}
 }
@@ -90,11 +116,45 @@ func TestLoadCasNotFound(t *testing.T) {
 	if err != nil {
 		t.Errorf("New: %v", err)
 	}
-	defer d.Shutdown()
 	newName := filepath.Join(root, "new")
 	dg := digest.NewFromBlob([]byte("bla"))
 	if d.LoadCas(dg, newName) {
 		t.Errorf("expected to not load %s from the cache to %s", dg, newName)
+	}
+	d.Shutdown()
+	stats := d.GetStats()
+	if stats.TotalNumFiles != 0 {
+		t.Errorf("expected TotalNumFiles to be 0, got %d", stats.TotalNumFiles)
+	}
+	if stats.TotalSizeBytes != 0 {
+		t.Errorf("expected TotalSizeBytes to be 0, got %d", stats.TotalSizeBytes)
+	}
+	if stats.NumFilesStored != 0 {
+		t.Errorf("expected NumFilesStored to be 0, got %d", stats.NumFilesStored)
+	}
+	if stats.TotalStoredBytes != 0 {
+		t.Errorf("expected TotalStoredBytes to be 0, got %d", stats.TotalStoredBytes)
+	}
+	if stats.NumCacheHits != 0 {
+		t.Errorf("expected NumCacheHits to be 0, got %d", stats.NumCacheHits)
+	}
+	if stats.TotalCacheHitSizeBytes != 0 {
+		t.Errorf("expected TotalCacheHitSizeBytes to be 0, got %d", stats.TotalCacheHitSizeBytes)
+	}
+	if stats.NumCacheMisses != 1 {
+		t.Errorf("expected NumCacheMisses to be 1, got %d", stats.NumCacheMisses)
+	}
+	if stats.NumFilesGCed != 0 {
+		t.Errorf("expected NumFilesGCed to be 0, got %d", stats.NumFilesGCed)
+	}
+	if stats.TotalGCedSizeBytes != 0 {
+		t.Errorf("expected TotalGCedSizeBytes to be 0, got %d", stats.TotalGCedSizeBytes)
+	}
+	if stats.InitTime == 0 {
+		t.Errorf("expected InitTime to be > 0")
+	}
+	if stats.TotalGCTime != 0 {
+		t.Errorf("expected TotalGCTime to be 0")
 	}
 }
 
@@ -104,10 +164,9 @@ func TestStoreLoadActionCache(t *testing.T) {
 	if err != nil {
 		t.Errorf("New: %v", err)
 	}
-	defer d.Shutdown()
 	ar := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
-			&repb.OutputFile{Path: "bla", Digest: digest.Empty.ToProto()},
+			{Path: "bla", Digest: digest.Empty.ToProto()},
 		},
 	}
 	dg := digest.NewFromBlob([]byte("foo"))
@@ -121,6 +180,46 @@ func TestStoreLoadActionCache(t *testing.T) {
 	if diff := cmp.Diff(ar, got, cmp.Comparer(proto.Equal)); diff != "" {
 		t.Errorf("LoadActionCache(...) gave diff on action result (-want +got):\n%s", diff)
 	}
+	d.Shutdown()
+	stats := d.GetStats()
+	if stats.TotalNumFiles != 1 {
+		t.Errorf("expected TotalNumFiles to be 1, got %d", stats.TotalNumFiles)
+	}
+	bytes, err := proto.Marshal(ar)
+	if err != nil {
+		t.Fatalf("error marshalling proto: %v", err)
+	}
+	size := int64(len(bytes))
+	if stats.TotalSizeBytes != size {
+		t.Errorf("expected TotalSizeBytes to be %d, got %d", size, stats.TotalSizeBytes)
+	}
+	if stats.NumFilesStored != 1 {
+		t.Errorf("expected NumFilesStored to be 1, got %d", stats.NumFilesStored)
+	}
+	if stats.TotalStoredBytes != size {
+		t.Errorf("expected TotalStoredBytes to be %d, got %d", size, stats.TotalStoredBytes)
+	}
+	if stats.NumCacheHits != 1 {
+		t.Errorf("expected NumCacheHits to be 1, got %d", stats.NumCacheHits)
+	}
+	if stats.TotalCacheHitSizeBytes != size {
+		t.Errorf("expected TotalCacheHitSizeBytes to be %d, got %d", size, stats.TotalCacheHitSizeBytes)
+	}
+	if stats.NumCacheMisses != 0 {
+		t.Errorf("expected NumCacheMisses to be 0, got %d", stats.NumCacheMisses)
+	}
+	if stats.NumFilesGCed != 0 {
+		t.Errorf("expected NumFilesGCed to be 0, got %d", stats.NumFilesGCed)
+	}
+	if stats.TotalGCedSizeBytes != 0 {
+		t.Errorf("expected TotalGCedSizeBytes to be 0, got %d", stats.TotalGCedSizeBytes)
+	}
+	if stats.InitTime == 0 {
+		t.Errorf("expected InitTime to be > 0")
+	}
+	if stats.TotalGCTime != 0 {
+		t.Errorf("expected TotalGCTime to be 0")
+	}
 }
 
 func TestGcOldestCas(t *testing.T) {
@@ -129,8 +228,6 @@ func TestGcOldestCas(t *testing.T) {
 	if err != nil {
 		t.Errorf("New: %v", err)
 	}
-	defer d.Shutdown()
-	d.testGcTicks = make(chan uint64, 1)
 	for i := 0; i < 5; i++ {
 		fname, _ := testutil.CreateFile(t, false, fmt.Sprintf("aaa %d", i))
 		dg, err := digest.NewFromFile(fname)
@@ -141,10 +238,7 @@ func TestGcOldestCas(t *testing.T) {
 			t.Errorf("StoreCas(%s, %s) failed: %v", dg, fname, err)
 		}
 	}
-	waitForGc(d)
-	if d.TotalSizeBytes() != d.maxCapacityBytes {
-		t.Errorf("expected total size bytes to be %d, got %d", d.maxCapacityBytes, d.TotalSizeBytes())
-	}
+	d.Shutdown()
 	newName := filepath.Join(root, "new")
 	for i := 0; i < 5; i++ {
 		dg := digest.NewFromBlob([]byte(fmt.Sprintf("aaa %d", i)))
@@ -152,12 +246,46 @@ func TestGcOldestCas(t *testing.T) {
 			t.Errorf("expected loaded to be %v for %s from the cache to %s", i > 0, dg, newName)
 		}
 	}
+	stats := d.GetStats()
+	if stats.TotalNumFiles != 4 {
+		t.Errorf("expected TotalNumFiles to be 4, got %d", stats.TotalNumFiles)
+	}
+	if stats.NumFilesStored != 5 {
+		t.Errorf("expected NumFilesStored to be 5, got %d", stats.NumFilesStored)
+	}
+	if stats.TotalStoredBytes != 25 {
+		t.Errorf("expected TotalStoredBytes to be 25, got %d", stats.TotalStoredBytes)
+	}
+	if stats.NumCacheHits != 4 {
+		t.Errorf("expected NumCacheHits to be 4, got %d", stats.NumCacheHits)
+	}
+	if stats.TotalCacheHitSizeBytes != 20 {
+		t.Errorf("expected TotalCacheHitSizeBytes to be 20, got %d", stats.TotalCacheHitSizeBytes)
+	}
+	if stats.NumCacheMisses != 1 {
+		t.Errorf("expected NumCacheMisses to be 1, got %d", stats.NumCacheMisses)
+	}
+	if stats.NumFilesGCed != 1 {
+		t.Errorf("expected NumFilesGCed to be 1, got %d", stats.NumFilesGCed)
+	}
+	if stats.TotalGCedSizeBytes != 5 {
+		t.Errorf("expected TotalGCedSizeBytes to be 5, got %d", stats.TotalGCedSizeBytes)
+	}
+	if uint64(stats.TotalSizeBytes) != d.maxCapacityBytes {
+		t.Errorf("expected total size bytes to be %d, got %d", d.maxCapacityBytes, stats.TotalSizeBytes)
+	}
+	if stats.InitTime <= 0 {
+		t.Errorf("expected InitTime to be > 0")
+	}
+	if stats.TotalGCTime <= 0 {
+		t.Errorf("expected TotalGCTime to be > 0")
+	}
 }
 
 func TestGcOldestActionCache(t *testing.T) {
 	ar := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
-			&repb.OutputFile{Path: "12345", Digest: digest.Empty.ToProto()},
+			{Path: "12345", Digest: digest.Empty.ToProto()},
 		},
 	}
 	bytes, err := proto.Marshal(ar)
@@ -170,8 +298,6 @@ func TestGcOldestActionCache(t *testing.T) {
 	if err != nil {
 		t.Errorf("New: %v", err)
 	}
-	defer d.Shutdown()
-	d.testGcTicks = make(chan uint64, 1)
 	for i := 0; i < 5; i++ {
 		si := fmt.Sprintf("aaa %d", i)
 		dg := digest.NewFromBlob([]byte(si))
@@ -180,10 +306,7 @@ func TestGcOldestActionCache(t *testing.T) {
 			t.Errorf("StoreActionCache(%s) failed: %v", dg, err)
 		}
 	}
-	waitForGc(d)
-	if d.TotalSizeBytes() != d.maxCapacityBytes {
-		t.Errorf("expected total size bytes to be %d, got %d", d.maxCapacityBytes, d.TotalSizeBytes())
-	}
+	d.Shutdown()
 	for i := 0; i < 5; i++ {
 		si := fmt.Sprintf("aaa %d", i)
 		dg := digest.NewFromBlob([]byte(si))
@@ -198,6 +321,48 @@ func TestGcOldestActionCache(t *testing.T) {
 			t.Errorf("expected loaded to be %v for %s from the cache", i > 0, dg)
 		}
 	}
+	stats := d.GetStats()
+	if stats.TotalNumFiles != 4 {
+		t.Errorf("expected TotalNumFiles to be 4, got %d", stats.TotalNumFiles)
+	}
+	if stats.NumFilesStored != 5 {
+		t.Errorf("expected NumFilesStored to be 5, got %d", stats.NumFilesStored)
+	}
+	if stats.TotalStoredBytes != int64(size)*5 {
+		t.Errorf("expected TotalStoredBytes to be %d, got %d", size*5, stats.TotalStoredBytes)
+	}
+	if stats.NumCacheHits != 4 {
+		t.Errorf("expected NumCacheHits to be 4, got %d", stats.NumCacheHits)
+	}
+	if stats.TotalCacheHitSizeBytes != int64(size)*4 {
+		t.Errorf("expected TotalCacheHitSizeBytes to be %d, got %d", size*4, stats.TotalCacheHitSizeBytes)
+	}
+	if stats.NumCacheMisses != 1 {
+		t.Errorf("expected NumCacheMisses to be 1, got %d", stats.NumCacheMisses)
+	}
+	if stats.NumFilesGCed != 1 {
+		t.Errorf("expected NumFilesGCed to be 1, got %d", stats.NumFilesGCed)
+	}
+	if stats.TotalGCedSizeBytes != int64(size) {
+		t.Errorf("expected TotalGCedSizeBytes to be %d, got %d", size, stats.TotalGCedSizeBytes)
+	}
+	if uint64(stats.TotalSizeBytes) != d.maxCapacityBytes {
+		t.Errorf("expected total size bytes to be %d, got %d", d.maxCapacityBytes, stats.TotalSizeBytes)
+	}
+	if stats.InitTime <= 0 {
+		t.Errorf("expected InitTime to be > 0")
+	}
+	if stats.TotalGCTime <= 0 {
+		t.Errorf("expected TotalGCTime to be > 0")
+	}
+}
+
+func getLastAccessTime(path string) (time.Time, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return fileInfoToAccessTime(info), nil
 }
 
 // We say that Last Access Time is behaving accurately on a system if reading from the file
@@ -250,8 +415,6 @@ func TestInitFromExistingCas(t *testing.T) {
 	if err != nil {
 		t.Errorf("New: %v", err)
 	}
-	defer d.Shutdown()
-	d.testGcTicks = make(chan uint64, 1)
 
 	// Check old files are cached:
 	dg = digest.NewFromBlob([]byte("aaa 1"))
@@ -263,17 +426,48 @@ func TestInitFromExistingCas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("digest.NewFromFile failed: %v", err)
 	}
-	if d.TotalSizeBytes() != d.maxCapacityBytes {
-		t.Errorf("expected total size bytes to be %d, got %d", d.maxCapacityBytes, d.TotalSizeBytes())
-	}
 	// Trigger a GC by adding a new file.
 	if err := d.StoreCas(dg, fname); err != nil {
 		t.Errorf("StoreCas(%s, %s) failed: %v", dg, fname, err)
 	}
-	waitForGc(d)
+	d.Shutdown()
 	dg = digest.NewFromBlob([]byte("aaa 2"))
 	if d.LoadCas(dg, newName) {
 		t.Errorf("expected to not load %s from the cache to %s", dg, newName)
+	}
+	stats := d.GetStats()
+	if stats.TotalNumFiles != 4 {
+		t.Errorf("expected TotalNumFiles to be 4, got %d", stats.TotalNumFiles)
+	}
+	if stats.NumFilesStored != 1 {
+		t.Errorf("expected NumFilesStored to be 1, got %d", stats.NumFilesStored)
+	}
+	if stats.TotalStoredBytes != 5 {
+		t.Errorf("expected TotalStoredBytes to be 5, got %d", stats.TotalStoredBytes)
+	}
+	if stats.NumCacheHits != 1 {
+		t.Errorf("expected NumCacheHits to be 1, got %d", stats.NumCacheHits)
+	}
+	if stats.TotalCacheHitSizeBytes != 5 {
+		t.Errorf("expected TotalCacheHitSizeBytes to be 5, got %d", stats.TotalCacheHitSizeBytes)
+	}
+	if stats.NumCacheMisses != 1 {
+		t.Errorf("expected NumCacheMisses to be 1, got %d", stats.NumCacheMisses)
+	}
+	if stats.NumFilesGCed != 1 {
+		t.Errorf("expected NumFilesGCed to be 1, got %d", stats.NumFilesGCed)
+	}
+	if stats.TotalGCedSizeBytes != 5 {
+		t.Errorf("expected TotalGCedSizeBytes to be 5, got %d", stats.TotalGCedSizeBytes)
+	}
+	if uint64(stats.TotalSizeBytes) != d.maxCapacityBytes {
+		t.Errorf("expected total size bytes to be %d, got %d", d.maxCapacityBytes, stats.TotalSizeBytes)
+	}
+	if stats.InitTime <= 0 {
+		t.Errorf("expected InitTime to be > 0")
+	}
+	if stats.TotalGCTime <= 0 {
+		t.Errorf("expected TotalGCTime to be > 0")
 	}
 }
 
@@ -292,8 +486,6 @@ func TestThreadSafetyCas(t *testing.T) {
 	if err != nil {
 		t.Errorf("New: %v", err)
 	}
-	d.testGcTicks = make(chan uint64, attempts)
-	defer d.Shutdown()
 	var files []string
 	var dgs []digest.Digest
 	for i := 0; i < nFiles; i++ {
@@ -312,14 +504,14 @@ func TestThreadSafetyCas(t *testing.T) {
 		}
 	}
 	// Randomly access and store files from different threads.
-	eg, _ := errgroup.WithContext(context.Background())
+	eg := errgroup.Group{}
 	var hits uint64
 	var runs []int
 	for k := 0; k < attempts; k++ {
 		eg.Go(func() error {
 			i := rand.Intn(nFiles)
 			runs = append(runs, i)
-			newName := filepath.Join(root, "new", uuid.New())
+			newName := filepath.Join(root, "new", uuid.New().String())
 			if d.LoadCas(dgs[i], newName) {
 				atomic.AddUint64(&hits, 1)
 				contents, err := os.ReadFile(newName)
@@ -339,11 +531,43 @@ func TestThreadSafetyCas(t *testing.T) {
 	if err := eg.Wait(); err != nil {
 		t.Error(err)
 	}
-	waitForGc(d)
-	if d.TotalSizeBytes() != d.maxCapacityBytes {
-		t.Errorf("expected total size bytes to be %d, got %d", d.maxCapacityBytes, d.TotalSizeBytes())
-	}
+	d.Shutdown()
 	if int(hits) < attempts/2 {
 		t.Errorf("Unexpectedly low cache hits %d out of %d attempts", hits, attempts)
+	}
+	stats := d.GetStats()
+	if stats.TotalNumFiles != 5 {
+		t.Errorf("expected TotalNumFiles to be 5, got %d", stats.TotalNumFiles)
+	}
+	if uint64(stats.NumCacheHits) != hits {
+		t.Errorf("expected NumCacheHits to be %d, got %d", hits, stats.NumCacheHits)
+	}
+	if uint64(stats.TotalCacheHitSizeBytes) != hits*5 {
+		t.Errorf("expected TotalCacheHitSizeBytes to be %d, got %d", hits*5, stats.TotalCacheHitSizeBytes)
+	}
+	if stats.NumCacheMisses+stats.NumCacheHits != int64(attempts) {
+		t.Errorf("expected NumCacheHits+NumCacheMisses to be %d, got %d", attempts, stats.NumCacheMisses+stats.NumCacheHits)
+	}
+	// This is less or equal because of multiple concurrent Stores.
+	if stats.NumFilesStored > int64(nFiles)+stats.NumCacheMisses {
+		t.Errorf("expected NumFilesStored to be <= %d, got %d", int64(nFiles)+stats.NumCacheMisses, stats.NumFilesStored)
+	}
+	if stats.TotalStoredBytes != 5*stats.NumFilesStored {
+		t.Errorf("expected TotalStoredBytes to be %d, got %d", 5*stats.NumFilesStored, stats.TotalStoredBytes)
+	}
+	if stats.NumFilesGCed <= 0 {
+		t.Errorf("expected NumFilesGCed to be > 0")
+	}
+	if stats.TotalGCedSizeBytes <= 0 {
+		t.Errorf("expected TotalGCedSizeBytes to be > 0")
+	}
+	if uint64(stats.TotalSizeBytes) != d.maxCapacityBytes {
+		t.Errorf("expected total size bytes to be %d, got %d", d.maxCapacityBytes, stats.TotalSizeBytes)
+	}
+	if stats.InitTime <= 0 {
+		t.Errorf("expected InitTime to be > 0")
+	}
+	if stats.TotalGCTime <= 0 {
+		t.Errorf("expected TotalGCTime to be > 0")
 	}
 }
