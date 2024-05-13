@@ -3,6 +3,7 @@ package credshelper
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -83,9 +84,13 @@ type Credentials struct {
 
 // externaltokenSource uses a credentialsHelper to obtain gcp oauth tokens.
 // This should be wrapped in a "golang.org/x/oauth2".ReuseTokenSource
-// to avoid obtaining new tokens each time.
+// to avoid obtaining new tokens each time. It implements both the
+// oauth2.TokenSource and credentials.PerRPCCredentials interfaces.
 type externalTokenSource struct {
 	credsHelperCmd *reusableCmd
+	headers        map[string]string
+	expiry         time.Time
+	headersLock    sync.RWMutex
 }
 
 func buildExternalCredentials(baseCreds cachedCredentials, credsFile string, credsHelperCmd *reusableCmd) *Credentials {
@@ -166,11 +171,32 @@ func (ts *externalTokenSource) Token() (*oauth2.Token, error) {
 	if ts == nil {
 		return nil, fmt.Errorf("empty tokensource")
 	}
-	tk, _, err := runCredsHelperCmd(ts.credsHelperCmd)
-	if err == nil {
-		log.Infof("'%s' credentials refreshed at %v, expires at %v", ts.credsHelperCmd, time.Now(), tk.Expiry)
+	credsOut, err := runCredsHelperCmd(ts.credsHelperCmd)
+	if err != nil {
+		return nil, err
 	}
-	return tk, err
+	log.Infof("'%s' credentials refreshed at %v, expires at %v", ts.credsHelperCmd, time.Now(), credsOut.tk.Expiry)
+	return credsOut.tk, err
+}
+
+// GetRequestMetadata gets the current request metadata, refreshing tokens if required.
+func (ts *externalTokenSource) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	ts.headersLock.RLock()
+	defer ts.headersLock.RUnlock()
+	if ts.expiry.Before(nowFn()) {
+		credsOut, err := runCredsHelperCmd(ts.credsHelperCmd)
+		if err != nil {
+			return nil, err
+		}
+		ts.expiry = credsOut.tk.Expiry
+		ts.headers = credsOut.hdrs
+	}
+	return ts.headers, nil
+}
+
+// RequireTransportSecurity indicates whether the credentials require transport security.
+func (ts *externalTokenSource) RequireTransportSecurity() bool {
+	return true
 }
 
 // NewExternalCredentials creates credentials obtained from a credshelper.
@@ -190,14 +216,20 @@ func NewExternalCredentials(credshelper string, credshelperArgs []string, credsF
 		}
 		log.Warningf("Failed to use cached credentials: %v", err)
 	}
-	tk, rexp, err := runCredsHelperCmd(credsHelperCmd)
+	credsOut, err := runCredsHelperCmd(credsHelperCmd)
 	if err != nil {
 		return nil, err
 	}
-	return buildExternalCredentials(cachedCredentials{token: tk, refreshExp: rexp}, credsFile, credsHelperCmd), nil
+	return buildExternalCredentials(cachedCredentials{token: credsOut.tk, refreshExp: credsOut.rexp}, credsFile, credsHelperCmd), nil
 }
 
-func runCredsHelperCmd(credsHelperCmd *reusableCmd) (*oauth2.Token, time.Time, error) {
+type credshelperOutput struct {
+	hdrs map[string]string
+	tk   *oauth2.Token
+	rexp time.Time
+}
+
+func runCredsHelperCmd(credsHelperCmd *reusableCmd) (*credshelperOutput, error) {
 	log.V(2).Infof("Running %v", credsHelperCmd)
 	var stdout, stderr bytes.Buffer
 	cmd := credsHelperCmd.Cmd()
@@ -209,53 +241,48 @@ func runCredsHelperCmd(credsHelperCmd *reusableCmd) (*oauth2.Token, time.Time, e
 		log.Errorf("Credentials helper warnings and errors: %v", stderr.String())
 	}
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, err
 	}
-	token, expiry, refreshExpiry, err := parseTokenExpiryFromOutput(out)
-	return &oauth2.Token{
-		AccessToken: token,
-		Expiry:      expiry,
-	}, refreshExpiry, err
+	return parseTokenExpiryFromOutput(out)
 }
 
-// CredsHelperOut is the struct to record the json output from the credshelper.
-type CredsHelperOut struct {
-	Token         string `json:"token"`
-	Expiry        string `json:"expiry"`
-	RefreshExpiry string `json:"refresh_expiry"`
+// JSONOut is the struct to record the json output from the credshelper.
+type JSONOut struct {
+	Token         string            `json:"token"`
+	Headers       map[string]string `json:"headers"`
+	Expiry        string            `json:"expiry"`
+	RefreshExpiry string            `json:"refresh_expiry"`
 }
 
-func parseTokenExpiryFromOutput(out string) (string, time.Time, time.Time, error) {
-	var (
-		tk        string
-		exp, rexp time.Time
-		chOut     CredsHelperOut
-	)
-	if err := json.Unmarshal([]byte(out), &chOut); err != nil {
-		return tk, exp, rexp,
-			fmt.Errorf("error while decoding credshelper output:%v", err)
+func parseTokenExpiryFromOutput(out string) (*credshelperOutput, error) {
+	credsOut := &credshelperOutput{}
+	var jsonOut JSONOut
+	if err := json.Unmarshal([]byte(out), &jsonOut); err != nil {
+		return nil, fmt.Errorf("error while decoding credshelper output:%v", err)
 	}
-	tk = chOut.Token
-	if tk == "" {
-		return tk, exp, rexp,
-			fmt.Errorf("no token was printed by the credentials helper")
+	if jsonOut.Token == "" {
+		return nil, fmt.Errorf("no token was printed by the credentials helper")
 	}
-	if chOut.Expiry != "" {
-		expiry, err := time.Parse(time.UnixDate, chOut.Expiry)
+	credsOut.tk = &oauth2.Token{AccessToken: jsonOut.Token}
+	if len(jsonOut.Headers) == 0 {
+		return nil, fmt.Errorf("no headers were printed by the credentials helper")
+	}
+	credsOut.hdrs = jsonOut.Headers
+	if jsonOut.Expiry != "" {
+		expiry, err := time.Parse(time.UnixDate, jsonOut.Expiry)
 		if err != nil {
-			return tk, exp, rexp, fmt.Errorf("invalid expiry format: %v (Expected time.UnixDate format)", chOut.Expiry)
+			return nil, fmt.Errorf("invalid expiry format: %v (Expected time.UnixDate format)", jsonOut.Expiry)
 		}
-		exp = expiry
-		rexp = expiry
+		credsOut.tk.Expiry = expiry
 	}
-	if chOut.RefreshExpiry != "" {
-		rexpiry, err := time.Parse(time.UnixDate, chOut.RefreshExpiry)
+	if jsonOut.RefreshExpiry != "" {
+		rexpiry, err := time.Parse(time.UnixDate, jsonOut.RefreshExpiry)
 		if err != nil {
-			return tk, exp, rexp, fmt.Errorf("invalid refresh expiry format: %v (Expected time.UnixDate format)", chOut.RefreshExpiry)
+			return nil, fmt.Errorf("invalid refresh expiry format: %v (Expected time.UnixDate format)", jsonOut.RefreshExpiry)
 		}
-		rexp = rexpiry
+		credsOut.rexp = rexpiry
 	}
-	return tk, exp, rexp, nil
+	return credsOut, nil
 }
 
 // binaryRelToAbs converts a path that is relative to the current executable
