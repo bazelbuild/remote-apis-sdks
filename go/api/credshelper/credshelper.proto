@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package credshelper;
+
+option go_package = "github.com/bazelbuild/remote-apis-sdks/go/api/credshelper";
+
+// Stores information used for authenticating to the remote execution service.
+message Credentials {
+  // Authentication mechanism.
+  string auth_source = 1;
+  // The token string.
+  string token = 2;
+  // Token expiry.
+  google.protobuf.Timestamp expiry = 3;
+  // Reauth expiry.
+  google.protobuf.Timestamp refresh_expiry = 4;
+  // Credshelper command digest in canonical form of hash/size.
+  string credsHelperCmdDigest = 5;
+}
