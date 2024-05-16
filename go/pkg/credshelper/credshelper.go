@@ -166,6 +166,14 @@ func (c *Credentials) RemoveFromDisk() {
 	}
 }
 
+// refreshStatus checks refresh expiry of credentials in case a manual refresh is required.
+func (c *Credentials) refreshStatus() error {
+	if !c.refreshExp.IsZero() && c.refreshExp.Before(nowFn()) {
+		return fmt.Errorf("credentials cannot be refreshed automatically, manual re-authentication required")
+	}
+	return nil
+}
+
 // Token retrieves an oauth2 token from the external tokensource.
 func (ts *externalTokenSource) Token() (*oauth2.Token, error) {
 	if ts == nil {
@@ -215,6 +223,10 @@ func NewExternalCredentials(credshelper string, credshelperArgs []string, credsF
 			return creds, nil
 		}
 		log.Warningf("Failed to use cached credentials: %v", err)
+		if err = creds.refreshStatus(); err != nil {
+			creds.RemoveFromDisk()
+			return nil, err
+		}
 	}
 	credsOut, err := runCredsHelperCmd(credsHelperCmd)
 	if err != nil {
