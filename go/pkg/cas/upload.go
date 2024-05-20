@@ -562,10 +562,13 @@ func (u *uploader) visitPath(ctx context.Context, absPath string, info os.FileIn
 		// Ignore all non-expected modes (e.g. domain sockets as used by git
 		// fsmonitor).
 		default:
-			return nil, nil
+			return nil, ErrSkip
 		}
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrSkip):
+		return nil, nil
+	case err != nil:
 		return nil, err
 	}
 	return cached.(*digested), nil
