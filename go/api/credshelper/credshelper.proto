@@ -17,5 +17,5 @@ message Credentials {
   // Reauth expiry.
   google.protobuf.Timestamp refresh_expiry = 4;
   // Credshelper command digest in canonical form of hash/size.
-  string credsHelperCmdDigest = 5;
+  string credshelper_cmd_digest = 5;
 }

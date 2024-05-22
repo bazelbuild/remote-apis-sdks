@@ -47,7 +47,7 @@ func loadFromDisk(tf string) (cachedCredentials, error) {
 		authSource:           cPb.GetAuthSource(),
 		token:                token,
 		refreshExp:           TimeFromProto(cPb.GetRefreshExpiry()),
-		credsHelperCmdDigest: cPb.GetCredsHelperCmdDigest(),
+		credsHelperCmdDigest: cPb.GetCredshelperCmdDigest(),
 	}
 	log.Infof("Loaded cached credentials of type %v, expires at %v", c.authSource, exp)
 	return c, nil
@@ -62,7 +62,7 @@ func saveToDisk(c cachedCredentials, tf string) error {
 	if c.token != nil {
 		cPb.Token = c.token.AccessToken
 		cPb.Expiry = TimeToProto(c.token.Expiry)
-		cPb.CredsHelperCmdDigest = c.credsHelperCmdDigest
+		cPb.CredshelperCmdDigest = c.credsHelperCmdDigest
 	}
 	if !c.refreshExp.IsZero() {
 		cPb.RefreshExpiry = TimeToProto(c.refreshExp)
