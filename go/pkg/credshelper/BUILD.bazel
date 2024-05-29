@@ -7,7 +7,7 @@ go_library(
         "cache.go",
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/credshelper",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
         "//go/api/credshelper",
 	"//go/pkg/digest",

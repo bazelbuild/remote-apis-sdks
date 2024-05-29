@@ -7,6 +7,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//go/pkg/client",
+        "//go/pkg/credshelper",
         "//go/pkg/moreflag",
         "@com_github_golang_glog//:glog",
         "@org_golang_google_grpc//:go_default_library",

@@ -4,9 +4,12 @@ package flags
 import (
 	"context"
 	"flag"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/credshelper"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -34,6 +37,12 @@ var (
 	// UseGCECredentials is whether to use the default GCE credentials to authenticate with remote
 	// execution. --use_application_default_credentials must be false.
 	UseGCECredentials = flag.Bool("use_gce_credentials", false, "If true (and --use_application_default_credentials is false), use the default GCE credentials to authenticate with remote execution.")
+	// CredentialsHelper specifies a path to a credentials helper binary which should be used to fetch credentials.
+	CredentialsHelper = flag.String(credshelper.CredshelperPathFlag, "", "Path to the credentials helper binary. If given execrell://, looks for the `credshelper` binary in the same folder as the current executable.")
+	// CredentialsHelperArgs specifies arguments for the credentials helper binary,
+	CredentialsHelperArgs = flag.String(credshelper.CredshelperArgsFlag, "", "Arguments for the credentials helper, separated by space.")
+	// CredsCache specifies the file path where credentials recieved from the credentials helper are cached. If no file is provided then no credentials are cached.
+	CredsCache = flag.String(credshelper.ExperimentalCredsCachePathFlag, "", "Path of the file where credentials should be cached. Credentials are not cached if no file path is provided.")
 	// UseRPCCredentials can be set to false to disable all per-RPC credentials.
 	UseRPCCredentials = flag.Bool("use_rpc_credentials", true, "If false, no per-RPC credentials will be used (disables --credential_file, --use_application_default_credentials, and --use_gce_credentials.")
 	// UseExternalAuthToken specifies whether to use an externally provided auth token, given via PerRPCCreds dial option, should be used.
@@ -108,6 +117,13 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		default:
 			tOpts = append(tOpts, opt)
 		}
+	}
+	if *CredentialsHelper != "" && perRPCCreds == nil {
+		creds, err := credshelper.NewExternalCredentials(*CredentialsHelper, strings.Fields(*CredentialsHelperArgs), *CredsCache)
+		if err != nil {
+			return nil, fmt.Errorf("credentials helper failed. Please try again or use another method of authentication:%v", err)
+		}
+		perRPCCreds = &client.PerRPCCreds{Creds: creds.TokenSource()}
 	}
 	opts = tOpts
 

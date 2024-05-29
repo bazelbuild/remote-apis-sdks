@@ -80,7 +80,7 @@ func (a AuthType) String() string {
 	case NoAuth:
 		return "no authentication"
 	case ExternalTokenAuth:
-		return "external authentication token (gcert?)"
+		return "external authentication token (credentials helper)"
 	case CredsFileAuth:
 		return "credentials file"
 	case ApplicationDefaultCredsAuth:

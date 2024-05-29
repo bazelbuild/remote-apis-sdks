@@ -28,8 +28,8 @@ const (
 	CredshelperPathFlag = "credentials_helper"
 	// CredshelperArgsFlag is the flag used to pass in the arguments to the credentials helper binary.
 	CredshelperArgsFlag = "credentials_helper_args"
-	// CredsFileFlag is the flag used to pass in the path of the file where credentials should be cached.
-	CredsFileFlag = "creds_file"
+	// ExperimentalCredsCachePathFlag is the flag used to pass in the path of the file where credentials should be cached.
+	ExperimentalCredsCachePathFlag = "experimental_creds_cache_file"
 
 	expiryBuffer = 5 * time.Minute
 )
@@ -93,6 +93,14 @@ type externalTokenSource struct {
 	headers        map[string]string
 	expiry         time.Time
 	headersLock    sync.RWMutex
+}
+
+// TokenSource returns a token source for this credentials instance.
+func (c *Credentials) TokenSource() *grpcOauth.TokenSource {
+	if c == nil {
+		return nil
+	}
+	return c.tokenSource
 }
 
 func buildExternalCredentials(baseCreds cachedCredentials, credsFile string, credsHelperCmd *reusableCmd) *Credentials {
@@ -168,8 +176,8 @@ func (c *Credentials) RemoveFromDisk() {
 	}
 }
 
-// refreshStatus checks refresh expiry of credentials in case a manual refresh is required.
-func (c *Credentials) refreshStatus() error {
+// RefreshStatus checks refresh expiry of credentials in case a manual refresh is required.
+func (c *Credentials) RefreshStatus() error {
 	if !c.refreshExp.IsZero() && c.refreshExp.Before(nowFn()) {
 		return fmt.Errorf("credentials cannot be refreshed automatically, manual re-authentication required")
 	}
@@ -225,10 +233,6 @@ func NewExternalCredentials(credshelper string, credshelperArgs []string, credsF
 			return creds, nil
 		}
 		log.Warningf("Failed to use cached credentials: %v", err)
-		if err = creds.refreshStatus(); err != nil {
-			creds.RemoveFromDisk()
-			return nil, err
-		}
 	}
 	credsOut, err := runCredsHelperCmd(credsHelperCmd)
 	if err != nil {

@@ -320,15 +320,15 @@ func TestGetRequestMetadata(t *testing.T) {
 
 func TestRefreshStatus(t *testing.T) {
 	c := Credentials{refreshExp: time.Time{}}
-	if err := c.refreshStatus(); err != nil {
+	if err := c.RefreshStatus(); err != nil {
 		t.Errorf("RefreshStatus returned an error when refreshExpiry is zero")
 	}
 	c.refreshExp = time.Now().Add(time.Hour)
-	if err := c.refreshStatus(); err != nil {
+	if err := c.RefreshStatus(); err != nil {
 		t.Errorf("RefreshStatus returned an error when refreshExpiry has not passed")
 	}
 	c.refreshExp = time.Now().Add(-time.Hour)
-	if err := c.refreshStatus(); err == nil {
+	if err := c.RefreshStatus(); err == nil {
 		t.Errorf("RefreshStatus did not return an error when refreshExpiry when it has passed")
 	}
 }
