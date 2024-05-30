@@ -1,10 +1,13 @@
 package credshelper
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +26,7 @@ func TestCredentialsHelperCache(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to create dir for credentials file %q: %v", cf, err)
 	}
-	credsHelperCmd := newReusableCmd("echo", []string{`{"token":"testToken", "expiry":"", "refresh_expiry":""}`})
+	credsHelperCmd := newReusableCmd("echo", []string{`{"headers":{"hdr":"val"},"token":"testToken", "expiry":""}`})
 	ts := &grpcOauth.TokenSource{
 		TokenSource: oauth2.ReuseTokenSourceWithExpiry(
 			&oauth2.Token{},
@@ -57,7 +60,7 @@ func TestExternalToken(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unable to create temporary file: %v", err)
 		}
-		chJSON := fmt.Sprintf(`{"token":"%v","expiry":"%s","refresh_expiry":""}`, tk, exp)
+		chJSON := fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s","refresh_expiry":""}`, tk, exp)
 		if _, err := tf.Write([]byte(chJSON)); err != nil {
 			t.Fatalf("Unable to write to file %v: %v", tf.Name(), err)
 		}
@@ -69,7 +72,7 @@ func TestExternalToken(t *testing.T) {
 		}
 	} else {
 		credshelper = "echo"
-		credshelperArgs = []string{fmt.Sprintf(`{"token":"%v","expiry":"%s","refresh_expiry":""}`, tk, exp)}
+		credshelperArgs = []string{fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s","refresh_expiry":""}`, tk, exp)}
 	}
 
 	credsHelperCmd := newReusableCmd(credshelper, credshelperArgs)
@@ -136,7 +139,7 @@ func writeTokenFile(t *testing.T, path, token string, expiry time.Time) {
 		t.Fatalf("Unable to open file %v: %v", path, err)
 	}
 	defer f.Close()
-	chJSON := fmt.Sprintf(`{"token":"%v","expiry":"%s","refresh_expiry":""}`, token, expiry.Format(time.UnixDate))
+	chJSON := fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s","refresh_expiry":""}`, token, expiry.Format(time.UnixDate))
 	if _, err := f.Write([]byte(chJSON)); err != nil {
 		t.Fatalf("Unable to write to file %v: %v", f.Name(), err)
 	}
@@ -153,24 +156,28 @@ func TestNewExternalCredentials(t *testing.T) {
 		checkExp       bool
 		credshelperOut string
 	}{{
+		name:           "No Headers",
+		wantErr:        true,
+		credshelperOut: `{"headers":"","token":"","expiry":"","refresh_expiry":""}`,
+	}, {
 		name:           "No Token",
 		wantErr:        true,
-		credshelperOut: `{"token":"","expiry":"","refresh_expiry":""}`,
+		credshelperOut: `{"headers":{"hdr":"val"},"token":"","expiry":"","refresh_expiry":""}`,
 	}, {
 		name:           "Credshelper Command Passed - No Expiry",
-		credshelperOut: fmt.Sprintf(`{"token":"%v","expiry":"","refresh_expiry":""}`, testToken),
+		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"","refresh_expiry":""}`, testToken),
 	}, {
 		name:           "Credshelper Command Passed - Expiry",
 		checkExp:       true,
-		credshelperOut: fmt.Sprintf(`{"token":"%v","expiry":"%v","refresh_expiry":""}`, testToken, unixExp),
+		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v","refresh_expiry":""}`, testToken, unixExp),
 	}, {
 		name:           "Credshelper Command Passed - Refresh Expiry",
 		checkExp:       true,
-		credshelperOut: fmt.Sprintf(`{"token":"%v","expiry":"%v","refresh_expiry":"%v"}`, testToken, unixExp, unixExp),
+		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v","refresh_expiry":"%v"}`, testToken, unixExp, unixExp),
 	}, {
 		name:           "Wrong Expiry Format",
 		wantErr:        true,
-		credshelperOut: fmt.Sprintf(`{"token":"%v","expiry":"%v","refresh_expiry":"%v"}`, testToken, expStr, expStr),
+		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v", "refresh_expiry":"%v"}`, testToken, expStr, expStr),
 	}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -219,6 +226,92 @@ func TestNewExternalCredentials(t *testing.T) {
 				if test.checkExp && !exp.Equal(tk.Expiry) {
 					t.Fatalf("tokensource.Token() gave expiry=%v, want=%v",
 						tk.Expiry, exp)
+				}
+			}
+		})
+	}
+}
+
+func TestGetRequestMetadata(t *testing.T) {
+	testToken := "token"
+	expiredHdrs := map[string]string{"expired": "true"}
+	testHdrs := map[string]string{"expired": "false"}
+	expiredExp := time.Now().Add(-time.Hour).Truncate(time.Second)
+	exp := time.Now().Add(time.Hour).Truncate(time.Second)
+	unixExp := exp.Format(time.UnixDate)
+	tests := []struct {
+		name           string
+		tsExp          time.Time
+		tsHeaders      map[string]string
+		wantErr        bool
+		wantExpired    bool
+		credshelperOut string
+	}{{
+		name:      "Creds Not Expired",
+		tsExp:     exp,
+		tsHeaders: testHdrs,
+	}, {
+		name:           "Creds Expired: Credshelper Successful",
+		tsExp:          expiredExp,
+		tsHeaders:      expiredHdrs,
+		wantExpired:    true,
+		credshelperOut: fmt.Sprintf(`{"headers":{"expired":"false"},"token":"%v","expiry":"%v"}`, testToken, unixExp),
+	}, {
+		name:           "Creds Expired: Credshelper Failed",
+		wantErr:        true,
+		wantExpired:    true,
+		credshelperOut: fmt.Sprintf(`{"headers":"","token":"%v","expiry":""`, testToken),
+	}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var (
+				credshelper     string
+				credshelperArgs []string
+			)
+			if runtime.GOOS == "windows" {
+				tf, err := os.CreateTemp("", "testnewexternalcreds.json")
+				if err != nil {
+					t.Fatalf("Unable to create temporary file: %v", err)
+				}
+				if _, err := tf.Write([]byte(test.credshelperOut)); err != nil {
+					t.Fatalf("Unable to write to file %v: %v", tf.Name(), err)
+				}
+				credshelper = "cmd"
+				credshelperArgs = []string{
+					"/c",
+					"cat",
+					tf.Name(),
+				}
+			} else {
+				credshelper = "echo"
+				credshelperArgs = []string{test.credshelperOut}
+			}
+			credsHelperCmd := newReusableCmd(credshelper, credshelperArgs)
+			exTs := externalTokenSource{
+				credsHelperCmd: credsHelperCmd,
+				expiry:         test.tsExp,
+				headers:        test.tsHeaders,
+				headersLock:    sync.RWMutex{},
+			}
+			hdrs, err := exTs.GetRequestMetadata(context.Background(), "uri")
+			if test.wantErr && err == nil {
+				t.Fatalf("GetRequestMetadata did not return an error.")
+			}
+			if !test.wantErr {
+				if err != nil {
+					t.Fatalf("GetRequestMetadata returned an error: %v", err)
+				}
+				if !reflect.DeepEqual(hdrs, exTs.headers) {
+					t.Errorf("GetRequestMetadata did not update headers in the tokensource: returned hdrs: %v, tokensource headers: %v", hdrs, exTs.headers)
+				}
+				if !exp.Equal(exTs.expiry) {
+					t.Errorf("GetRequestMetadata did not update expiry in the tokensource")
+				}
+				if !test.wantExpired && !reflect.DeepEqual(hdrs, testHdrs) {
+					t.Errorf("GetRequestMetadata returned headers: %v, but want headers: %v", hdrs, testHdrs)
+				}
+				if test.wantExpired && reflect.DeepEqual(hdrs, expiredHdrs) {
+					t.Errorf("GetRequestMetadata returned expired headers")
 				}
 			}
 		})
