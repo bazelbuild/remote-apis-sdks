@@ -19,7 +19,6 @@ go_library(
         "//go/api/command",
         "//go/pkg/actas",
         "//go/pkg/balancer",
-        "//go/pkg/balancer/proto",
         "//go/pkg/chunker",
         "//go/pkg/command",
         "//go/pkg/contextmd",

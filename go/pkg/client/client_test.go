@@ -207,10 +207,8 @@ func TestNewClientRR(t *testing.T) {
 	ctx := context.Background()
 
 	c, err := NewClient(ctx, instance, DialParams{
-		Service:            "server",
-		NoSecurity:         true,
-		RoundRobinBalancer: true,
-		RoundRobinPoolSize: 25,
+		Service:    "server",
+		NoSecurity: true,
 	}, StartupCapabilities(false))
 	if err != nil {
 		t.Fatalf("Error creating client: %v", err)
