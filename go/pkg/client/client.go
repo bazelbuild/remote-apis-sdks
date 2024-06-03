@@ -29,7 +29,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
-	configpb "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer/proto"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
@@ -428,10 +427,6 @@ const DefaultCASConcurrency = 500
 // that the GRPC balancer can perform.
 const DefaultMaxConcurrentRequests = 25
 
-// DefaultMaxConcurrentStreams specifies the default threshold value at which the GRPC balancer should create
-// new sub-connections.
-const DefaultMaxConcurrentStreams = 25
-
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casConcurrency = int64(cy)
@@ -547,9 +542,6 @@ type DialParams struct {
 	// MaxConcurrentRequests specifies the maximum number of concurrent RPCs on a single connection.
 	MaxConcurrentRequests uint32
 
-	// MaxConcurrentStreams specifies the maximum number of concurrent stream RPCs on a single connection.
-	MaxConcurrentStreams uint32
-
 	// TLSClientAuthCert specifies the public key in PEM format for using mTLS auth to connect to the RBE service.
 	//
 	// If this is specified, TLSClientAuthKey must also be specified.
@@ -559,31 +551,6 @@ type DialParams struct {
 	//
 	// If this is specified, TLSClientAuthCert must also be specified.
 	TLSClientAuthKey string
-
-	// RoundRobinBalancer enables the simplified gRPC balancer instead of the default one.
-	RoundRobinBalancer bool
-
-	// RoundRobinPoolSize specifies the pool size for the round-robin load balancer.
-	RoundRobinPoolSize int
-}
-
-func createGRPCInterceptor(p DialParams) *balancer.GCPInterceptor {
-	apiConfig := &configpb.ApiConfig{
-		ChannelPool: &configpb.ChannelPoolConfig{
-			MaxSize:                          p.MaxConcurrentRequests,
-			MaxConcurrentStreamsLowWatermark: p.MaxConcurrentStreams,
-		},
-		Method: []*configpb.MethodConfig{
-			{
-				Name: []string{".*"},
-				Affinity: &configpb.AffinityConfig{
-					Command:     configpb.AffinityConfig_BIND,
-					AffinityKey: "bind-affinity",
-				},
-			},
-		},
-	}
-	return balancer.NewGCPInterceptor(apiConfig)
 }
 
 func createTLSConfig(params DialParams) (*tls.Config, error) {
@@ -627,12 +594,6 @@ func OptsFromParams(ctx context.Context, params DialParams) ([]grpc.DialOption, 
 	var opts []grpc.DialOption
 	opts = append(opts, params.DialOpts...)
 
-	if params.MaxConcurrentRequests == 0 {
-		params.MaxConcurrentRequests = DefaultMaxConcurrentRequests
-	}
-	if params.MaxConcurrentStreams == 0 {
-		params.MaxConcurrentStreams = DefaultMaxConcurrentStreams
-	}
 	if params.NoSecurity {
 		authUsed = NoAuth
 		opts = append(opts, grpc.WithInsecure())
@@ -690,12 +651,6 @@ func OptsFromParams(ctx context.Context, params DialParams) ([]grpc.DialOption, 
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
 
-	grpcInt := createGRPCInterceptor(params)
-	opts = append(opts, grpc.WithDisableServiceConfig())
-	opts = append(opts, grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingConfig": [{"%s":{}}]}`, balancer.Name)))
-	opts = append(opts, grpc.WithUnaryInterceptor(grpcInt.GCPUnaryClientInterceptor))
-	opts = append(opts, grpc.WithStreamInterceptor(grpcInt.GCPStreamClientInterceptor))
-
 	return opts, authUsed, nil
 }
 
@@ -708,6 +663,9 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 	if params.Service == "" {
 		return nil, &InitError{Err: fmt.Errorf("service needs to be specified")}
 	}
+	if params.MaxConcurrentRequests == 0 {
+		params.MaxConcurrentRequests = DefaultMaxConcurrentRequests
+	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
 	log.Infof("Connecting to remote execution service %s", params.Service)
 	dialOpts, authUsed, err := OptsFromParams(ctx, params)
@@ -716,14 +674,10 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 	}
 
 	var conn, casConn GrpcClientConn
-	if params.RoundRobinBalancer {
-		dial := func(ctx context.Context) (*grpc.ClientConn, error) {
-			return grpc.DialContext(ctx, params.Service, dialOpts...)
-		}
-		conn, err = balancer.NewRRConnPool(ctx, params.RoundRobinPoolSize, dial)
-	} else {
-		conn, err = grpc.Dial(params.Service, dialOpts...)
+	dial := func(ctx context.Context) (*grpc.ClientConn, error) {
+		return grpc.DialContext(ctx, params.Service, dialOpts...)
 	}
+	conn, err = balancer.NewRRConnPool(ctx, int(params.MaxConcurrentRequests), dial)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't dial gRPC %q: %v", params.Service, err)
 	}
@@ -731,14 +685,10 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 	casConn = conn
 	if params.CASService != "" && params.CASService != params.Service {
 		log.Infof("Connecting to CAS service %s", params.CASService)
-		if params.RoundRobinBalancer {
-			dial := func(ctx context.Context) (*grpc.ClientConn, error) {
-				return grpc.DialContext(ctx, params.CASService, dialOpts...)
-			}
-			casConn, err = balancer.NewRRConnPool(ctx, params.RoundRobinPoolSize, dial)
-		} else {
-			casConn, err = grpc.Dial(params.CASService, dialOpts...)
+		dial := func(ctx context.Context) (*grpc.ClientConn, error) {
+			return grpc.DialContext(ctx, params.CASService, dialOpts...)
 		}
+		casConn, err = balancer.NewRRConnPool(ctx, int(params.MaxConcurrentRequests), dial)
 	}
 	if err != nil {
 		return nil, &InitError{Err: statusWrap(err), AuthUsed: authUsed}

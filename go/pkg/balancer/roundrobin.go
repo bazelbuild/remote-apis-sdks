@@ -1,3 +1,6 @@
+// Package balancer implements a simple gRPC client-side load balancer.
+// It mitigates https://github.com/grpc/grpc/issues/21386 by having multiple connections
+// which effectively multplies the concurrent streams limit.
 package balancer
 
 import (

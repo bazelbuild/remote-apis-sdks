@@ -3,32 +3,12 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "balancer",
     srcs = [
-        "gcp_balancer.go",
-        "gcp_interceptor.go",
-        "gcp_picker.go",
         "roundrobin.go",
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/pkg/balancer/proto",
         "@org_golang_google_grpc//:go_default_library",
-        "@org_golang_google_grpc//balancer",
-        "@org_golang_google_grpc//connectivity",
-        "@org_golang_google_grpc//grpclog",
-        "@org_golang_google_grpc//resolver",
-        "@org_golang_google_protobuf//encoding/protojson",
     ],
 )
 
-go_test(
-    name = "balancer_test",
-    srcs = ["gcp_balancer_test.go"],
-    embed = [":balancer"],
-    deps = [
-        "@com_github_google_uuid//:uuid",
-        "@org_golang_google_grpc//balancer",
-        "@org_golang_google_grpc//connectivity",
-        "@org_golang_google_grpc//resolver",
-    ],
-)

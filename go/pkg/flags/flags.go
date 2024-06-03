@@ -6,7 +6,6 @@ import (
 	"flag"
 	"time"
 
-	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag"
 	"google.golang.org/grpc"
@@ -54,8 +53,6 @@ var (
 	CASConcurrency = flag.Int("cas_concurrency", client.DefaultCASConcurrency, "Num concurrent upload / download RPCs that the SDK is allowed to do.")
 	// MaxConcurrentRequests denotes the maximum number of concurrent RPCs on a single gRPC connection.
 	MaxConcurrentRequests = flag.Uint("max_concurrent_requests_per_conn", client.DefaultMaxConcurrentRequests, "Maximum number of concurrent RPCs on a single gRPC connection.")
-	// MaxConcurrentStreams denotes the maximum number of concurrent stream RPCs on a single gRPC connection.
-	MaxConcurrentStreams = flag.Uint("max_concurrent_streams_per_conn", client.DefaultMaxConcurrentStreams, "Maximum number of concurrent stream RPCs on a single gRPC connection.")
 	// TLSServerName overrides the server name sent in the TLS session.
 	TLSServerName = flag.String("tls_server_name", "", "Override the TLS server name")
 	// TLSCACert loads CA certificates from a file
@@ -74,17 +71,9 @@ var (
 	KeepAliveTimeout = flag.Duration("grpc_keepalive_timeout", 20*time.Second, "After having pinged for keepalive check, the client waits for a duration of Timeout and if no activity is seen even after that the connection is closed. Default is 20s.")
 	// KeepAlivePermitWithoutStream specifies gRPCs keepalive permitWithoutStream parameter.
 	KeepAlivePermitWithoutStream = flag.Bool("grpc_keepalive_permit_without_stream", false, "If true, client sends keepalive pings even with no active RPCs; otherwise, doesn't send pings even if time and timeout are set. Default is false.")
-	// UseRoundRobinBalancer is a temporary feature flag to rollout a simplified load balancer.
-	// See http://go/remote-apis-sdks/issues/499
-	UseRoundRobinBalancer = flag.Bool("use_round_robin_balancer", true, "If true (default), a round-robin connection bool is used for gRPC. Otherwise, the existing load balancer is used.")
-	// RoundRobinBalancerPoolSize specifies the pool size for the round robin balancer.
-	RoundRobinBalancerPoolSize = flag.Int("round_robin_balancer_pool_size", client.DefaultMaxConcurrentRequests, "pool size for round robin grpc balacner")
 )
 
 func init() {
-	// MinConnections denotes the minimum number of gRPC sub-connections the gRPC balancer should create during SDK initialization.
-	flag.IntVar(&balancer.MinConnections, "min_grpc_connections", balancer.DefaultMinConnections, "Minimum number of gRPC sub-connections the gRPC balancer should create during SDK initialization.")
-	// RPCTimeouts stores the per-RPC timeout values. The flag allows users to override the defaults
 	// set in client.DefaultRPCTimeouts. This is in order to not force the users to familiarize
 	// themselves with every RPC, otherwise it is easy to accidentally enforce a timeout on
 	// WaitExecution, for example.
@@ -149,8 +138,5 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		TLSClientAuthCert:     *TLSClientAuthCert,
 		TLSClientAuthKey:      *TLSClientAuthKey,
 		MaxConcurrentRequests: uint32(*MaxConcurrentRequests),
-		MaxConcurrentStreams:  uint32(*MaxConcurrentStreams),
-		RoundRobinBalancer:    *UseRoundRobinBalancer,
-		RoundRobinPoolSize:    *RoundRobinBalancerPoolSize,
 	}, opts...)
 }

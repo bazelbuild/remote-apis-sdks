@@ -94,8 +94,9 @@ func (s *Server) NewClientConn(ctx context.Context) (*grpc.ClientConn, error) {
 
 func (s *Server) dialParams() rc.DialParams {
 	return rc.DialParams{
-		Service:    s.listener.Addr().String(),
-		NoSecurity: true,
+		Service:               s.listener.Addr().String(),
+		NoSecurity:            true,
+		MaxConcurrentRequests: 25,
 	}
 }
 

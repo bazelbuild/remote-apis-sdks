@@ -6,7 +6,6 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/flags",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/pkg/balancer",
         "//go/pkg/client",
         "//go/pkg/moreflag",
         "@com_github_golang_glog//:glog",
