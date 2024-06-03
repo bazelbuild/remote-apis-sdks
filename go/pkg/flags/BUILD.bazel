@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//go/pkg/balancer",
         "//go/pkg/client",
+        "//go/pkg/diskcache",
         "//go/pkg/moreflag",
         "@com_github_golang_glog//:glog",
         "@org_golang_google_grpc//:go_default_library",

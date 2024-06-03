@@ -855,11 +855,7 @@ func (c *Client) getActionResult(ctx context.Context, actionDigest string) (*rep
 	if err != nil {
 		return nil, err
 	}
-	d := &repb.Digest{
-		Hash:      acDg.Hash,
-		SizeBytes: acDg.Size,
-	}
-	resPb, err := c.GrpcClient.CheckActionCache(ctx, d)
+	resPb, err := c.GrpcClient.CheckActionCache(ctx, acDg)
 	if err != nil {
 		return nil, err
 	}

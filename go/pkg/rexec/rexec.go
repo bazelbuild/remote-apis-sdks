@@ -274,7 +274,7 @@ func (ec *Context) GetCachedResult() {
 	}
 	if ec.opt.AcceptCached && !ec.opt.DoNotCache {
 		ec.Metadata.EventTimes[command.EventCheckActionCache] = &command.TimeInterval{From: time.Now()}
-		resPb, err := ec.client.GrpcClient.CheckActionCache(ec.ctx, ec.Metadata.ActionDigest.ToProto())
+		resPb, err := ec.client.GrpcClient.CheckActionCache(ec.ctx, ec.Metadata.ActionDigest)
 		ec.Metadata.EventTimes[command.EventCheckActionCache].To = time.Now()
 		if err != nil {
 			ec.Result = command.NewRemoteErrorResult(err)

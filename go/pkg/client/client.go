@@ -15,10 +15,12 @@ import (
 	"time"
 
 	"errors"
+
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/diskcache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/uploadinfo"
 	"golang.org/x/oauth2"
@@ -194,6 +196,7 @@ type Client struct {
 	uploadOnce          sync.Once
 	downloadOnce        sync.Once
 	useBatchCompression UseBatchCompression
+	diskCache           *diskcache.DiskCache
 }
 
 const (
@@ -241,6 +244,10 @@ func (c *Client) Close() error {
 	}
 	if c.casConnection != c.connection {
 		return c.casConnection.Close()
+	}
+	if c.diskCache != nil {
+		// Waits for local disk GC to complete.
+		c.diskCache.Shutdown()
 	}
 	return nil
 }
@@ -349,6 +356,15 @@ func (s UnifiedDownloadTickDuration) Apply(c *Client) {
 // Apply sets the client's TreeSymlinkOpts.
 func (o *TreeSymlinkOpts) Apply(c *Client) {
 	c.TreeSymlinkOpts = o
+}
+
+type DiskCacheOpts struct {
+	DiskCache *diskcache.DiskCache
+}
+
+// Apply sets the client's TreeSymlinkOpts.
+func (o *DiskCacheOpts) Apply(c *Client) {
+	c.diskCache = o.DiskCache
 }
 
 // MaxBatchDigests is maximum amount of digests to batch in upload and download operations.

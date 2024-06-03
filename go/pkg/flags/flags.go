@@ -8,6 +8,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/diskcache"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/moreflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -79,6 +80,10 @@ var (
 	UseRoundRobinBalancer = flag.Bool("use_round_robin_balancer", true, "If true (default), a round-robin connection bool is used for gRPC. Otherwise, the existing load balancer is used.")
 	// RoundRobinBalancerPoolSize specifies the pool size for the round robin balancer.
 	RoundRobinBalancerPoolSize = flag.Int("round_robin_balancer_pool_size", client.DefaultMaxConcurrentRequests, "pool size for round robin grpc balacner")
+	// DiskCachePath, if set, adds a local disk cache for downloaded outputs and action cache results.
+	DiskCachePath = flag.String("disk_cache_path", "", "If set, will use a local disk cache for downloaded outputs.")
+	// DiskCacheCapacityGb specifies a maximum limit in GB to store in the local disk cache. A no-op if --disk_cache_path is not set.
+	DiskCacheCapacityGb = flag.Float64("disk_cache_max_gb", 1.0, "Maximum GB to store in the local disk cache. A no-op if --disk_cache_path is not set.")
 )
 
 func init() {
@@ -131,6 +136,14 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 		log.V(1).Infof("KeepAlive params = %v", params)
 		dialOpts = append(dialOpts, grpc.WithKeepaliveParams(params))
+	}
+	if *DiskCachePath != "" {
+		capBytes := uint64(*DiskCacheCapacityGb * 1024 * 1024 * 1024)
+		diskCache, err := diskcache.New(ctx, *DiskCachePath, capBytes)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, &client.DiskCacheOpts{DiskCache: diskCache})
 	}
 	return client.NewClient(ctx, *Instance, client.DialParams{
 		Service:               *Service,
