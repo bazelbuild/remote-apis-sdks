@@ -26,7 +26,7 @@ func TestCredentialsHelperCache(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to create dir for credentials file %q: %v", cf, err)
 	}
-	credsHelperCmd := newReusableCmd("echo", []string{`{"headers":{"hdr":"val"},"token":"testToken", "expiry":""}`})
+	credsHelperCmd := newReusableCmd("echo", []string{`{"headers":{"hdr":"val"},"token":"testToken", "expiry":"","refresh_expiry":""}`})
 	ts := &grpcOauth.TokenSource{
 		TokenSource: oauth2.ReuseTokenSourceWithExpiry(
 			&oauth2.Token{},
@@ -315,6 +315,21 @@ func TestGetRequestMetadata(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRefreshStatus(t *testing.T) {
+	c := Credentials{refreshExp: time.Time{}}
+	if err := c.refreshStatus(); err != nil {
+		t.Errorf("RefreshStatus returned an error when refreshExpiry is zero")
+	}
+	c.refreshExp = time.Now().Add(time.Hour)
+	if err := c.refreshStatus(); err != nil {
+		t.Errorf("RefreshStatus returned an error when refreshExpiry has not passed")
+	}
+	c.refreshExp = time.Now().Add(-time.Hour)
+	if err := c.refreshStatus(); err == nil {
+		t.Errorf("RefreshStatus did not return an error when refreshExpiry when it has passed")
 	}
 }
 
