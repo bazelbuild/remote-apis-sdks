@@ -86,6 +86,7 @@ func TestExecCacheHit(t *testing.T) {
 					LogicalBytesDownloaded: 12,
 					RealBytesDownloaded:    12,
 					OutputFileDigests:      map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
+					OutputFileIsExecutable: map[string]bool{"a/b/out": false},
 					OutputDirectoryDigests: map[string]digest.Digest{},
 					OutputSymlinks:         map[string]string{},
 					StderrDigest:           stderrDg,
@@ -586,7 +587,7 @@ func TestOutputSymlinks(t *testing.T) {
 	}
 	opt := &command.ExecutionOptions{AcceptCached: true, DownloadOutputs: true, DownloadOutErr: false}
 	wantRes := &command.Result{Status: command.CacheHitResultStatus}
-	cmdDg, acDg, stderrDg, stdoutDg := e.Set(cmd, opt, wantRes, fakes.StdOut("stdout"), fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output"}, &fakes.OutputSymlink{Path: "a/b/sl", Target: "out"}, fakes.ExecutionCacheHit(true))
+	cmdDg, acDg, stderrDg, stdoutDg := e.Set(cmd, opt, wantRes, fakes.StdOut("stdout"), fakes.StdErr("stderr"), &fakes.OutputFile{Path: "a/b/out", Contents: "output", IsExecutable: true}, &fakes.OutputSymlink{Path: "a/b/sl", Target: "out"}, fakes.ExecutionCacheHit(true))
 	oe := outerr.NewRecordingOutErr()
 
 	res, meta := e.Client.Run(context.Background(), cmd, opt, oe)
@@ -627,6 +628,7 @@ func TestOutputSymlinks(t *testing.T) {
 		LogicalBytesDownloaded: 6,
 		RealBytesDownloaded:    6,
 		OutputFileDigests:      map[string]digest.Digest{"a/b/out": digest.NewFromBlob([]byte("output"))},
+		OutputFileIsExecutable: map[string]bool{"a/b/out": true},
 		OutputDirectoryDigests: map[string]digest.Digest{},
 		OutputSymlinks:         map[string]string{"a/b/sl": "out"},
 		StderrDigest:           stderrDg,

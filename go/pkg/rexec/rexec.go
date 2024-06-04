@@ -107,12 +107,14 @@ func (ec *Context) setOutputMetadata() {
 	ec.Metadata.OutputFiles = len(ec.resPb.OutputFiles) + len(ec.resPb.OutputFileSymlinks)
 	ec.Metadata.OutputDirectories = len(ec.resPb.OutputDirectories) + len(ec.resPb.OutputDirectorySymlinks)
 	ec.Metadata.OutputFileDigests = make(map[string]digest.Digest)
+	ec.Metadata.OutputFileIsExecutable = make(map[string]bool)
 	ec.Metadata.OutputDirectoryDigests = make(map[string]digest.Digest)
 	ec.Metadata.OutputSymlinks = make(map[string]string)
 	ec.Metadata.TotalOutputBytes = 0
 	for _, file := range ec.resPb.OutputFiles {
 		dg := digest.NewFromProtoUnvalidated(file.Digest)
 		ec.Metadata.OutputFileDigests[file.Path] = dg
+		ec.Metadata.OutputFileIsExecutable[file.Path] = file.IsExecutable
 		ec.Metadata.TotalOutputBytes += dg.Size
 	}
 	for _, dir := range ec.resPb.OutputDirectories {

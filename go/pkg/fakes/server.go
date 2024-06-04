@@ -310,8 +310,9 @@ func (f *InputFile) apply(ac *repb.ActionResult, s *Server, execRoot string) err
 
 // OutputFile is to be added as an output of the fake action.
 type OutputFile struct {
-	Path     string
-	Contents string
+	Path         string
+	Contents     string
+	IsExecutable bool
 }
 
 // Apply puts the file in the fake CAS and the given ActionResult.
@@ -319,7 +320,7 @@ func (f *OutputFile) apply(ac *repb.ActionResult, s *Server, execRoot string) er
 	bytes := []byte(f.Contents)
 	s.Exec.OutputBlobs = append(s.Exec.OutputBlobs, bytes)
 	dg := s.CAS.Put(bytes)
-	ac.OutputFiles = append(ac.OutputFiles, &repb.OutputFile{Path: f.Path, Digest: dg.ToProto()})
+	ac.OutputFiles = append(ac.OutputFiles, &repb.OutputFile{Path: f.Path, Digest: dg.ToProto(), IsExecutable: f.IsExecutable})
 	return nil
 }
 
