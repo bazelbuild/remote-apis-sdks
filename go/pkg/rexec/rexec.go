@@ -107,12 +107,14 @@ func (ec *Context) setOutputMetadata() {
 	ec.Metadata.OutputFiles = len(ec.resPb.OutputFiles) + len(ec.resPb.OutputFileSymlinks)
 	ec.Metadata.OutputDirectories = len(ec.resPb.OutputDirectories) + len(ec.resPb.OutputDirectorySymlinks)
 	ec.Metadata.OutputFileDigests = make(map[string]digest.Digest)
+	ec.Metadata.OutputFileIsExecutable = make(map[string]bool)
 	ec.Metadata.OutputDirectoryDigests = make(map[string]digest.Digest)
 	ec.Metadata.OutputSymlinks = make(map[string]string)
 	ec.Metadata.TotalOutputBytes = 0
 	for _, file := range ec.resPb.OutputFiles {
 		dg := digest.NewFromProtoUnvalidated(file.Digest)
 		ec.Metadata.OutputFileDigests[file.Path] = dg
+		ec.Metadata.OutputFileIsExecutable[file.Path] = file.IsExecutable
 		ec.Metadata.TotalOutputBytes += dg.Size
 	}
 	for _, dir := range ec.resPb.OutputDirectories {
@@ -185,6 +187,7 @@ func (ec *Context) computeActionDg(rootDg digest.Digest, platform *repb.Platform
 		InputRootDigest: rootDg.ToProto(),
 		DoNotCache:      ec.opt.DoNotCache,
 	}
+	log.Infof("Action cache proto: %+v", acPb)
 	// If supported, we attach a copy of the platform properties list to the Action.
 	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
 		acPb.Platform = platform
@@ -272,10 +275,13 @@ func (ec *Context) GetCachedResult() {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
-	if ec.opt.AcceptCached && !ec.opt.DoNotCache {
+	log.Infof("Done computing inputs")
+	if ec.opt.AcceptCached {
+		log.Infof("Will check the cache")
 		ec.Metadata.EventTimes[command.EventCheckActionCache] = &command.TimeInterval{From: time.Now()}
 		resPb, err := ec.client.GrpcClient.CheckActionCache(ec.ctx, ec.Metadata.ActionDigest.ToProto())
 		ec.Metadata.EventTimes[command.EventCheckActionCache].To = time.Now()
+		log.Infof("Checked cache: %v, %v", resPb, err)
 		if err != nil {
 			ec.Result = command.NewRemoteErrorResult(err)
 			return
@@ -393,7 +399,7 @@ func (ec *Context) ExecuteRemotely() {
 	var nOutStreamed, nErrStreamed int64
 	op, err := ec.client.GrpcClient.ExecuteAndWaitProgress(ec.ctx, &repb.ExecuteRequest{
 		InstanceName:    ec.client.GrpcClient.InstanceName,
-		SkipCacheLookup: !ec.opt.AcceptCached || ec.opt.DoNotCache,
+		SkipCacheLookup: !ec.opt.AcceptCached,
 		ActionDigest:    ec.Metadata.ActionDigest.ToProto(),
 	}, func(md *repb.ExecuteOperationMetadata) {
 		if !ec.opt.StreamOutErr {

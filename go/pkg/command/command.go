@@ -543,6 +543,8 @@ type Metadata struct {
 	TotalOutputBytes int64
 	// Output File digests.
 	OutputFileDigests map[string]digest.Digest
+	// Output File executable bit.
+	OutputFileIsExecutable map[string]bool
 	// Output Directory digests.
 	OutputDirectoryDigests map[string]digest.Digest
 	// Output Symlinks.
