@@ -187,7 +187,6 @@ func (ec *Context) computeActionDg(rootDg digest.Digest, platform *repb.Platform
 		InputRootDigest: rootDg.ToProto(),
 		DoNotCache:      ec.opt.DoNotCache,
 	}
-	log.Infof("Action cache proto: %+v", acPb)
 	// If supported, we attach a copy of the platform properties list to the Action.
 	if ec.client.GrpcClient.SupportsActionPlatformProperties() {
 		acPb.Platform = platform
@@ -275,13 +274,10 @@ func (ec *Context) GetCachedResult() {
 		ec.Result = command.NewLocalErrorResult(err)
 		return
 	}
-	log.Infof("Done computing inputs")
-	if ec.opt.AcceptCached {
-		log.Infof("Will check the cache")
+	if ec.opt.AcceptCached && !ec.opt.DoNotCache {
 		ec.Metadata.EventTimes[command.EventCheckActionCache] = &command.TimeInterval{From: time.Now()}
 		resPb, err := ec.client.GrpcClient.CheckActionCache(ec.ctx, ec.Metadata.ActionDigest.ToProto())
 		ec.Metadata.EventTimes[command.EventCheckActionCache].To = time.Now()
-		log.Infof("Checked cache: %v, %v", resPb, err)
 		if err != nil {
 			ec.Result = command.NewRemoteErrorResult(err)
 			return
@@ -399,7 +395,7 @@ func (ec *Context) ExecuteRemotely() {
 	var nOutStreamed, nErrStreamed int64
 	op, err := ec.client.GrpcClient.ExecuteAndWaitProgress(ec.ctx, &repb.ExecuteRequest{
 		InstanceName:    ec.client.GrpcClient.InstanceName,
-		SkipCacheLookup: !ec.opt.AcceptCached,
+		SkipCacheLookup: !ec.opt.AcceptCached || ec.opt.DoNotCache,
 		ActionDigest:    ec.Metadata.ActionDigest.ToProto(),
 	}, func(md *repb.ExecuteOperationMetadata) {
 		if !ec.opt.StreamOutErr {
