@@ -30,6 +30,8 @@ const (
 	CredshelperArgsFlag = "credentials_helper_args"
 	// CredsFileFlag is the flag used to pass in the path of the file where credentials should be cached.
 	CredsFileFlag = "creds_file"
+
+	expiryBuffer = 5 * time.Minute
 )
 
 var nowFn = time.Now
@@ -110,8 +112,8 @@ func buildExternalCredentials(baseCreds cachedCredentials, credsFile string, cre
 		TokenSource: oauth2.ReuseTokenSourceWithExpiry(
 			baseCreds.token,
 			baseTS,
-			// Refresh tokens 5 mins early to be safe
-			5*time.Minute,
+			// Refresh tokens a bit early to be safe
+			expiryBuffer,
 		),
 	}
 	return c
@@ -191,7 +193,7 @@ func (ts *externalTokenSource) Token() (*oauth2.Token, error) {
 func (ts *externalTokenSource) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	ts.headersLock.RLock()
 	defer ts.headersLock.RUnlock()
-	if ts.expiry.Before(nowFn()) {
+	if ts.expiry.Before(nowFn().Add(-expiryBuffer)) {
 		credsOut, err := runCredsHelperCmd(ts.credsHelperCmd)
 		if err != nil {
 			return nil, err
