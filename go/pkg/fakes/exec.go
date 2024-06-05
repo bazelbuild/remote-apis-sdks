@@ -13,9 +13,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	oppb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	oppb "google.golang.org/genproto/googleapis/longrunning"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 )
 
