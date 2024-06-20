@@ -450,7 +450,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		// the entire in.cleanPath, which may be much larger than the union of the
 		// allowlisted paths.
 		log.Infof("start localEg %s", in.Path)
-		localEg, ctx := errgroup.WithContext(ctx)
+		localEg, eCtx := errgroup.WithContext(ctx)
 		var treeMu sync.Mutex
 		for _, relPath := range in.cleanAllowlist {
 			relPath := relPath
@@ -467,7 +467,7 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 					}
 				}
 
-				switch dig, err := u.visitPath(ctx, absPath, info, in.Exclude); {
+				switch dig, err := u.visitPath(eCtx, absPath, info, in.Exclude); {
 				case err != nil:
 					return fmt.Errorf("%q: %w", absPath, err)
 				case dig != nil:
