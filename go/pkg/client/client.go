@@ -29,13 +29,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
+	opgrpc "cloud.google.com/go/longrunning/autogen/longrunningpb"
+	oppb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	log "github.com/golang/glog"
 	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
-	opgrpc "google.golang.org/genproto/googleapis/longrunning"
-	oppb "google.golang.org/genproto/googleapis/longrunning"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 

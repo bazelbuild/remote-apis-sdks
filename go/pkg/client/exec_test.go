@@ -5,8 +5,8 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 
+	oppb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	oppb "google.golang.org/genproto/googleapis/longrunning"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 )
