@@ -157,8 +157,7 @@ func TestNewExternalCredentials(t *testing.T) {
 		credshelperOut string
 	}{{
 		name:           "No Headers",
-		wantErr:        true,
-		credshelperOut: `{"headers":"","token":"","expiry":"","refresh_expiry":""}`,
+		credshelperOut: fmt.Sprintf(`{"token":"%v","expiry":"","refresh_expiry":""}`, testToken),
 	}, {
 		name:           "No Token",
 		wantErr:        true,

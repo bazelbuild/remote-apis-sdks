@@ -282,9 +282,6 @@ func parseTokenExpiryFromOutput(out string) (*credshelperOutput, error) {
 		return nil, fmt.Errorf("no token was printed by the credentials helper")
 	}
 	credsOut.tk = &oauth2.Token{AccessToken: jsonOut.Token}
-	if len(jsonOut.Headers) == 0 {
-		return nil, fmt.Errorf("no headers were printed by the credentials helper")
-	}
 	credsOut.hdrs = jsonOut.Headers
 	if jsonOut.Expiry != "" {
 		expiry, err := time.Parse(time.UnixDate, jsonOut.Expiry)
