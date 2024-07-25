@@ -182,28 +182,28 @@ func capToLimit(m *Metadata, limit int) *Metadata {
 	if excess <= 0 {
 		return m
 	}
-	truncateStrings(limit, &m.ActionID, &m.InvocationID, &m.CorrelatedInvocationsID, &m.ToolName, &m.ToolVersion)
-	return m
-}
-
-// truncateStrings remove one char from the longest str at a time until the
-// total length of all the strings is less than limit value.
-func truncateStrings(limit int, inputs ...*string) {
-	total := 0
-	for _, s := range inputs {
-		total += len(*s)
-	}
-	if total <= limit {
-		return
-	}
-	for total > limit {
-		mIdx := 0
-		for i, s := range inputs {
-			if len(*s) > len(*inputs[mIdx]) {
-				mIdx = i
-			}
+	// We ignore the tool name, because in practice this is a
+	// very short constant which makes no sense to truncate.
+	diff := len(m.ActionID) - len(m.InvocationID)
+	if diff > 0 {
+		if diff > excess {
+			m.ActionID = m.ActionID[:len(m.ActionID)-excess]
+		} else {
+			m.ActionID = m.ActionID[:len(m.ActionID)-diff]
+			rem := (excess - diff + 1) / 2
+			m.ActionID = m.ActionID[:len(m.ActionID)-rem]
+			m.InvocationID = m.InvocationID[:len(m.InvocationID)-rem]
 		}
-		*inputs[mIdx] = (*inputs[mIdx])[:len(*inputs[mIdx])-1]
-		total -= 1
+	} else {
+		diff = -diff
+		if diff > excess {
+			m.InvocationID = m.InvocationID[:len(m.InvocationID)-excess]
+		} else {
+			m.InvocationID = m.InvocationID[:len(m.InvocationID)-diff]
+			rem := (excess - diff + 1) / 2
+			m.InvocationID = m.InvocationID[:len(m.InvocationID)-rem]
+			m.ActionID = m.ActionID[:len(m.ActionID)-rem]
+		}
 	}
+	return m
 }
