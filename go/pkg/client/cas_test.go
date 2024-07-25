@@ -724,12 +724,19 @@ func TestUpload(t *testing.T) {
 	t.Parallel()
 	var twoThousandBlobs [][]byte
 	var thousandBlobs [][]byte
-	for i := 0; i < 2000; i++ {
+	for i := uint16(0); i < 2000; i++ {
 		var buf = new(bytes.Buffer)
-		binary.Write(buf, binary.LittleEndian, i)
+		err := binary.Write(buf, binary.LittleEndian, i)
+		if err != nil {
+			t.Fatalf("failed to write bytes to binary buffe: %v", err)
+		}
 		// Write a few extra bytes so that we have > chunkSize sized blobs.
 		for j := 0; j < 10; j++ {
-			binary.Write(buf, binary.LittleEndian, 0)
+			err = binary.Write(buf, binary.LittleEndian, int16(0))
+			if err != nil {
+				t.Fatalf("failed to write zeros to binary buffer: %v", err)
+			}
+
 		}
 		twoThousandBlobs = append(twoThousandBlobs, buf.Bytes())
 		if i%2 == 0 {
@@ -743,8 +750,9 @@ func TestUpload(t *testing.T) {
 		input [][]byte
 		// present is the blobs already present in the CAS; they're pre-loaded into the fakes.CAS object
 		// and the test verifies no attempt was made to upload them.
-		present [][]byte
-		opts    []client.Opt
+		present            [][]byte
+		opts               []client.Opt
+		wantMaxConcurrency int // if non-zero, expect this level of concurrency instead of defaultCASConcurrency
 	}
 	tests := []testcase{
 		{
@@ -768,10 +776,11 @@ func TestUpload(t *testing.T) {
 			present: [][]byte{[]byte("bar")},
 		},
 		{
-			name:    "2000 blobs heavy concurrency",
-			input:   twoThousandBlobs,
-			present: thousandBlobs,
-			opts:    []client.Opt{client.CASConcurrency(500)},
+			name:               "2000 blobs heavy concurrency",
+			input:              twoThousandBlobs,
+			present:            thousandBlobs,
+			opts:               []client.Opt{client.CASConcurrency(500)},
+			wantMaxConcurrency: 500,
 		},
 	}
 
@@ -851,8 +860,12 @@ func TestUpload(t *testing.T) {
 					t.Errorf("Stats said that blob %v with digest %s was present in the CAS", blob, dg)
 				}
 			}
-			if fake.MaxConcurrency() > defaultCASConcurrency {
-				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), defaultCASConcurrency)
+			wantMaxConcurrency := defaultCASConcurrency
+			if tc.wantMaxConcurrency != 0 {
+				wantMaxConcurrency = tc.wantMaxConcurrency
+			}
+			if fake.MaxConcurrency() > wantMaxConcurrency {
+				t.Errorf("CAS concurrency %v was higher than max %v", fake.MaxConcurrency(), wantMaxConcurrency)
 			}
 		})
 	}
