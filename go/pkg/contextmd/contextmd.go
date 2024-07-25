@@ -27,8 +27,8 @@ type Metadata struct {
 	ActionID string
 	// InvocationID is an optional id to use to identify an invocation spanning multiple commands.
 	InvocationID string
-	// CorrelatedInvocationID is an optional id to use to identify a build spanning multiple invocations.
-	CorrelatedInvocationID string
+	// CorrelatedInvocationsID is an optional id to use to identify a build spanning multiple invocations.
+	CorrelatedInvocationsID string
 	// ToolName is an optional tool name to pass to the remote server for logging.
 	ToolName string
 	// ToolVersion is an optional tool version to pass to the remote server for logging.
@@ -64,11 +64,11 @@ func ExtractMetadata(ctx context.Context) (m *Metadata, err error) {
 		return nil, err
 	}
 	return &Metadata{
-		ToolName:               meta.ToolDetails.GetToolName(),
-		ToolVersion:            meta.ToolDetails.GetToolVersion(),
-		ActionID:               meta.ActionId,
-		InvocationID:           meta.ToolInvocationId,
-		CorrelatedInvocationID: meta.CorrelatedInvocationsId,
+		ToolName:                meta.ToolDetails.GetToolName(),
+		ToolVersion:             meta.ToolDetails.GetToolVersion(),
+		ActionID:                meta.ActionId,
+		InvocationID:            meta.ToolInvocationId,
+		CorrelatedInvocationsID: meta.CorrelatedInvocationsId,
 	}, nil
 }
 
@@ -177,7 +177,7 @@ func mergeSet(set map[string]struct{}) string {
 
 // capToLimit ensures total length does not exceed max header size.
 func capToLimit(m *Metadata, limit int) *Metadata {
-	total := len(m.ToolName) + len(m.ToolVersion) + len(m.ActionID) + len(m.InvocationID) + len(m.CorrelatedInvocationID)
+	total := len(m.ToolName) + len(m.ToolVersion) + len(m.ActionID) + len(m.InvocationID) + len(m.CorrelatedInvocationsID)
 	excess := total - limit
 	if excess <= 0 {
 		return m

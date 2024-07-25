@@ -57,11 +57,11 @@ func (c *Client) NewContext(ctx context.Context, cmd *command.Command, opt *comm
 		return nil, err
 	}
 	grpcCtx, err := contextmd.WithMetadata(ctx, &contextmd.Metadata{
-		ToolName:               cmd.Identifiers.ToolName,
-		ToolVersion:            cmd.Identifiers.ToolVersion,
-		ActionID:               cmd.Identifiers.CommandID,
-		InvocationID:           cmd.Identifiers.InvocationID,
-		CorrelatedInvocationID: cmd.Identifiers.CorrelatedInvocationID,
+		ToolName:                cmd.Identifiers.ToolName,
+		ToolVersion:             cmd.Identifiers.ToolVersion,
+		ActionID:                cmd.Identifiers.CommandID,
+		InvocationID:            cmd.Identifiers.InvocationID,
+		CorrelatedInvocationsID: cmd.Identifiers.CorrelatedInvocationsID,
 	})
 	if err != nil {
 		return nil, err
