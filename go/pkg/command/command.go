@@ -147,8 +147,8 @@ type Identifiers struct {
 	// InvocationID is an optional id to use to identify an invocation spanning multiple commands.
 	InvocationID string
 
-	// CorrelatedInvocationID is an optional id to use to identify a build spanning multiple invocations.
-	CorrelatedInvocationID string
+	// CorrelatedInvocationsID is an optional id to use to identify a build spanning multiple invocations.
+	CorrelatedInvocationsID string
 
 	// ToolName is an optional tool name to pass to the remote server for logging.
 	ToolName string
@@ -644,12 +644,12 @@ func FromREProto(cmdPb *repb.Command) *Command {
 // FromProto parses a Command struct from a proto message.
 func FromProto(p *cpb.Command) *Command {
 	ids := &Identifiers{
-		CommandID:              p.GetIdentifiers().GetCommandId(),
-		InvocationID:           p.GetIdentifiers().GetInvocationId(),
-		CorrelatedInvocationID: p.GetIdentifiers().GetCorrelatedInvocationsId(),
-		ToolName:               p.GetIdentifiers().GetToolName(),
-		ToolVersion:            p.GetIdentifiers().GetToolVersion(),
-		ExecutionID:            p.GetIdentifiers().GetExecutionId(),
+		CommandID:               p.GetIdentifiers().GetCommandId(),
+		InvocationID:            p.GetIdentifiers().GetInvocationId(),
+		CorrelatedInvocationsID: p.GetIdentifiers().GetCorrelatedInvocationsId(),
+		ToolName:                p.GetIdentifiers().GetToolName(),
+		ToolVersion:             p.GetIdentifiers().GetToolVersion(),
+		ExecutionID:             p.GetIdentifiers().GetExecutionId(),
 	}
 	is := inputSpecFromProto(p.GetInput())
 	return &Command{
@@ -873,11 +873,12 @@ func ToProto(cmd *Command) *cpb.Command {
 	}
 	if cmd.Identifiers != nil {
 		cPb.Identifiers = &cpb.Identifiers{
-			CommandId:    cmd.Identifiers.CommandID,
-			InvocationId: cmd.Identifiers.InvocationID,
-			ToolName:     cmd.Identifiers.ToolName,
-			ToolVersion:  cmd.Identifiers.ToolVersion,
-			ExecutionId:  cmd.Identifiers.ExecutionID,
+			CommandId:               cmd.Identifiers.CommandID,
+			InvocationId:            cmd.Identifiers.InvocationID,
+			CorrelatedInvocationsId: cmd.Identifiers.CorrelatedInvocationsID,
+			ToolName:                cmd.Identifiers.ToolName,
+			ToolVersion:             cmd.Identifiers.ToolVersion,
+			ExecutionId:             cmd.Identifiers.ExecutionID,
 		}
 	}
 	return cPb

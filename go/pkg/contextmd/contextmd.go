@@ -27,8 +27,8 @@ type Metadata struct {
 	ActionID string
 	// InvocationID is an optional id to use to identify an invocation spanning multiple commands.
 	InvocationID string
-	// CorrelatedInvocationID is an optional id to use to identify a build spanning multiple invocations.
-	CorrelatedInvocationID string
+	// CorrelatedInvocationsID is an optional id to use to identify a build spanning multiple invocations.
+	CorrelatedInvocationsID string
 	// ToolName is an optional tool name to pass to the remote server for logging.
 	ToolName string
 	// ToolVersion is an optional tool version to pass to the remote server for logging.
@@ -64,11 +64,11 @@ func ExtractMetadata(ctx context.Context) (m *Metadata, err error) {
 		return nil, err
 	}
 	return &Metadata{
-		ToolName:               meta.ToolDetails.GetToolName(),
-		ToolVersion:            meta.ToolDetails.GetToolVersion(),
-		ActionID:               meta.ActionId,
-		InvocationID:           meta.ToolInvocationId,
-		CorrelatedInvocationID: meta.CorrelatedInvocationsId,
+		ToolName:                meta.ToolDetails.GetToolName(),
+		ToolVersion:             meta.ToolDetails.GetToolVersion(),
+		ActionID:                meta.ActionId,
+		InvocationID:            meta.ToolInvocationId,
+		CorrelatedInvocationsID: meta.CorrelatedInvocationsId,
 	}, nil
 }
 
@@ -177,33 +177,33 @@ func mergeSet(set map[string]struct{}) string {
 
 // capToLimit ensures total length does not exceed max header size.
 func capToLimit(m *Metadata, limit int) *Metadata {
-	total := len(m.ToolName) + len(m.ToolVersion) + len(m.ActionID) + len(m.InvocationID) + len(m.CorrelatedInvocationID)
+	total := len(m.ToolName) + len(m.ToolVersion) + len(m.ActionID) + len(m.InvocationID) + len(m.CorrelatedInvocationsID)
 	excess := total - limit
 	if excess <= 0 {
 		return m
 	}
-	// We ignore the tool name, because in practice this is a
-	// very short constant which makes no sense to truncate.
-	diff := len(m.ActionID) - len(m.InvocationID)
-	if diff > 0 {
-		if diff > excess {
-			m.ActionID = m.ActionID[:len(m.ActionID)-excess]
-		} else {
-			m.ActionID = m.ActionID[:len(m.ActionID)-diff]
-			rem := (excess - diff + 1) / 2
-			m.ActionID = m.ActionID[:len(m.ActionID)-rem]
-			m.InvocationID = m.InvocationID[:len(m.InvocationID)-rem]
-		}
-	} else {
-		diff = -diff
-		if diff > excess {
-			m.InvocationID = m.InvocationID[:len(m.InvocationID)-excess]
-		} else {
-			m.InvocationID = m.InvocationID[:len(m.InvocationID)-diff]
-			rem := (excess - diff + 1) / 2
-			m.InvocationID = m.InvocationID[:len(m.InvocationID)-rem]
-			m.ActionID = m.ActionID[:len(m.ActionID)-rem]
-		}
-	}
+	truncateStrings(limit, &m.ActionID, &m.InvocationID, &m.CorrelatedInvocationsID, &m.ToolName, &m.ToolVersion)
 	return m
+}
+
+// truncateStrings remove one char from the longest str at a time until the
+// total length of all the strings is less than limit value.
+func truncateStrings(limit int, inputs ...*string) {
+	total := 0
+	for _, s := range inputs {
+		total += len(*s)
+	}
+	if total <= limit {
+		return
+	}
+	for total > limit {
+		mIdx := 0
+		for i, s := range inputs {
+			if len(*s) > len(*inputs[mIdx]) {
+				mIdx = i
+			}
+		}
+		*inputs[mIdx] = (*inputs[mIdx])[:len(*inputs[mIdx])-1]
+		total -= 1
+	}
 }

@@ -212,6 +212,9 @@ func TestFillDefaultFieldValues_Empty(t *testing.T) {
 	if c.Identifiers.InvocationID == "" {
 		t.Errorf("did not generate invocation id for empty command")
 	}
+	if c.Identifiers.CorrelatedInvocationsID != "" {
+		t.Errorf("default CorrelatedInvocationsID value is not empty string")
+	}
 	if c.InputSpec == nil {
 		t.Errorf("did not generate input spec for empty command")
 	}
@@ -220,9 +223,10 @@ func TestFillDefaultFieldValues_Empty(t *testing.T) {
 func TestFillDefaultFieldValues_PreserveExisting(t *testing.T) {
 	t.Parallel()
 	ids := &Identifiers{
-		CommandID:    "bla",
-		ToolName:     "foo",
-		InvocationID: "bar",
+		CommandID:               "bla",
+		ToolName:                "foo",
+		InvocationID:            "bar",
+		CorrelatedInvocationsID: "baz",
 	}
 	inputSpec := &InputSpec{}
 	c := &Command{InputSpec: inputSpec, Identifiers: ids}
@@ -235,10 +239,13 @@ func TestFillDefaultFieldValues_PreserveExisting(t *testing.T) {
 		t.Errorf("did not preserve CommandID: got %s, expected bla", c.Identifiers.CommandID)
 	}
 	if c.Identifiers.ToolName != "foo" {
-		t.Errorf("did not preserve CommandID: got %s, expected foo", c.Identifiers.ToolName)
+		t.Errorf("did not preserve ToolName: got %s, expected foo", c.Identifiers.ToolName)
 	}
 	if c.Identifiers.InvocationID != "bar" {
-		t.Errorf("did not preserve CommandID: got %s, expected bar", c.Identifiers.InvocationID)
+		t.Errorf("did not preserve InvocationID: got %s, expected bar", c.Identifiers.InvocationID)
+	}
+	if c.Identifiers.CorrelatedInvocationsID != "baz" {
+		t.Errorf("did not preserve CorrelatedInvocationsID: got %s, expected baz", c.Identifiers.CorrelatedInvocationsID)
 	}
 	if c.InputSpec != inputSpec {
 		t.Fatal("command.InputSpec address not preserved")
@@ -458,9 +465,10 @@ func TestToREProtoWithOutputPaths(t *testing.T) {
 func TestToFromProto(t *testing.T) {
 	cmd := &Command{
 		Identifiers: &Identifiers{
-			CommandID:    "a",
-			InvocationID: "b",
-			ToolName:     "c",
+			CommandID:               "a",
+			InvocationID:            "b",
+			CorrelatedInvocationsID: "d",
+			ToolName:                "c",
 		},
 		Args:     []string{"a", "b", "c"},
 		ExecRoot: "/exec/root",

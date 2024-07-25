@@ -61,7 +61,7 @@ func (c *Client) NewContext(ctx context.Context, cmd *command.Command, opt *comm
 		ToolVersion:            cmd.Identifiers.ToolVersion,
 		ActionID:               cmd.Identifiers.CommandID,
 		InvocationID:           cmd.Identifiers.InvocationID,
-		CorrelatedInvocationID: cmd.Identifiers.CorrelatedInvocationID,
+		CorrelatedInvocationID: cmd.Identifiers.CorrelatedInvocationsID,
 	})
 	if err != nil {
 		return nil, err
