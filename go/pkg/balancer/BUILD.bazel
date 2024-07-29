@@ -4,6 +4,8 @@ go_library(
     name = "balancer",
     srcs = [
         "roundrobin.go",
+        "common.go",
+        "heap.go",
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer",
     visibility = ["//visibility:public"],
@@ -12,3 +14,13 @@ go_library(
     ],
 )
 
+go_test(
+    name = "balancer_test",
+    srcs = [
+        "heap_test.go",
+    ],
+    embed = [":balancer"],
+    deps = [
+        "@org_golang_google_grpc//:go_default_library",
+    ],
+)

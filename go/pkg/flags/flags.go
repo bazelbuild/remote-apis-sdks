@@ -60,8 +60,10 @@ var (
 	Instance = flag.String("instance", "", "The instance ID to target when calling remote execution via gRPC (e.g., projects/$PROJECT/instances/default_instance for Google RBE).")
 	// CASConcurrency specifies the maximum number of concurrent upload & download RPCs that can be in flight.
 	CASConcurrency = flag.Int("cas_concurrency", client.DefaultCASConcurrency, "Num concurrent upload / download RPCs that the SDK is allowed to do.")
-	// MaxConcurrentRequests denotes the maximum number of concurrent RPCs on a single gRPC connection.
+	// MaxConcurrentRequests specifies the maximum number of concurrent RPCs on a single gRPC connection.
 	MaxConcurrentRequests = flag.Uint("max_concurrent_requests_per_conn", client.DefaultMaxConcurrentRequests, "Maximum number of concurrent RPCs on a single gRPC connection.")
+	// GRPCClientBalancer denotes the balancer implementation to use on the client side..
+	GRPCClientBalancer = flag.String("grpc_client_balancer", client.DefaultGRPCClientBalancer, "gRPC client balancer implementation to use. Possible options are [roundrobin, heap]. Defaults to roundrobin.")
 	// TLSServerName overrides the server name sent in the TLS session.
 	TLSServerName = flag.String("tls_server_name", "", "Override the TLS server name")
 	// TLSCACert loads CA certificates from a file
@@ -154,5 +156,6 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		TLSClientAuthCert:     *TLSClientAuthCert,
 		TLSClientAuthKey:      *TLSClientAuthKey,
 		MaxConcurrentRequests: uint32(*MaxConcurrentRequests),
+		GRPCClientBalancer:    *GRPCClientBalancer,
 	}, opts...)
 }
