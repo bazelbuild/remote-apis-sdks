@@ -256,12 +256,16 @@ func (c *Client) BatchDownloadBlobsWithStats(ctx context.Context, dgs []digest.D
 					if err != nil {
 						errDg = r.Digest
 						errMsg = err.Error()
+						numErrs++
+						allRetriable = false
 						continue
 					}
 					r.Data = b
 				default:
 					errDg = r.Digest
 					errMsg = fmt.Sprintf("blob returned with unsupported compressor %s", r.Compressor)
+					numErrs++
+					allRetriable = false
 					continue
 				}
 				bi := CompressedBlobInfo{
