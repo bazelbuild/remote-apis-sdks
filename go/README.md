@@ -12,6 +12,14 @@ Flags that describe the RBE instance used and the authentication method are comm
 
 `--alsologtostderr` and `-v VERBOSITY_LEVEL` can be used to tune the verbosity and location of the output, e.g. `--alsologtosrderr -v 1`.
 
+For example, the common flags could be:
+
+```
+    --service remotebuildexecution.googleapis.com:443 \
+    --use_application_default_credentials=true \
+    --alsologtostderr \
+    --v 1
+```
 #### Downloading an action's inputs and metadata
 ```
 bazelisk run //go/cmd/remotetool -- \
@@ -41,6 +49,36 @@ bazelisk run //go/cmd/remotetool -- \
 - For `COMMON_FLAGS`, see the [above section](#common-flags).
 - An action digest formatted as `"{hash}/{size}"` can be provided directly using the `--digest` flag, or a previously downloaded action can be used with `--action_root`. The `--action_root` path should point to the `--path` of a previous `download_action` invocation. Specifically, the `--action_root` folder must contain a `cmd.textproto` and `ac.textproto` files.
 - `--path` is the destination where the outputs of the action will be downloaded
+
+#### Re-running a downloaded action remotely on a different RBE instance
+
+If you want to download an action from an RBE instance `FOO`, and remotely 
+execute it on another RBE instance `BAR` (probably because you only have the 
+permission to download actions from `FOO`, but don't have the permission to
+execute that instance). In this case, you want to download the action first, and
+then re-run it on another RBE instance with
+`--instance` and `--action_root` flags. 
+
+1. download the action from instance `FOO` to dir `/tmp/out/downloaded_action`
+
+```
+bazelisk run //go/cmd/remotetool -- \
+    --operation download_action \
+    --instance=FOO \
+    --digest=DIGEST
+    COMMON_FLAGS
+    --path /tmp/out/downloaded_action
+```
+2. run the downloaded action with another RBE instance `BAR`
+```
+bazelisk run //go/cmd/remotetool -- \
+    --operation execute_action \
+    --instance=BAR \
+    --action_root /tmp/out/downloaded_action \
+    COMMON_FLAGS
+    --path /tmp/output_file_path
+```
+
 
 #### Running a modified version of a downloaded action
 

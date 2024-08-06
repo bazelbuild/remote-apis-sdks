@@ -27,10 +27,10 @@ var (
 
 // RegisterFlags registers the flags necessary for the embedded tool to work.
 func RegisterFlags() {
-	flag.StringVar(&inputDigest, "digest", "", "Digest in <digest/size_bytes> format.")
+	flag.StringVar(&inputDigest, "digest", "", "Digest in <digest/size_bytes> format. This flag should not be provided if action_root is set.")
 	flag.StringVar(&pathPrefix, "path", "", "Path to which outputs should be downloaded to.")
 	flag.BoolVar(&overwrite, "overwrite", false, "Overwrite the output path if it already exist.")
-	flag.StringVar(&actionRoot, "action_root", "", "For execute_action: the root of the action spec, containing ac.textproto (Action proto), cmd.textproto (Command proto), and input/ (root of the input tree).")
+	flag.StringVar(&actionRoot, "action_root", "", "For execute_action: the root of the action spec, containing ac.textproto (Action proto), cmd.textproto (Command proto), and input/ (root of the input tree). This flag should not be provided if digest is set.")
 	flag.IntVar(&execAttempts, "exec_attempts", 10, "For check_determinism: the number of times to remotely execute the action and check for mismatches.")
 	flag.StringVar(&jsonOutput, "json", "", "Path to output operation result as JSON. Currently supported for \"upload_dir\", and includes various upload metadata (see UploadStats).")
 }
@@ -99,12 +99,14 @@ var RemoteToolOperations = map[OpType]func(ctx context.Context, c *Client){
 		fmt.Printf("Action downloaded to %v\n", getPathFlag())
 	},
 	executeAction: func(ctx context.Context, c *Client) {
-		if _, err := c.ExecuteAction(ctx, getDigestFlag(), actionRoot, getPathFlag(), outerr.SystemOutErr); err != nil {
+		validateActionRootAndDg()
+		if _, err := c.ExecuteAction(ctx, inputDigest, actionRoot, getPathFlag(), outerr.SystemOutErr); err != nil {
 			log.Exitf("error executing action: %v", err)
 		}
 	},
 	checkDeterminism: func(ctx context.Context, c *Client) {
-		if err := c.CheckDeterminism(ctx, getDigestFlag(), actionRoot, execAttempts); err != nil {
+		validateActionRootAndDg()
+		if err := c.CheckDeterminism(ctx, inputDigest, actionRoot, execAttempts); err != nil {
 			log.Exitf("error checking determinism: %v", err)
 		}
 	},
@@ -156,4 +158,13 @@ func getPathFlag() string {
 		log.Exitf("--path must be specified.")
 	}
 	return pathPrefix
+}
+
+func validateActionRootAndDg() {
+	if inputDigest != "" && actionRoot != "" {
+		log.Exitf("either specify --digest or --action_root, should not set both of them together.")
+	}
+	if inputDigest == "" && actionRoot == "" {
+		log.Exitf("either specify --digest or --action_root, one of these flags must be set, but not both.")
+	}
 }

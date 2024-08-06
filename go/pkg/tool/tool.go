@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"errors"
 	log "github.com/golang/glog"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -98,7 +98,7 @@ func (c *Client) prepCommand(ctx context.Context, client *rexec.Client, actionDi
 		return nil, err
 	}
 
-	log.Infof("Reading command from action digest..")
+	log.Infof("Reading command from action digest: %v", acDg)
 	if _, err := c.GrpcClient.ReadProto(ctx, cmdDg, commandProto); err != nil {
 		return nil, err
 	}
@@ -656,6 +656,7 @@ func (c *Client) ExecuteAction(ctx context.Context, actionDigest, actionRoot, ou
 	case command.LocalErrorResultStatus:
 		oe.WriteErr([]byte(fmt.Sprintf("Local error: %v.\n", ec.Result.Err)))
 	}
+	fmt.Printf("Result: %+v\n", ec.Result)
 	if ec.Result.Err == nil && outDir != "" {
 		ec.DownloadOutputs(outDir)
 		fmt.Printf("Output written to %v\n", outDir)
