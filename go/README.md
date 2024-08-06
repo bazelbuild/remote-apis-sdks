@@ -54,9 +54,9 @@ bazelisk run //go/cmd/remotetool -- \
 
 If you want to download an action from an RBE instance `FOO`, and remotely 
 execute it on another RBE instance `BAR` (probably because you only have the 
-permission to download actions from `FOO`, but lack of permission to don't have 
-the permission to execute an action with instance `FOO`). In this case, you want
-to download the action first, and then re-run it on another RBE instance with
+permission to download actions from `FOO`, but don't have the permission to
+execute that instance). In this case, you want to download the action first, and
+then re-run it on another RBE instance with
 `--instance` and `--action_root` flags. 
 
 1. download the action from instance `FOO` to dir `/tmp/out/downloaded_action`

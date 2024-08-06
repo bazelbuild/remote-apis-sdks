@@ -99,14 +99,14 @@ var RemoteToolOperations = map[OpType]func(ctx context.Context, c *Client){
 		fmt.Printf("Action downloaded to %v\n", getPathFlag())
 	},
 	executeAction: func(ctx context.Context, c *Client) {
-		dg, root := validateActionRootAndDg()
-		if _, err := c.ExecuteAction(ctx, dg, root, getPathFlag(), outerr.SystemOutErr); err != nil {
+		validateActionRootAndDg()
+		if _, err := c.ExecuteAction(ctx, inputDigest, actionRoot, getPathFlag(), outerr.SystemOutErr); err != nil {
 			log.Exitf("error executing action: %v", err)
 		}
 	},
 	checkDeterminism: func(ctx context.Context, c *Client) {
-		dg, root := validateActionRootAndDg()
-		if err := c.CheckDeterminism(ctx, dg, root, execAttempts); err != nil {
+		validateActionRootAndDg()
+		if err := c.CheckDeterminism(ctx, inputDigest, actionRoot, execAttempts); err != nil {
 			log.Exitf("error checking determinism: %v", err)
 		}
 	},
@@ -160,12 +160,11 @@ func getPathFlag() string {
 	return pathPrefix
 }
 
-func validateActionRootAndDg() (string, string) {
+func validateActionRootAndDg() {
 	if inputDigest != "" && actionRoot != "" {
 		log.Exitf("either specify --digest or --action_root, should not set both of them together.")
 	}
 	if inputDigest == "" && actionRoot == "" {
-		log.Exitf("either specify --digest or --action_root, at least one of these two flag must be set.")
+		log.Exitf("either specify --digest or --action_root, one of these flags must be set, but not both.")
 	}
-	return inputDigest, actionRoot
 }
