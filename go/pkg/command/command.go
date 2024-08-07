@@ -72,14 +72,14 @@ func (s SymlinkBehaviorType) String() string {
 }
 
 func SymlinkBehavior(s string) SymlinkBehaviorType {
-  switch s {
-  case "resolve":
-    return ResolveSymlink
-  case "preserve":
-    return PreserveSymlink
-  default:
-    return UnspecifiedSymlinkBehavior
-  }
+	switch s {
+	case "resolve", "ResolveSymlink":
+		return ResolveSymlink
+	case "preserve", "PreserveSymlink":
+		return PreserveSymlink
+	default:
+		return UnspecifiedSymlinkBehavior
+	}
 }
 
 // InputExclusion represents inputs to be excluded from being considered for command execution.
