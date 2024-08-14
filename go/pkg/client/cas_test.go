@@ -1934,7 +1934,7 @@ func TestBatchDownloadBlobsCompressed(t *testing.T) {
 type readResponseModifier func(idx int, resp *repb.BatchReadBlobsResponse_Response)
 
 type invalidReadServer struct {
-	repb.ContentAddressableStorageServer
+	regrpc.ContentAddressableStorageServer
 	readResponseModifier
 }
 
