@@ -78,7 +78,6 @@ func (r *reusableCmd) Digest() digest.Digest {
 
 // Credentials provides auth functionalities using an external credentials helper
 type Credentials struct {
-	credsFile      string
 	refreshExp     time.Time
 	tokenSource    *grpcOauth.TokenSource
 	credsHelperCmd *reusableCmd
@@ -101,79 +100,6 @@ func (c *Credentials) TokenSource() *grpcOauth.TokenSource {
 		return nil
 	}
 	return c.tokenSource
-}
-
-func buildExternalCredentials(baseCreds cachedCredentials, credsFile string, credsHelperCmd *reusableCmd) *Credentials {
-	c := &Credentials{
-		credsHelperCmd: credsHelperCmd,
-		credsFile:      credsFile,
-		refreshExp:     baseCreds.refreshExp,
-	}
-	baseTS := &externalTokenSource{
-		credsHelperCmd: credsHelperCmd,
-	}
-	c.tokenSource = &grpcOauth.TokenSource{
-		// Wrap the base token source with a ReuseTokenSource so that we only
-		// generate new credentials when the current one is about to expire.
-		// This is needed because retrieving the token is expensive and some
-		// token providers have per hour rate limits.
-		TokenSource: oauth2.ReuseTokenSourceWithExpiry(
-			baseCreds.token,
-			baseTS,
-			// Refresh tokens a bit early to be safe
-			expiryBuffer,
-		),
-	}
-	return c
-}
-
-func loadCredsFromDisk(credsFile string, credsHelperCmd *reusableCmd) (*Credentials, error) {
-	cc, err := loadFromDisk(credsFile)
-	if err != nil {
-		return nil, err
-	}
-	cmdDigest := credsHelperCmd.Digest()
-	if cc.credsHelperCmdDigest != cmdDigest.String() {
-		return nil, fmt.Errorf("cached credshelper command digest: %s is not the same as requested credshelper command digest: %s",
-			cc.credsHelperCmdDigest, cmdDigest.String())
-	}
-	isExpired := cc.token != nil && cc.token.Expiry.Before(nowFn())
-	if isExpired {
-		return nil, fmt.Errorf("cached token is expired at %v", cc.token.Expiry)
-	}
-	return buildExternalCredentials(cc, credsFile, credsHelperCmd), nil
-}
-
-// SaveToDisk saves credentials to disk.
-func (c *Credentials) SaveToDisk() {
-	if c == nil {
-		return
-	}
-	cc := cachedCredentials{authSource: CredentialsHelper, refreshExp: c.refreshExp}
-	// Since c.tokenSource is always wrapped in a oauth2.ReuseTokenSourceWithExpiry
-	// this will return a cached credential if one exists.
-	t, err := c.tokenSource.Token()
-	if err != nil {
-		log.Errorf("Failed to get token to persist to disk: %v", err)
-		return
-	}
-	cc.token = t
-	if c.credsHelperCmd != nil {
-		cc.credsHelperCmdDigest = c.credsHelperCmd.Digest().String()
-	}
-	if err := saveToDisk(cc, c.credsFile); err != nil {
-		log.Errorf("Failed to save credentials to disk: %v", err)
-	}
-}
-
-// RemoveFromDisk deletes the credentials cache on disk.
-func (c *Credentials) RemoveFromDisk() {
-	if c == nil {
-		return
-	}
-	if err := os.Remove(c.credsFile); err != nil {
-		log.Errorf("Failed to remove credentials from disk: %v", err)
-	}
 }
 
 // RefreshStatus checks refresh expiry of credentials in case a manual refresh is required.
@@ -218,7 +144,7 @@ func (ts *externalTokenSource) RequireTransportSecurity() bool {
 }
 
 // NewExternalCredentials creates credentials obtained from a credshelper.
-func NewExternalCredentials(credshelper string, credshelperArgs []string, credsFile string) (*Credentials, error) {
+func NewExternalCredentials(credshelper string, credshelperArgs []string) (*Credentials, error) {
 	if credshelper == "execrel://" {
 		credshelperPath, err := binaryRelToAbs("credshelper")
 		if err != nil {
@@ -227,18 +153,30 @@ func NewExternalCredentials(credshelper string, credshelperArgs []string, credsF
 		credshelper = credshelperPath
 	}
 	credsHelperCmd := newReusableCmd(credshelper, credshelperArgs)
-	if credsFile != "" {
-		creds, err := loadCredsFromDisk(credsFile, credsHelperCmd)
-		if err == nil {
-			return creds, nil
-		}
-		log.Warningf("Failed to use cached credentials: %v", err)
-	}
 	credsOut, err := runCredsHelperCmd(credsHelperCmd)
 	if err != nil {
 		return nil, err
 	}
-	return buildExternalCredentials(cachedCredentials{token: credsOut.tk, refreshExp: credsOut.rexp}, credsFile, credsHelperCmd), nil
+	c := &Credentials{
+		credsHelperCmd: credsHelperCmd,
+		refreshExp:     credsOut.rexp,
+	}
+	baseTS := &externalTokenSource{
+		credsHelperCmd: credsHelperCmd,
+	}
+	c.tokenSource = &grpcOauth.TokenSource{
+		// Wrap the base token source with a ReuseTokenSource so that we only
+		// generate new credentials when the current one is about to expire.
+		// This is needed because retrieving the token is expensive and some
+		// token providers have per hour rate limits.
+		TokenSource: oauth2.ReuseTokenSourceWithExpiry(
+			credsOut.tk,
+			baseTS,
+			// Refresh tokens a bit early to be safe
+			expiryBuffer,
+		),
+	}
+	return c, nil
 }
 
 type credshelperOutput struct {

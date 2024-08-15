@@ -10,42 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"golang.org/x/oauth2"
-	grpcOauth "google.golang.org/grpc/credentials/oauth"
 )
-
-func TestCredentialsHelperCache(t *testing.T) {
-	dir, err := os.MkdirTemp("", "test")
-	if err != nil {
-		t.Errorf("failed to create the temp directory: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	cf := filepath.Join(dir, "reproxy.creds")
-	err = os.MkdirAll(filepath.Dir(cf), 0755)
-	if err != nil {
-		t.Errorf("failed to create dir for credentials file %q: %v", cf, err)
-	}
-	credsHelperCmd := newReusableCmd("echo", []string{`{"headers":{"hdr":"val"},"token":"testToken", "expiry":"","refresh_expiry":""}`})
-	ts := &grpcOauth.TokenSource{
-		TokenSource: oauth2.ReuseTokenSourceWithExpiry(
-			&oauth2.Token{},
-			&externalTokenSource{credsHelperCmd: credsHelperCmd},
-			5*time.Minute,
-		),
-	}
-	creds := Credentials{
-		refreshExp:     time.Time{},
-		tokenSource:    ts,
-		credsFile:      cf,
-		credsHelperCmd: credsHelperCmd,
-	}
-	creds.SaveToDisk()
-	_, err = loadCredsFromDisk(cf, credsHelperCmd)
-	if err != nil {
-		t.Errorf("LoadCredsFromDisk failed: %v", err)
-	}
-}
 
 func TestExternalToken(t *testing.T) {
 	expiry := time.Now().Truncate(time.Second)
@@ -203,7 +168,7 @@ func TestNewExternalCredentials(t *testing.T) {
 				credshelperArgs = []string{test.credshelperOut}
 			}
 
-			creds, err := NewExternalCredentials(credshelper, credshelperArgs, "")
+			creds, err := NewExternalCredentials(credshelper, credshelperArgs)
 			if test.wantErr && err == nil {
 				t.Fatalf("NewExternalCredentials did not return an error.")
 			}

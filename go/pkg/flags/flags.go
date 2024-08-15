@@ -119,7 +119,7 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 	}
 	if *CredentialsHelper != "" && perRPCCreds == nil {
-		creds, err := credshelper.NewExternalCredentials(*CredentialsHelper, strings.Fields(*CredentialsHelperArgs), *CredsCache)
+		creds, err := credshelper.NewExternalCredentials(*CredentialsHelper, strings.Fields(*CredentialsHelperArgs))
 		if err != nil {
 			return nil, fmt.Errorf("credentials helper failed. Please try again or use another method of authentication:%v", err)
 		}
