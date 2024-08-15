@@ -28,8 +28,6 @@ const (
 	CredshelperPathFlag = "credentials_helper"
 	// CredshelperArgsFlag is the flag used to pass in the arguments to the credentials helper binary.
 	CredshelperArgsFlag = "credentials_helper_args"
-	// ExperimentalCredsCachePathFlag is the flag used to pass in the path of the file where credentials should be cached.
-	ExperimentalCredsCachePathFlag = "experimental_creds_cache_file"
 
 	expiryBuffer = 5 * time.Minute
 )
