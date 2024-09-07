@@ -7,7 +7,6 @@ require (
 	github.com/golang/glog v1.1.0
 	github.com/google/go-cmp v0.5.9
 	github.com/google/uuid v1.3.0
-	github.com/hectane/go-acl v0.0.0-20230122075934-ca0b05cb1adb
 	github.com/klauspost/compress v1.17.8
 	github.com/pkg/xattr v0.4.4
 	golang.org/x/oauth2 v0.20.0

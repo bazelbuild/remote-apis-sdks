@@ -41,8 +41,6 @@ var (
 	CredentialsHelper = flag.String(credshelper.CredshelperPathFlag, "", "Path to the credentials helper binary. If given execrell://, looks for the `credshelper` binary in the same folder as the current executable.")
 	// CredentialsHelperArgs specifies arguments for the credentials helper binary,
 	CredentialsHelperArgs = flag.String(credshelper.CredshelperArgsFlag, "", "Arguments for the credentials helper, separated by space.")
-	// CredsCache specifies the file path where credentials recieved from the credentials helper are cached. If no file is provided then no credentials are cached.
-	CredsCache = flag.String(credshelper.ExperimentalCredsCachePathFlag, "", "Path of the file where credentials should be cached. Credentials are not cached if no file path is provided.")
 	// UseRPCCredentials can be set to false to disable all per-RPC credentials.
 	UseRPCCredentials = flag.Bool("use_rpc_credentials", true, "If false, no per-RPC credentials will be used (disables --credential_file, --use_application_default_credentials, and --use_gce_credentials.")
 	// UseExternalAuthToken specifies whether to use an externally provided auth token, given via PerRPCCreds dial option, should be used.
@@ -119,7 +117,7 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		}
 	}
 	if *CredentialsHelper != "" && perRPCCreds == nil {
-		creds, err := credshelper.NewExternalCredentials(*CredentialsHelper, strings.Fields(*CredentialsHelperArgs), *CredsCache)
+		creds, err := credshelper.NewExternalCredentials(*CredentialsHelper, strings.Fields(*CredentialsHelperArgs))
 		if err != nil {
 			return nil, fmt.Errorf("credentials helper failed. Please try again or use another method of authentication:%v", err)
 		}

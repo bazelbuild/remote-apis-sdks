@@ -4,7 +4,6 @@ go_library(
     name = "credshelper",
     srcs = [
         "credshelper.go",
-        "cache.go",
     ],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/credshelper",
     visibility = ["//visibility:public"],
