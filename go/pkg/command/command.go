@@ -71,7 +71,7 @@ func (s SymlinkBehaviorType) String() string {
 	return fmt.Sprintf("InvalidSymlinkBehaviorType(%d)", s)
 }
 
-func SymlinkBehavior(s string) SymlinkBehaviorType {
+func SymlinkBehaviorFromString(s string) SymlinkBehaviorType {
 	switch s {
 	case "resolve", "ResolveSymlink":
 		return ResolveSymlink

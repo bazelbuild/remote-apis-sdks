@@ -124,7 +124,7 @@ var RemoteToolOperations = map[OpType]func(ctx context.Context, c *Client){
 		}
 	},
 	uploadDir: func(ctx context.Context, c *Client) {
-		us, err := c.UploadDirectory(ctx, getPathFlag(), command.SymlinkBehavior(symlinkBehavior))
+		us, err := c.UploadDirectory(ctx, getPathFlag(), command.SymlinkBehaviorFromString(symlinkBehavior))
 		if jsonOutput != "" {
 			js, _ := json.MarshalIndent(us, "", "  ")
 			if jsonOutput == "-" {
