@@ -11,24 +11,27 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/outerr"
 
 	log "github.com/golang/glog"
 )
 
 var (
-	inputDigest  string
-	pathPrefix   string
-	overwrite    bool
-	actionRoot   string
-	execAttempts int
-	jsonOutput   string
+	inputDigest     string
+	pathPrefix      string
+	symlinkBehavior string
+	overwrite       bool
+	actionRoot      string
+	execAttempts    int
+	jsonOutput      string
 )
 
 // RegisterFlags registers the flags necessary for the embedded tool to work.
 func RegisterFlags() {
 	flag.StringVar(&inputDigest, "digest", "", "Digest in <digest/size_bytes> format. This flag should not be provided if action_root is set.")
 	flag.StringVar(&pathPrefix, "path", "", "Path to which outputs should be downloaded to.")
+	flag.StringVar(&symlinkBehavior, "symlink_behavior", "unspecified", "For upload_dir: how to handle symlinks. One of 'unspecified', 'resolve', 'preserve'.")
 	flag.BoolVar(&overwrite, "overwrite", false, "Overwrite the output path if it already exist.")
 	flag.StringVar(&actionRoot, "action_root", "", "For execute_action: the root of the action spec, containing ac.textproto (Action proto), cmd.textproto (Command proto), and input/ (root of the input tree). This flag should not be provided if digest is set.")
 	flag.IntVar(&execAttempts, "exec_attempts", 10, "For check_determinism: the number of times to remotely execute the action and check for mismatches.")
@@ -121,7 +124,7 @@ var RemoteToolOperations = map[OpType]func(ctx context.Context, c *Client){
 		}
 	},
 	uploadDir: func(ctx context.Context, c *Client) {
-		us, err := c.UploadDirectory(ctx, getPathFlag())
+		us, err := c.UploadDirectory(ctx, getPathFlag(), command.SymlinkBehaviorFromString(symlinkBehavior))
 		if jsonOutput != "" {
 			js, _ := json.MarshalIndent(us, "", "  ")
 			if jsonOutput == "-" {

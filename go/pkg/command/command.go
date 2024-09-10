@@ -71,6 +71,17 @@ func (s SymlinkBehaviorType) String() string {
 	return fmt.Sprintf("InvalidSymlinkBehaviorType(%d)", s)
 }
 
+func SymlinkBehaviorFromString(s string) SymlinkBehaviorType {
+	switch s {
+	case "resolve", "ResolveSymlink":
+		return ResolveSymlink
+	case "preserve", "PreserveSymlink":
+		return PreserveSymlink
+	default:
+		return UnspecifiedSymlinkBehavior
+	}
+}
+
 // InputExclusion represents inputs to be excluded from being considered for command execution.
 type InputExclusion struct {
 	// Required: the path regular expression to match for exclusion.
