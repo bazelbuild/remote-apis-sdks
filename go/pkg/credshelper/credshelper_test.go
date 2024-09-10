@@ -25,7 +25,7 @@ func TestExternalToken(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unable to create temporary file: %v", err)
 		}
-		chJSON := fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s","refresh_expiry":""}`, tk, exp)
+		chJSON := fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s"}`, tk, exp)
 		if _, err := tf.Write([]byte(chJSON)); err != nil {
 			t.Fatalf("Unable to write to file %v: %v", tf.Name(), err)
 		}
@@ -37,7 +37,7 @@ func TestExternalToken(t *testing.T) {
 		}
 	} else {
 		credshelper = "echo"
-		credshelperArgs = []string{fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s","refresh_expiry":""}`, tk, exp)}
+		credshelperArgs = []string{fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s"}`, tk, exp)}
 	}
 
 	credsHelperCmd := newReusableCmd(credshelper, credshelperArgs)
@@ -104,7 +104,7 @@ func writeTokenFile(t *testing.T, path, token string, expiry time.Time) {
 		t.Fatalf("Unable to open file %v: %v", path, err)
 	}
 	defer f.Close()
-	chJSON := fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s","refresh_expiry":""}`, token, expiry.Format(time.UnixDate))
+	chJSON := fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%s"}`, token, expiry.Format(time.UnixDate))
 	if _, err := f.Write([]byte(chJSON)); err != nil {
 		t.Fatalf("Unable to write to file %v: %v", f.Name(), err)
 	}
@@ -122,26 +122,22 @@ func TestNewExternalCredentials(t *testing.T) {
 		credshelperOut string
 	}{{
 		name:           "No Headers",
-		credshelperOut: fmt.Sprintf(`{"token":"%v","expiry":"","refresh_expiry":""}`, testToken),
+		credshelperOut: fmt.Sprintf(`{"token":"%v","expiry":""}`, testToken),
 	}, {
 		name:           "No Token",
 		wantErr:        true,
-		credshelperOut: `{"headers":{"hdr":"val"},"token":"","expiry":"","refresh_expiry":""}`,
+		credshelperOut: `{"headers":{"hdr":"val"},"token":"","expiry":""}`,
 	}, {
 		name:           "Credshelper Command Passed - No Expiry",
-		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"","refresh_expiry":""}`, testToken),
+		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":""}`, testToken),
 	}, {
 		name:           "Credshelper Command Passed - Expiry",
 		checkExp:       true,
-		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v","refresh_expiry":""}`, testToken, unixExp),
-	}, {
-		name:           "Credshelper Command Passed - Refresh Expiry",
-		checkExp:       true,
-		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v","refresh_expiry":"%v"}`, testToken, unixExp, unixExp),
+		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v"}`, testToken, unixExp),
 	}, {
 		name:           "Wrong Expiry Format",
 		wantErr:        true,
-		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v", "refresh_expiry":"%v"}`, testToken, expStr, expStr),
+		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v"}`, testToken, expStr),
 	}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -279,21 +275,6 @@ func TestGetRequestMetadata(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestRefreshStatus(t *testing.T) {
-	c := Credentials{refreshExp: time.Time{}}
-	if err := c.RefreshStatus(); err != nil {
-		t.Errorf("RefreshStatus returned an error when refreshExpiry is zero")
-	}
-	c.refreshExp = time.Now().Add(time.Hour)
-	if err := c.RefreshStatus(); err != nil {
-		t.Errorf("RefreshStatus returned an error when refreshExpiry has not passed")
-	}
-	c.refreshExp = time.Now().Add(-time.Hour)
-	if err := c.RefreshStatus(); err == nil {
-		t.Errorf("RefreshStatus did not return an error when refreshExpiry when it has passed")
 	}
 }
 

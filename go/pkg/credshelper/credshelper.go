@@ -76,7 +76,6 @@ func (r *reusableCmd) Digest() digest.Digest {
 
 // Credentials provides auth functionalities using an external credentials helper
 type Credentials struct {
-	refreshExp     time.Time
 	tokenSource    *grpcOauth.TokenSource
 	credsHelperCmd *reusableCmd
 }
@@ -98,14 +97,6 @@ func (c *Credentials) TokenSource() *grpcOauth.TokenSource {
 		return nil
 	}
 	return c.tokenSource
-}
-
-// RefreshStatus checks refresh expiry of credentials in case a manual refresh is required.
-func (c *Credentials) RefreshStatus() error {
-	if !c.refreshExp.IsZero() && c.refreshExp.Before(nowFn()) {
-		return fmt.Errorf("credentials cannot be refreshed automatically, manual re-authentication required")
-	}
-	return nil
 }
 
 // Token retrieves an oauth2 token from the external tokensource.
@@ -157,7 +148,6 @@ func NewExternalCredentials(credshelper string, credshelperArgs []string) (*Cred
 	}
 	c := &Credentials{
 		credsHelperCmd: credsHelperCmd,
-		refreshExp:     credsOut.rexp,
 	}
 	baseTS := &externalTokenSource{
 		credsHelperCmd: credsHelperCmd,
@@ -202,10 +192,9 @@ func runCredsHelperCmd(credsHelperCmd *reusableCmd) (*credshelperOutput, error) 
 
 // JSONOut is the struct to record the json output from the credshelper.
 type JSONOut struct {
-	Token         string            `json:"token"`
-	Headers       map[string]string `json:"headers"`
-	Expiry        string            `json:"expiry"`
-	RefreshExpiry string            `json:"refresh_expiry"`
+	Token   string            `json:"token"`
+	Headers map[string]string `json:"headers"`
+	Expiry  string            `json:"expiry"`
 }
 
 func parseTokenExpiryFromOutput(out string) (*credshelperOutput, error) {
@@ -225,13 +214,6 @@ func parseTokenExpiryFromOutput(out string) (*credshelperOutput, error) {
 			return nil, fmt.Errorf("invalid expiry format: %v (Expected time.UnixDate format)", jsonOut.Expiry)
 		}
 		credsOut.tk.Expiry = expiry
-	}
-	if jsonOut.RefreshExpiry != "" {
-		rexpiry, err := time.Parse(time.UnixDate, jsonOut.RefreshExpiry)
-		if err != nil {
-			return nil, fmt.Errorf("invalid refresh expiry format: %v (Expected time.UnixDate format)", jsonOut.RefreshExpiry)
-		}
-		credsOut.rexp = rexpiry
 	}
 	return credsOut, nil
 }
