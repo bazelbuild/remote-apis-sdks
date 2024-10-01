@@ -21,8 +21,8 @@ type RRConnPool struct {
 	idx   uint32 // access via sync/atomic
 }
 
-// Conn picks the next connection from the pool in a round-robin fasion.
-func (p *RRConnPool) Conn() *grpc.ClientConn {
+// conn picks the next connection from the pool in a round-robin fasion.
+func (p *RRConnPool) conn() *grpc.ClientConn {
 	i := atomic.AddUint32(&p.idx, 1)
 	return p.conns[i%uint32(len(p.conns))]
 }
@@ -40,16 +40,13 @@ func (p *RRConnPool) Close() error {
 
 // Invoke picks up a connection from the pool and delegates the call to it.
 func (p *RRConnPool) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
-	return p.Conn().Invoke(ctx, method, args, reply, opts...)
+	return p.conn().Invoke(ctx, method, args, reply, opts...)
 }
 
 // NewStream picks up a connection from the pool and delegates the call to it.
 func (p *RRConnPool) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-	return p.Conn().NewStream(ctx, desc, method, opts...)
+	return p.conn().NewStream(ctx, desc, method, opts...)
 }
-
-// DialFunc defines the dial function used in creating the pool.
-type DialFunc func(ctx context.Context) (*grpc.ClientConn, error)
 
 // NewRRConnPool makes a new instance of the round-robin connection pool and dials as many as poolSize connections
 // using the provided dialFn.

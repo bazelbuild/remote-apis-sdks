@@ -427,6 +427,9 @@ const DefaultCASConcurrency = 500
 // that the GRPC balancer can perform.
 const DefaultMaxConcurrentRequests = 25
 
+// DefaultGrpcClientBalancer specifies the default balancer implementation.
+const DefaultGRPCClientBalancer = "roundrobin"
+
 // Apply sets the CASConcurrency flag on a client.
 func (cy CASConcurrency) Apply(c *Client) {
 	c.casConcurrency = int64(cy)
@@ -541,6 +544,9 @@ type DialParams struct {
 
 	// MaxConcurrentRequests specifies the maximum number of concurrent RPCs on a single connection.
 	MaxConcurrentRequests uint32
+
+	// GRPCClientBalancer specifies the balancer implementation to use.
+	GRPCClientBalancer string
 
 	// TLSClientAuthCert specifies the public key in PEM format for using mTLS auth to connect to the RBE service.
 	//
@@ -666,6 +672,9 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 	if params.MaxConcurrentRequests == 0 {
 		params.MaxConcurrentRequests = DefaultMaxConcurrentRequests
 	}
+	if params.GRPCClientBalancer == "" {
+		params.GRPCClientBalancer = DefaultGRPCClientBalancer
+	}
 	log.Infof("Connecting to remote execution instance %s", instanceName)
 	log.Infof("Connecting to remote execution service %s", params.Service)
 	dialOpts, authUsed, err := OptsFromParams(ctx, params)
@@ -673,22 +682,40 @@ func NewClient(ctx context.Context, instanceName string, params DialParams, opts
 		return nil, fmt.Errorf("failed to prepare gRPC dial options: %v", err)
 	}
 
-	var conn, casConn GrpcClientConn
+	newConn := func(dial balancer.DialFunc) (GrpcClientConn, error) {
+		switch params.GRPCClientBalancer {
+		case "roundrobin":
+			conn, err := balancer.NewRRConnPool(ctx, int(params.MaxConcurrentRequests), dial)
+			if err != nil {
+				return nil, fmt.Errorf("couldn't dial gRPC %q: %v", params.Service, err)
+			}
+			return conn, nil
+		case "heap":
+			conn, err := balancer.NewHeapConnPool(ctx, int(params.MaxConcurrentRequests), dial)
+			if err != nil {
+				return nil, fmt.Errorf("couldn't dial gRPC %q: %v", params.Service, err)
+			}
+			return conn, nil
+		default:
+			return nil, fmt.Errorf("unknown gRPC client balancer implementation: %q", params.GRPCClientBalancer)
+		}
+	}
+
 	dial := func(ctx context.Context) (*grpc.ClientConn, error) {
 		return grpc.DialContext(ctx, params.Service, dialOpts...)
 	}
-	conn, err = balancer.NewRRConnPool(ctx, int(params.MaxConcurrentRequests), dial)
+	conn, err := newConn(dial)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't dial gRPC %q: %v", params.Service, err)
+		return nil, &InitError{Err: statusWrap(err), AuthUsed: authUsed}
 	}
 
-	casConn = conn
+	casConn := conn
 	if params.CASService != "" && params.CASService != params.Service {
 		log.Infof("Connecting to CAS service %s", params.CASService)
 		dial := func(ctx context.Context) (*grpc.ClientConn, error) {
 			return grpc.DialContext(ctx, params.CASService, dialOpts...)
 		}
-		casConn, err = balancer.NewRRConnPool(ctx, int(params.MaxConcurrentRequests), dial)
+		casConn, err = newConn(dial)
 	}
 	if err != nil {
 		return nil, &InitError{Err: statusWrap(err), AuthUsed: authUsed}
