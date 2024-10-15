@@ -16,7 +16,7 @@ go_library(
         "//go/pkg/client",
         "//go/pkg/command",
         "//go/pkg/digest",
-        "//go/pkg/fakes/auxpb:auxiliary_metadata_go_proto",
+        "//go/pkg/fakes/auxpb",
         "//go/pkg/filemetadata",
         "//go/pkg/rexec",
         "//go/pkg/uploadinfo",

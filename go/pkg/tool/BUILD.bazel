@@ -9,7 +9,7 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/tool",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/api/command:command_go_proto",
+        "//go/api/command",
         "//go/pkg/cas",
         "//go/pkg/client",
         "//go/pkg/command",
@@ -31,7 +31,7 @@ go_test(
     srcs = ["tool_test.go"],
     embed = [":tool"],
     deps = [
-        "//go/api/command:command_go_proto",
+        "//go/api/command",
         "//go/pkg/command",
         "//go/pkg/digest",
         "//go/pkg/fakes",
