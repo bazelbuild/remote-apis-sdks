@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "fakes",
@@ -16,16 +16,16 @@ go_library(
         "//go/pkg/client",
         "//go/pkg/command",
         "//go/pkg/digest",
-        "//go/pkg/fakes/auxpb",
+        "//go/pkg/fakes/auxpb:auxiliary_metadata_go_proto",
         "//go/pkg/filemetadata",
         "//go/pkg/rexec",
         "//go/pkg/uploadinfo",
         "@com_github_bazelbuild_remote_apis//build/bazel/remote/execution/v2:remote_execution_go_proto",
         "@com_github_google_uuid//:uuid",
         "@com_github_klauspost_compress//zstd",
-        "@go_googleapis//google/bytestream:bytestream_go_proto",
-        "@go_googleapis//google/longrunning:longrunning_go_proto",
-        "@org_golang_google_grpc//:go_default_library",
+        "@org_golang_google_genproto//googleapis/longrunning",
+        "@org_golang_google_genproto_googleapis_bytestream//:bytestream",
+        "@org_golang_google_grpc//:grpc",
         "@org_golang_google_grpc//codes",
         "@org_golang_google_grpc//status",
         "@org_golang_google_protobuf//proto",

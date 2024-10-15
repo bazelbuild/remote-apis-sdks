@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "tool",
@@ -9,7 +9,7 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/tool",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/api/command",
+        "//go/api/command:command_go_proto",
         "//go/pkg/cas",
         "//go/pkg/client",
         "//go/pkg/command",
@@ -31,7 +31,7 @@ go_test(
     srcs = ["tool_test.go"],
     embed = [":tool"],
     deps = [
-        "//go/api/command",
+        "//go/api/command:command_go_proto",
         "//go/pkg/command",
         "//go/pkg/digest",
         "//go/pkg/fakes",

@@ -71,6 +71,7 @@ func (s SymlinkBehaviorType) String() string {
 	return fmt.Sprintf("InvalidSymlinkBehaviorType(%d)", s)
 }
 
+// SymlinkBehaviorFromString returns the canonical SymlinkBehaviorType for a string
 func SymlinkBehaviorFromString(s string) SymlinkBehaviorType {
 	switch s {
 	case "resolve", "ResolveSymlink":
@@ -623,6 +624,7 @@ func (c *Command) ToREProto(useOutputPathsField bool) *repb.Command {
 	return cmdPb
 }
 
+// FromREProto converts a Command protobuf message to a Command go struct
 func FromREProto(cmdPb *repb.Command) *Command {
 	cmd := &Command{
 		InputSpec: &InputSpec{
@@ -709,6 +711,7 @@ func inputSpecFromProto(is *cpb.InputSpec) *InputSpec {
 	}
 }
 
+// NodePropertiesToAPI converts from the remote-apis-sdks message to the remote-apis message
 func NodePropertiesToAPI(np *cpb.NodeProperties) *repb.NodeProperties {
 	if np == nil {
 		return nil
@@ -729,6 +732,7 @@ func NodePropertiesToAPI(np *cpb.NodeProperties) *repb.NodeProperties {
 	return res
 }
 
+// NodePropertiesFromAPI converts from the remote-apis message to the remote-apis-sdks message
 func NodePropertiesFromAPI(np *repb.NodeProperties) *cpb.NodeProperties {
 	if np == nil {
 		return nil
