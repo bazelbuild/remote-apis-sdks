@@ -6,9 +6,3 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/portpicker",
     visibility = ["//visibility:public"],
 )
-
-alias(
-    name = "go_default_library",
-    actual = ":portpicker",
-    visibility = ["//visibility:public"],
-)

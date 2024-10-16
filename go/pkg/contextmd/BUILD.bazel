@@ -19,9 +19,3 @@ go_test(
     srcs = ["contextmd_test.go"],
     embed = [":contextmd"],
 )
-
-alias(
-    name = "go_default_library",
-    actual = ":contextmd",
-    visibility = ["//visibility:public"],
-)

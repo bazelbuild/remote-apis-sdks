@@ -9,9 +9,3 @@ go_library(
         "@org_golang_google_grpc//:grpc",
     ],
 )
-
-alias(
-    name = "go_default_library",
-    actual = ":balancer",
-    visibility = ["//visibility:public"],
-)

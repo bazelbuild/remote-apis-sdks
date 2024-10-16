@@ -36,9 +36,3 @@ config_setting(
     name = "windows",
     constraint_values = ["@platforms//os:windows"],
 )
-
-alias(
-    name = "go_default_library",
-    actual = ":filemetadata",
-    visibility = ["//visibility:public"],
-)

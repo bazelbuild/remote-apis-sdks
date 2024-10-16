@@ -12,9 +12,3 @@ go_test(
     srcs = ["opts_test.go"],
     deps = [":symlinkopts"],
 )
-
-alias(
-    name = "go_default_library",
-    actual = ":symlinkopts",
-    visibility = ["//visibility:public"],
-)
