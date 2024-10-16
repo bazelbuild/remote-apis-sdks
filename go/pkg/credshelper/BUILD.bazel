@@ -18,3 +18,9 @@ go_test(
     srcs = ["credshelper_test.go"],
     embed = [":credshelper"],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":credshelper",
+    visibility = ["//visibility:public"],
+)

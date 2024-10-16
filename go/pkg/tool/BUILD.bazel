@@ -41,3 +41,9 @@ go_test(
         "@org_golang_google_protobuf//encoding/prototext",
     ],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":tool",
+    visibility = ["//visibility:public"],
+)

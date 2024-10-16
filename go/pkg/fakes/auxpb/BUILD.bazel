@@ -21,3 +21,9 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/fakes/auxpb",
     visibility = ["//visibility:public"],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":auxpb",
+    visibility = ["//visibility:public"],
+)

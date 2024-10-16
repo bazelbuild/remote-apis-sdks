@@ -13,3 +13,9 @@ go_test(
     srcs = ["outerr_test.go"],
     embed = [":outerr"],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":outerr",
+    visibility = ["//visibility:public"],
+)

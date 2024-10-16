@@ -26,3 +26,9 @@ go_test(
         "@org_golang_x_oauth2//:oauth2",
     ],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":actas",
+    visibility = ["//visibility:public"],
+)

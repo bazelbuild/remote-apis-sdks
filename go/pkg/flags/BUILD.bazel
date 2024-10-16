@@ -14,3 +14,9 @@ go_library(
         "@org_golang_google_grpc//keepalive",
     ],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":flags",
+    visibility = ["//visibility:public"],
+)

@@ -13,3 +13,9 @@ go_test(
     embed = [":moreflag"],
     deps = ["@com_github_google_go_cmp//cmp"],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":moreflag",
+    visibility = ["//visibility:public"],
+)

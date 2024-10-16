@@ -21,3 +21,9 @@ go_test(
         "@com_github_klauspost_compress//zstd",
     ],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":reader",
+    visibility = ["//visibility:public"],
+)

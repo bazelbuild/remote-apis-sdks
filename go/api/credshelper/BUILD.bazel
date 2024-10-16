@@ -22,3 +22,9 @@ go_library(
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/api/credshelper",
     visibility = ["//visibility:public"],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":credshelper",
+    visibility = ["//visibility:public"],
+)

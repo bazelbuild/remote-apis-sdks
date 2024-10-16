@@ -12,3 +12,9 @@ go_test(
     srcs = ["singleflightcache_test.go"],
     embed = [":cache"],
 )
+
+alias(
+    name = "go_default_library",
+    actual = ":cache",
+    visibility = ["//visibility:public"],
+)
