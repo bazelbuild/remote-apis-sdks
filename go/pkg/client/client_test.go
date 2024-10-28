@@ -3,12 +3,20 @@ package client
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"os"
 	"path"
 	"testing"
 
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	svpb "github.com/bazelbuild/remote-apis/build/bazel/semver"
+	bspb "google.golang.org/genproto/googleapis/bytestream"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -265,4 +273,99 @@ func TestResourceName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRemoteHeaders(t *testing.T) {
+	one := []byte{1}
+	oneDigest := digest.NewFromBlob(one)
+	want := map[string]string{"x-test": "test123"}
+	checkHeaders := func(t *testing.T, got metadata.MD) {
+		t.Helper()
+		for k, wantV := range want {
+			if gotV, ok := got[k]; !ok {
+				t.Errorf("header %s not seen in server metadata", k)
+			} else if len(gotV) != 1 {
+				t.Errorf("header %s seen %d times", k, len(wantV))
+			} else if gotV[0] != wantV {
+				t.Errorf("got header %s value %q; want %q", k, gotV[0], wantV)
+			}
+		}
+	}
+
+	ctx := context.Background()
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("Cannot listen: %v", err)
+	}
+	defer listener.Close()
+	server := grpc.NewServer()
+	fake := &fakeByteStreamForRemoteHeaders{}
+	bspb.RegisterByteStreamServer(server, fake)
+	repb.RegisterCapabilitiesServer(server, &fakeCapabilitiesForRemoteHeaders{})
+	go server.Serve(listener)
+	defer server.Stop()
+
+	client, err := NewClient(ctx, "instance", DialParams{
+		Service:       listener.Addr().String(),
+		NoSecurity:    true,
+		RemoteHeaders: want,
+	})
+	if err != nil {
+		t.Fatalf("Cannot create client: %v", err)
+	}
+	defer client.Close()
+
+	t.Run("unary", func(t *testing.T) {
+		if _, err := client.WriteBlob(ctx, one); err != nil {
+			t.Fatalf("Writing blob: %v", err)
+		}
+		checkHeaders(t, fake.writeHeaders)
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		if _, _, err := client.ReadBlob(ctx, oneDigest); err != nil {
+			t.Fatalf("Reading blob: %v", err)
+		}
+		checkHeaders(t, fake.readHeaders)
+	})
+}
+
+type fakeByteStreamForRemoteHeaders struct {
+	bspb.UnimplementedByteStreamServer
+	readHeaders, writeHeaders metadata.MD
+}
+
+func (bs *fakeByteStreamForRemoteHeaders) Read(req *bspb.ReadRequest, stream bspb.ByteStream_ReadServer) error {
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if !ok {
+		return status.Error(codes.InvalidArgument, "metadata not found")
+	}
+	bs.readHeaders = md
+	stream.Send(&bspb.ReadResponse{Data: []byte{1}})
+	return nil
+}
+
+func (bs *fakeByteStreamForRemoteHeaders) Write(stream bspb.ByteStream_WriteServer) error {
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if !ok {
+		return status.Error(codes.InvalidArgument, "metadata not found")
+	}
+	bs.writeHeaders = md
+	for {
+		_, err := stream.Recv()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+	}
+	return stream.SendAndClose(&bspb.WriteResponse{})
+}
+
+type fakeCapabilitiesForRemoteHeaders struct {
+	repb.UnimplementedCapabilitiesServer
+}
+
+func (cap *fakeCapabilitiesForRemoteHeaders) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesRequest) (*repb.ServerCapabilities, error) {
+	return &repb.ServerCapabilities{}, nil
 }
