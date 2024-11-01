@@ -71,6 +71,12 @@ func TestMapValueSet(t *testing.T) {
 			wantStr: "lang=cpp,type=compile",
 		},
 		{
+			name:    "ok - multiple equalities",
+			str:     "tag=key=value",
+			wantMap: map[string]string{"tag": "key=value"},
+			wantStr: "tag=key=value",
+		},
+		{
 			name:    "ok - extra comma",
 			str:     "type=compile,",
 			wantMap: map[string]string{"type": "compile"},
@@ -150,10 +156,6 @@ func TestMapValueSetErrors(t *testing.T) {
 		{
 			name: "no key",
 			str:  "=val",
-		},
-		{
-			name: "multiple equalities",
-			str:  "type=a=b",
 		},
 		{
 			name: "duplicate keys",
@@ -252,6 +254,12 @@ func TestListMapValueSet(t *testing.T) {
 			wantStr: "lang=cpp,type=compile",
 		},
 		{
+			name:    "ok - multiple equalities",
+			str:     "tag=a=b",
+			wantMap: map[string][]string{"tag": {"a=b"}},
+			wantStr: "tag=a=b",
+		},
+		{
 			name:    "ok - extra comma",
 			str:     "type=compile,",
 			wantMap: map[string][]string{"type": {"compile"}},
@@ -271,11 +279,6 @@ func TestListMapValueSet(t *testing.T) {
 		{
 			name:    "no key",
 			str:     "=val",
-			wantErr: true,
-		},
-		{
-			name:    "multiple equalities",
-			str:     "type=a=b",
 			wantErr: true,
 		},
 	}

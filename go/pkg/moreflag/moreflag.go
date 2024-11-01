@@ -150,14 +150,14 @@ func parsePairs(s string) ([]string, error) {
 		if p == "" {
 			continue
 		}
-		pair := strings.Split(p, "=")
-		if len(pair) != 2 {
-			return nil, fmt.Errorf("wrong format for key-value pair: %v", p)
+		k, v, ok := strings.Cut(p, "=")
+		if !ok {
+			return nil, fmt.Errorf("wrong format for key=value pair: %v", p)
 		}
-		if pair[0] == "" {
+		if k == "" {
 			return nil, fmt.Errorf("key not provided")
 		}
-		pairs = append(pairs, pair...)
+		pairs = append(pairs, k, v)
 	}
 	return pairs, nil
 }
