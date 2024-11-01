@@ -557,7 +557,7 @@ type DialParams struct {
 
 	// RemoteHeaders specifies additional gRPC metadata headers to be passed with
 	// each RPC. These headers are not meant to be used for authentication.
-	RemoteHeaders map[string]string
+	RemoteHeaders map[string][]string
 }
 
 func createTLSConfig(params DialParams) (*tls.Config, error) {
@@ -659,7 +659,7 @@ func OptsFromParams(ctx context.Context, params DialParams) ([]grpc.DialOption, 
 	}
 
 	if len(params.RemoteHeaders) > 0 {
-		md := metadata.New(params.RemoteHeaders)
+		md := metadata.MD(params.RemoteHeaders)
 		opts = append(
 			opts,
 			grpc.WithChainUnaryInterceptor(func(

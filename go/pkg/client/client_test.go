@@ -12,6 +12,7 @@ import (
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	svpb "github.com/bazelbuild/remote-apis/build/bazel/semver"
+	"github.com/google/go-cmp/cmp"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -278,7 +279,7 @@ func TestResourceName(t *testing.T) {
 func TestRemoteHeaders(t *testing.T) {
 	one := []byte{1}
 	oneDigest := digest.NewFromBlob(one)
-	want := map[string]string{"x-test": "test123"}
+	want := map[string][]string{"x-test": {"test123"}}
 	checkHeaders := func(t *testing.T, got metadata.MD) {
 		t.Helper()
 		for k, wantV := range want {
@@ -286,8 +287,8 @@ func TestRemoteHeaders(t *testing.T) {
 				t.Errorf("header %s not seen in server metadata", k)
 			} else if len(gotV) != 1 {
 				t.Errorf("header %s seen %d times", k, len(wantV))
-			} else if gotV[0] != wantV {
-				t.Errorf("got header %s value %q; want %q", k, gotV[0], wantV)
+			} else if diff := cmp.Diff(gotV, wantV); diff != "" {
+				t.Errorf("got header %s value %q; want %q; diff (-got, +want) %s", k, gotV, wantV, diff)
 			}
 		}
 	}

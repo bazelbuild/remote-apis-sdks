@@ -57,7 +57,7 @@ var (
 	// projects/[PROJECT_ID]/instances/[INSTANCE_NAME] format for Google RBE).
 	Instance = flag.String("instance", "", "The instance ID to target when calling remote execution via gRPC (e.g., projects/$PROJECT/instances/default_instance for Google RBE).")
 	// RemoteHeaders stores additional headers to pass with each RPC.
-	RemoteHeaders map[string]string
+	RemoteHeaders map[string][]string
 	// CASConcurrency specifies the maximum number of concurrent upload & download RPCs that can be in flight.
 	CASConcurrency = flag.Int("cas_concurrency", client.DefaultCASConcurrency, "Num concurrent upload / download RPCs that the SDK is allowed to do.")
 	// MaxConcurrentRequests denotes the maximum number of concurrent RPCs on a single gRPC connection.
@@ -88,7 +88,7 @@ func init() {
 	// WaitExecution, for example.
 	flag.Var((*moreflag.StringMapValue)(&RPCTimeouts), "rpc_timeouts", "Comma-separated key value pairs in the form rpc_name=timeout. The key for default RPC is named default. 0 indicates no timeout. Example: GetActionResult=500ms,Execute=0,default=10s.")
 
-	flag.Var((*moreflag.StringMapValue)(&RemoteHeaders), "remote_headers", "Comma-separated headers to pass with each RPC in the form key=value.")
+	flag.Var((*moreflag.StringListMapValue)(&RemoteHeaders), "remote_headers", "Comma-separated headers to pass with each RPC in the form key=value.")
 }
 
 // NewClientFromFlags connects to a remote execution service and returns a client suitable for higher-level

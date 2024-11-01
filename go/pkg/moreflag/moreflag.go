@@ -61,22 +61,16 @@ func (m *StringMapValue) String() string {
 // Set updates the map with key and value pair(s) in the format key1=value1,key2=value2.
 func (m *StringMapValue) Set(s string) error {
 	*m = make(map[string]string)
-	pairs := strings.Split(s, ",")
-	for _, p := range pairs {
-		if p == "" {
-			continue
+	pairs, err := parsePairs(s)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(pairs); i += 2 {
+		k, v := pairs[i], pairs[i+1]
+		if _, ok := (*m)[k]; ok {
+			return fmt.Errorf("key %v already defined in list of key-value pairs %v", k, s)
 		}
-		pair := strings.Split(p, "=")
-		if len(pair) != 2 {
-			return fmt.Errorf("wrong format for key-value pair: %v", p)
-		}
-		if pair[0] == "" {
-			return fmt.Errorf("key not provided")
-		}
-		if _, ok := (*m)[pair[0]]; ok {
-			return fmt.Errorf("key %v already defined in list of key-value pairs %v", pair[0], s)
-		}
-		(*m)[pair[0]] = pair[1]
+		(*m)[k] = v
 	}
 	return nil
 }
@@ -106,4 +100,64 @@ func (m *StringListValue) Set(s string) error {
 // Get returns the flag value as a list of strings.
 func (m *StringListValue) Get() interface{} {
 	return []string(*m)
+}
+
+// StringListMapValue is like StringMapValue, but it allows a key to be used
+// with multiple values. The command-line syntax is the same: for example,
+// the string key1=a,key1=b,key2=c parses as a map with "key1" having values
+// "a" and "b", and "key2" having the value "c".
+type StringListMapValue map[string][]string
+
+func (m *StringListMapValue) String() string {
+	keys := make([]string, 0, len(*m))
+	for key := range *m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b bytes.Buffer
+	for _, key := range keys {
+		for _, value := range (*m)[key] {
+			if b.Len() > 0 {
+				b.WriteRune(',')
+			}
+			b.WriteString(key)
+			b.WriteRune('=')
+			b.WriteString(value)
+		}
+	}
+	return b.String()
+}
+
+func (m *StringListMapValue) Set(s string) error {
+	*m = make(map[string][]string)
+	pairs, err := parsePairs(s)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(pairs); i += 2 {
+		k, v := pairs[i], pairs[i+1]
+		(*m)[k] = append((*m)[k], v)
+	}
+	return nil
+}
+
+// parsePairs parses a string of the form "key1=value1,key2=value2", returning
+// a slice with an even number of strings like "key1", "value1", "key2",
+// "value2". Pairs are separated by ','; keys and values are separated by '='.
+func parsePairs(s string) ([]string, error) {
+	var pairs []string
+	for _, p := range strings.Split(s, ",") {
+		if p == "" {
+			continue
+		}
+		pair := strings.Split(p, "=")
+		if len(pair) != 2 {
+			return nil, fmt.Errorf("wrong format for key-value pair: %v", p)
+		}
+		if pair[0] == "" {
+			return nil, fmt.Errorf("key not provided")
+		}
+		pairs = append(pairs, pair...)
+	}
+	return pairs, nil
 }
