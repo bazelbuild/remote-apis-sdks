@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "bazelcredswrapper_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/bazelbuild/remote-apis-sdks/go/cmd/bazelcredswrapper",
+    visibility = ["//visibility:private"],
+    deps = ["@com_github_golang_glog//:glog"],
+)
+
+go_binary(
+    name = "bazelcredswrapper",
+    embed = [":bazelcredswrapper_lib"],
+    visibility = ["//visibility:public"],
+)
