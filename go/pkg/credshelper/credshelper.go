@@ -108,6 +108,9 @@ func (ts *externalTokenSource) Token() (*oauth2.Token, error) {
 	if err != nil {
 		return nil, err
 	}
+	if credsOut.tk.AccessToken == "" {
+		return nil, fmt.Errorf("no token was printed by the credentials helper")
+	}
 	log.Infof("'%s' credentials refreshed at %v, expires at %v", ts.credsHelperCmd, time.Now(), credsOut.tk.Expiry)
 	return credsOut.tk, err
 }
@@ -170,7 +173,6 @@ func NewExternalCredentials(credshelper string, credshelperArgs []string) (*Cred
 type credshelperOutput struct {
 	hdrs map[string]string
 	tk   *oauth2.Token
-	rexp time.Time
 }
 
 func runCredsHelperCmd(credsHelperCmd *reusableCmd) (*credshelperOutput, error) {
@@ -202,9 +204,6 @@ func parseTokenExpiryFromOutput(out string) (*credshelperOutput, error) {
 	var jsonOut JSONOut
 	if err := json.Unmarshal([]byte(out), &jsonOut); err != nil {
 		return nil, fmt.Errorf("error while decoding credshelper output:%v", err)
-	}
-	if jsonOut.Token == "" {
-		return nil, fmt.Errorf("no token was printed by the credentials helper")
 	}
 	credsOut.tk = &oauth2.Token{AccessToken: jsonOut.Token}
 	credsOut.hdrs = jsonOut.Headers

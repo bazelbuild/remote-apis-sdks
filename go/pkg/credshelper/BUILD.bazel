@@ -2,32 +2,19 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "credshelper",
-    srcs = [
-        "credshelper.go",
-    ],
+    srcs = ["credshelper.go"],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/credshelper",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/api/credshelper",
-	"//go/pkg/digest",
+        "//go/pkg/digest",
         "@com_github_golang_glog//:glog",
-        "@com_github_hectane_go_acl//:go-acl",
         "@org_golang_google_grpc//credentials/oauth",
-        "@org_golang_google_protobuf//encoding/prototext",
-        "@org_golang_google_protobuf//types/known/timestamppb",
         "@org_golang_x_oauth2//:oauth2",
-        "@org_golang_x_oauth2//google",
     ],
 )
 
 go_test(
     name = "credshelper_test",
-    srcs = [
-        "credshelper_test.go",
-    ],
+    srcs = ["credshelper_test.go"],
     embed = [":credshelper"],
-    deps = [
-        "@com_github_google_go_cmp//cmp",
-        "@org_golang_x_oauth2//:oauth2",
-    ],
 )
