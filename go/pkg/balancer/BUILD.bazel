@@ -1,14 +1,11 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "balancer",
-    srcs = [
-        "roundrobin.go",
-    ],
+    srcs = ["roundrobin.go"],
     importpath = "github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer",
     visibility = ["//visibility:public"],
     deps = [
         "@org_golang_google_grpc//:go_default_library",
     ],
 )
-

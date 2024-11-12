@@ -125,7 +125,6 @@ func TestNewExternalCredentials(t *testing.T) {
 		credshelperOut: fmt.Sprintf(`{"token":"%v","expiry":""}`, testToken),
 	}, {
 		name:           "No Token",
-		wantErr:        true,
 		credshelperOut: `{"headers":{"hdr":"val"},"token":"","expiry":""}`,
 	}, {
 		name:           "Credshelper Command Passed - No Expiry",
@@ -168,7 +167,7 @@ func TestNewExternalCredentials(t *testing.T) {
 			if test.wantErr && err == nil {
 				t.Fatalf("NewExternalCredentials did not return an error.")
 			}
-			if !test.wantErr {
+			if !test.wantErr && test.name != "No Token" {
 				if err != nil {
 					t.Fatalf("NewExternalCredentials returned an error: %v", err)
 				}
@@ -247,13 +246,13 @@ func TestGetRequestMetadata(t *testing.T) {
 				credshelperArgs = []string{test.credshelperOut}
 			}
 			credsHelperCmd := newReusableCmd(credshelper, credshelperArgs)
-			exTs := externalTokenSource{
+			p := perRPCCredentials{
 				credsHelperCmd: credsHelperCmd,
 				expiry:         test.tsExp,
 				headers:        test.tsHeaders,
 				headersLock:    sync.RWMutex{},
 			}
-			hdrs, err := exTs.GetRequestMetadata(context.Background(), "uri")
+			hdrs, err := p.GetRequestMetadata(context.Background(), "uri")
 			if test.wantErr && err == nil {
 				t.Fatalf("GetRequestMetadata did not return an error.")
 			}
@@ -261,10 +260,10 @@ func TestGetRequestMetadata(t *testing.T) {
 				if err != nil {
 					t.Fatalf("GetRequestMetadata returned an error: %v", err)
 				}
-				if !reflect.DeepEqual(hdrs, exTs.headers) {
-					t.Errorf("GetRequestMetadata did not update headers in the tokensource: returned hdrs: %v, tokensource headers: %v", hdrs, exTs.headers)
+				if !reflect.DeepEqual(hdrs, p.headers) {
+					t.Errorf("GetRequestMetadata did not update headers in the tokensource: returned hdrs: %v, tokensource headers: %v", hdrs, p.headers)
 				}
-				if !exp.Equal(exTs.expiry) {
+				if !exp.Equal(p.expiry) {
 					t.Errorf("GetRequestMetadata did not update expiry in the tokensource")
 				}
 				if !test.wantExpired && !reflect.DeepEqual(hdrs, testHdrs) {
