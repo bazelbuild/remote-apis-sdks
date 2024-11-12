@@ -71,6 +71,12 @@ func TestMapValueSet(t *testing.T) {
 			wantStr: "lang=cpp,type=compile",
 		},
 		{
+			name:    "ok - multiple equalities",
+			str:     "tag=key=value",
+			wantMap: map[string]string{"tag": "key=value"},
+			wantStr: "tag=key=value",
+		},
+		{
 			name:    "ok - extra comma",
 			str:     "type=compile,",
 			wantMap: map[string]string{"type": "compile"},
@@ -152,10 +158,6 @@ func TestMapValueSetErrors(t *testing.T) {
 			str:  "=val",
 		},
 		{
-			name: "multiple equalities",
-			str:  "type=a=b",
-		},
-		{
 			name: "duplicate keys",
 			str:  "type=compile,type=link",
 		},
@@ -221,6 +223,83 @@ func TestListValueSet(t *testing.T) {
 			got := lv.String()
 			if test.wantStr != got {
 				t.Errorf("StringListValue.String() produced diff. Want %s, got %s", test.wantStr, got)
+			}
+		})
+	}
+}
+
+func TestListMapValueSet(t *testing.T) {
+	tests := []struct {
+		name    string
+		str     string
+		wantMap map[string][]string
+		wantStr string
+		wantErr bool
+	}{
+		{
+			name:    "empty",
+			str:     "",
+			wantMap: map[string][]string{},
+		},
+		{
+			name:    "ok - single pair",
+			str:     "type=compile",
+			wantMap: map[string][]string{"type": {"compile"}},
+			wantStr: "type=compile",
+		},
+		{
+			name:    "ok - multiple pairs",
+			str:     "type=compile,lang=cpp",
+			wantMap: map[string][]string{"type": {"compile"}, "lang": {"cpp"}},
+			wantStr: "lang=cpp,type=compile",
+		},
+		{
+			name:    "ok - multiple equalities",
+			str:     "tag=a=b",
+			wantMap: map[string][]string{"tag": {"a=b"}},
+			wantStr: "tag=a=b",
+		},
+		{
+			name:    "ok - extra comma",
+			str:     "type=compile,",
+			wantMap: map[string][]string{"type": {"compile"}},
+			wantStr: "type=compile",
+		},
+		{
+			name:    "ok - duplicate key",
+			str:     "tag=b,tag=a",
+			wantMap: map[string][]string{"tag": {"b", "a"}},
+			wantStr: "tag=b,tag=a",
+		},
+		{
+			name:    "bad format",
+			str:     "type=compile,langcpp",
+			wantErr: true,
+		},
+		{
+			name:    "no key",
+			str:     "=val",
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var m map[string][]string
+			slmv := (*StringListMapValue)(&m)
+			if err := slmv.Set(test.str); err == nil && test.wantErr {
+				t.Fatalf("StringListMapValue.Set(%v) succeeded unexpectedly", test.str)
+			} else if err != nil && !test.wantErr {
+				t.Fatalf("StringListMapValue.Set(%v) returned error: %v", test.str, err)
+			}
+			if test.wantErr {
+				return
+			}
+			if diff := cmp.Diff(test.wantMap, m); diff != "" {
+				t.Errorf("StringListMapValue.Set(%v) produced diff in map, (-want, +got): %s", test.str, diff)
+			}
+			got := slmv.String()
+			if test.wantStr != got {
+				t.Errorf("StringListMapValue.String() produced diff. Want %s, got %s", test.wantStr, got)
 			}
 		})
 	}

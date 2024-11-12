@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"errors"
+
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -26,6 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	// Redundant imports are required for the google3 mirror. Aliases should not be changed.
@@ -189,6 +191,7 @@ type Client struct {
 	casDownloaders      *semaphore.Weighted
 	casDownloadRequests chan *downloadRequest
 	rpcTimeouts         RPCTimeouts
+	remoteHeaders       map[string]string
 	creds               credentials.PerRPCCredentials
 	uploadOnce          sync.Once
 	downloadOnce        sync.Once
@@ -551,6 +554,10 @@ type DialParams struct {
 	//
 	// If this is specified, TLSClientAuthCert must also be specified.
 	TLSClientAuthKey string
+
+	// RemoteHeaders specifies additional gRPC metadata headers to be passed with
+	// each RPC. These headers are not meant to be used for authentication.
+	RemoteHeaders map[string][]string
 }
 
 func createTLSConfig(params DialParams) (*tls.Config, error) {
@@ -649,6 +656,32 @@ func OptsFromParams(ctx context.Context, params DialParams) ([]grpc.DialOption, 
 			return nil, authUsed, fmt.Errorf("could not create TLS config: %v", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	}
+
+	if len(params.RemoteHeaders) > 0 {
+		md := metadata.MD(params.RemoteHeaders)
+		opts = append(
+			opts,
+			grpc.WithChainUnaryInterceptor(func(
+				ctx context.Context,
+				method string,
+				req, reply any,
+				cc *grpc.ClientConn,
+				invoker grpc.UnaryInvoker,
+				opts ...grpc.CallOption) error {
+				ctx = metadata.NewOutgoingContext(ctx, md)
+				return invoker(ctx, method, req, reply, cc, opts...)
+			}),
+			grpc.WithChainStreamInterceptor(func(
+				ctx context.Context,
+				desc *grpc.StreamDesc,
+				cc *grpc.ClientConn,
+				method string,
+				streamer grpc.Streamer,
+				opts ...grpc.CallOption) (grpc.ClientStream, error) {
+				ctx = metadata.NewOutgoingContext(ctx, md)
+				return streamer(ctx, desc, cc, method, opts...)
+			}))
 	}
 
 	return opts, authUsed, nil
