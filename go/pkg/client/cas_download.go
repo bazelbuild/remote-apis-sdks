@@ -192,6 +192,10 @@ type CompressedBlobInfo struct {
 	Data           []byte
 }
 
+// BatchDownloadBlobsWithStats downloads a number CompressedBlobInfos from the CAS to memory.
+// They must collectively be below the maximum total size for a batch read, which
+// is about 4 MB (see MaxBatchSize). Digests must be computed in advance by the caller.
+// In case multiple errors occur during the blob read, the last error will be returned.
 func (c *Client) BatchDownloadBlobsWithStats(ctx context.Context, dgs []digest.Digest) (map[digest.Digest]CompressedBlobInfo, error) {
 	if len(dgs) > int(c.MaxBatchDigests) {
 		return nil, fmt.Errorf("batch read of %d total blobs exceeds maximum of %d", len(dgs), c.MaxBatchDigests)

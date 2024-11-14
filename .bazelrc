@@ -1,0 +1,2 @@
+# We have migrated to bzlmod, so ensure that it is enabled.
+common --enable_bzlmod=true

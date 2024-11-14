@@ -170,13 +170,14 @@ func (s *Exec) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_Execute
 	return nil
 }
 
+// WaitExecution implements a stub implementation of client.WaitExecution
 func (s *Exec) WaitExecution(req *repb.WaitExecutionRequest, stream regrpc.Execution_WaitExecutionServer) (err error) {
 	if req.Name != fakeOPName(s.adg) {
 		return status.Errorf(codes.NotFound, "requested operation %v not found", req.Name)
 	}
-	if op, err := s.fakeExecution(s.adg, true); err != nil {
+	op, err := s.fakeExecution(s.adg, true)
+	if err != nil {
 		return err
-	} else {
-		return stream.Send(op)
 	}
+	return stream.Send(op)
 }
