@@ -18,6 +18,7 @@ import (
 
 	log "github.com/golang/glog"
 	"golang.org/x/oauth2"
+	"google.golang.org/grpc/credentials"
 	grpcOauth "google.golang.org/grpc/credentials/oauth"
 )
 
@@ -77,6 +78,16 @@ func (r *reusableCmd) Digest() digest.Digest {
 // Credentials provides auth functionalities using an external credentials helper
 type Credentials struct {
 	tokenSource    *grpcOauth.TokenSource
+	perRPCCreds    *perRPCCredentials
+	credsHelperCmd *reusableCmd
+}
+
+// perRPCCredentials fullfills the grpc.Credentials.PerRPCCredentials interface
+// to provde auth functionalities with headers
+type perRPCCredentials struct {
+	headers        map[string]string
+	expiry         time.Time
+	headersLock    sync.RWMutex
 	credsHelperCmd *reusableCmd
 }
 
@@ -86,9 +97,6 @@ type Credentials struct {
 // oauth2.TokenSource and credentials.PerRPCCredentials interfaces.
 type externalTokenSource struct {
 	credsHelperCmd *reusableCmd
-	headers        map[string]string
-	expiry         time.Time
-	headersLock    sync.RWMutex
 }
 
 // TokenSource returns a token source for this credentials instance.
@@ -97,6 +105,20 @@ func (c *Credentials) TokenSource() *grpcOauth.TokenSource {
 		return nil
 	}
 	return c.tokenSource
+}
+
+// PerRPCCreds returns a perRPCCredentials for this credentials instance.
+func (c *Credentials) PerRPCCreds() credentials.PerRPCCredentials {
+	if c == nil {
+		return nil
+	}
+	// If no perRPCCreds exist for this Credentials object, then
+	// grpcOauth.TokenSource will do since it implements the same interface
+	// and some credentials helpers may only provide a token without headers
+	if c.perRPCCreds == nil {
+		return c.TokenSource()
+	}
+	return c.perRPCCreds
 }
 
 // Token retrieves an oauth2 token from the external tokensource.
@@ -108,27 +130,30 @@ func (ts *externalTokenSource) Token() (*oauth2.Token, error) {
 	if err != nil {
 		return nil, err
 	}
+	if credsOut.tk.AccessToken == "" {
+		return nil, fmt.Errorf("no token was printed by the credentials helper")
+	}
 	log.Infof("'%s' credentials refreshed at %v, expires at %v", ts.credsHelperCmd, time.Now(), credsOut.tk.Expiry)
 	return credsOut.tk, err
 }
 
 // GetRequestMetadata gets the current request metadata, refreshing tokens if required.
-func (ts *externalTokenSource) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
-	ts.headersLock.RLock()
-	defer ts.headersLock.RUnlock()
-	if ts.expiry.Before(nowFn().Add(-expiryBuffer)) {
-		credsOut, err := runCredsHelperCmd(ts.credsHelperCmd)
+func (p *perRPCCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	p.headersLock.RLock()
+	defer p.headersLock.RUnlock()
+	if p.expiry.Before(nowFn().Add(-expiryBuffer)) {
+		credsOut, err := runCredsHelperCmd(p.credsHelperCmd)
 		if err != nil {
 			return nil, err
 		}
-		ts.expiry = credsOut.tk.Expiry
-		ts.headers = credsOut.hdrs
+		p.expiry = credsOut.tk.Expiry
+		p.headers = credsOut.hdrs
 	}
-	return ts.headers, nil
+	return p.headers, nil
 }
 
 // RequireTransportSecurity indicates whether the credentials require transport security.
-func (ts *externalTokenSource) RequireTransportSecurity() bool {
+func (p *perRPCCredentials) RequireTransportSecurity() bool {
 	return true
 }
 
@@ -149,20 +174,29 @@ func NewExternalCredentials(credshelper string, credshelperArgs []string) (*Cred
 	c := &Credentials{
 		credsHelperCmd: credsHelperCmd,
 	}
-	baseTS := &externalTokenSource{
-		credsHelperCmd: credsHelperCmd,
+	if len(credsOut.hdrs) != 0 {
+		c.perRPCCreds = &perRPCCredentials{
+			headers:        credsOut.hdrs,
+			expiry:         credsOut.tk.Expiry,
+			credsHelperCmd: credsHelperCmd,
+		}
 	}
-	c.tokenSource = &grpcOauth.TokenSource{
-		// Wrap the base token source with a ReuseTokenSource so that we only
-		// generate new credentials when the current one is about to expire.
-		// This is needed because retrieving the token is expensive and some
-		// token providers have per hour rate limits.
-		TokenSource: oauth2.ReuseTokenSourceWithExpiry(
-			credsOut.tk,
-			baseTS,
-			// Refresh tokens a bit early to be safe
-			expiryBuffer,
-		),
+	if credsOut.tk.AccessToken != "" {
+		baseTS := &externalTokenSource{
+			credsHelperCmd: credsHelperCmd,
+		}
+		c.tokenSource = &grpcOauth.TokenSource{
+			// Wrap the base token source with a ReuseTokenSource so that we only
+			// generate new credentials when the current one is about to expire.
+			// This is needed because retrieving the token is expensive and some
+			// token providers have per hour rate limits.
+			TokenSource: oauth2.ReuseTokenSourceWithExpiry(
+				credsOut.tk,
+				baseTS,
+				// Refresh tokens a bit early to be safe
+				expiryBuffer,
+			),
+		}
 	}
 	return c, nil
 }
@@ -170,7 +204,6 @@ func NewExternalCredentials(credshelper string, credshelperArgs []string) (*Cred
 type credshelperOutput struct {
 	hdrs map[string]string
 	tk   *oauth2.Token
-	rexp time.Time
 }
 
 func runCredsHelperCmd(credsHelperCmd *reusableCmd) (*credshelperOutput, error) {
@@ -203,8 +236,8 @@ func parseTokenExpiryFromOutput(out string) (*credshelperOutput, error) {
 	if err := json.Unmarshal([]byte(out), &jsonOut); err != nil {
 		return nil, fmt.Errorf("error while decoding credshelper output:%v", err)
 	}
-	if jsonOut.Token == "" {
-		return nil, fmt.Errorf("no token was printed by the credentials helper")
+	if jsonOut.Token == "" && len(jsonOut.Headers) == 0 {
+		return nil, fmt.Errorf("both token and headers are empty, invalid credentials")
 	}
 	credsOut.tk = &oauth2.Token{AccessToken: jsonOut.Token}
 	credsOut.hdrs = jsonOut.Headers

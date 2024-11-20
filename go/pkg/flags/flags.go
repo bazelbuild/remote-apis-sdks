@@ -125,7 +125,7 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		if err != nil {
 			return nil, fmt.Errorf("credentials helper failed. Please try again or use another method of authentication:%v", err)
 		}
-		perRPCCreds = &client.PerRPCCreds{Creds: creds.TokenSource()}
+		perRPCCreds = &client.PerRPCCreds{Creds: creds.PerRPCCreds()}
 	}
 	opts = tOpts
 
