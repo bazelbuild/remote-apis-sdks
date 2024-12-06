@@ -1,5 +1,4 @@
 // Binary bazelcredswrapper is used to authenticate using bazel style credentials helper with the remote-apis-sdks
-
 package main
 
 import (
