@@ -10,9 +10,11 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	regrpc "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	svpb "github.com/bazelbuild/remote-apis/build/bazel/semver"
 	"github.com/google/go-cmp/cmp"
+	bsgrpc "google.golang.org/genproto/googleapis/bytestream"
 	bspb "google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -301,8 +303,8 @@ func TestRemoteHeaders(t *testing.T) {
 	defer listener.Close()
 	server := grpc.NewServer()
 	fake := &fakeByteStreamForRemoteHeaders{}
-	bspb.RegisterByteStreamServer(server, fake)
-	repb.RegisterCapabilitiesServer(server, &fakeCapabilitiesForRemoteHeaders{})
+	bsgrpc.RegisterByteStreamServer(server, fake)
+	regrpc.RegisterCapabilitiesServer(server, &fakeCapabilitiesForRemoteHeaders{})
 	go server.Serve(listener)
 	defer server.Stop()
 
@@ -332,11 +334,11 @@ func TestRemoteHeaders(t *testing.T) {
 }
 
 type fakeByteStreamForRemoteHeaders struct {
-	bspb.UnimplementedByteStreamServer
+	bsgrpc.UnimplementedByteStreamServer
 	readHeaders, writeHeaders metadata.MD
 }
 
-func (bs *fakeByteStreamForRemoteHeaders) Read(req *bspb.ReadRequest, stream bspb.ByteStream_ReadServer) error {
+func (bs *fakeByteStreamForRemoteHeaders) Read(req *bspb.ReadRequest, stream bsgrpc.ByteStream_ReadServer) error {
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return status.Error(codes.InvalidArgument, "metadata not found")
@@ -346,7 +348,7 @@ func (bs *fakeByteStreamForRemoteHeaders) Read(req *bspb.ReadRequest, stream bsp
 	return nil
 }
 
-func (bs *fakeByteStreamForRemoteHeaders) Write(stream bspb.ByteStream_WriteServer) error {
+func (bs *fakeByteStreamForRemoteHeaders) Write(stream bsgrpc.ByteStream_WriteServer) error {
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return status.Error(codes.InvalidArgument, "metadata not found")
@@ -364,7 +366,7 @@ func (bs *fakeByteStreamForRemoteHeaders) Write(stream bspb.ByteStream_WriteServ
 }
 
 type fakeCapabilitiesForRemoteHeaders struct {
-	repb.UnimplementedCapabilitiesServer
+	regrpc.UnimplementedCapabilitiesServer
 }
 
 func (cap *fakeCapabilitiesForRemoteHeaders) GetCapabilities(ctx context.Context, req *repb.GetCapabilitiesRequest) (*repb.ServerCapabilities, error) {

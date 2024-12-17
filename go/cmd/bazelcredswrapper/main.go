@@ -20,9 +20,7 @@ var (
 )
 
 func main() {
-	defer log.Flush()
 	flag.Parse()
-	log.Flush()
 	var err error
 	if *credsPath == "" {
 		log.Errorf("No credentials helper path provided.")

@@ -141,6 +141,10 @@ func (m *StringListMapValue) Set(s string) error {
 	return nil
 }
 
+func (m *StringListMapValue) Get() interface{} {
+	return map[string][]string(*m)
+}
+
 // parsePairs parses a string of the form "key1=value1,key2=value2", returning
 // a slice with an even number of strings like "key1", "value1", "key2",
 // "value2". Pairs are separated by ','; keys and values are separated by '='.
