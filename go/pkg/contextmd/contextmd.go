@@ -125,15 +125,20 @@ func MergeMetadata(metas ...*Metadata) *Metadata {
 		return &Metadata{}
 	}
 
-	md := metas[0]
 	actionIds := make(map[string]struct{}, len(metas))
 	invocationIds := make(map[string]struct{}, len(metas))
 	for _, m := range metas {
 		actionIds[m.ActionID] = struct{}{}
 		invocationIds[m.InvocationID] = struct{}{}
 	}
-	md.ActionID = mergeSet(actionIds)
-	md.InvocationID = mergeSet(invocationIds)
+	md := &Metadata{
+		ActionID:                mergeSet(actionIds),
+		InvocationID:            mergeSet(invocationIds),
+		CorrelatedInvocationsID: metas[0].CorrelatedInvocationsID,
+		ToolName:                metas[0].ToolName,
+		ToolVersion:             metas[0].ToolVersion,
+	}
+
 	return md
 }
 
