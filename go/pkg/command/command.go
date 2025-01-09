@@ -597,7 +597,9 @@ func (c *Command) ToREProto(useOutputPathsField bool) *repb.Command {
 	// In v2.1 of the RE API the `output_{files, directories}` fields were
 	// replaced by a single field: `output_paths`.
 	if useOutputPathsField {
-		cmdPb.OutputPaths = append(c.OutputFiles, c.OutputDirs...)
+		cmdPb.OutputPaths = make([]string, 0, len(c.OutputFiles)+len(c.OutputDirs))
+		cmdPb.OutputPaths = append(cmdPb.OutputPaths, c.OutputFiles...)
+		cmdPb.OutputPaths = append(cmdPb.OutputPaths, c.OutputDirs...)
 		sort.Strings(cmdPb.OutputPaths)
 	} else {
 		cmdPb.OutputFiles = make([]string, len(c.OutputFiles))
