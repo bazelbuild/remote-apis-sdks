@@ -473,3 +473,12 @@ func (c ExecutionCacheHit) apply(ac *repb.ActionResult, s *Server, execRoot stri
 	s.Exec.Cached = bool(c)
 	return nil
 }
+
+// AuxiliaryMetadata replaces ExecutionMetadata.AuxiliaryMetadata
+type AuxiliaryMetadata []*anypb.Any
+
+// Apply puts the action auxiliary metadata in the given ActionResult the beginning of the list.
+func (o AuxiliaryMetadata) apply(ac *repb.ActionResult, s *Server, execRoot string) error {
+	ac.ExecutionMetadata.AuxiliaryMetadata = o
+	return nil
+}
