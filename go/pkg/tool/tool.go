@@ -505,6 +505,10 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 			cmdArgs[i] = fmt.Sprintf("'%s'", arg)
 			continue
 		}
+		if strings.HasPrefix(arg, "--cfg") {
+			cmdArgs[i] = fmt.Sprintf("'%s'", arg)
+			continue
+		}
 		cmdArgs[i] = arg
 	}
 	execCmd := strings.Join(cmdArgs, " ")

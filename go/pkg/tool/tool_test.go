@@ -144,7 +144,7 @@ func TestTool_DownloadAction(t *testing.T) {
 	e, cleanup := fakes.NewTestEnv(t)
 	defer cleanup()
 	cmd := &command.Command{
-		Args:        []string{"foo", "bar", "baz"},
+		Args:        []string{"foo", "bar", "baz", "@rust_api_level_cfg_flags.txt", "--cfg=feature=\"debug\"", "--cfg=__rust_toolchain=\"ZYWVoLo8XHwkRcwBUtl83-8E559gSwiuYrDOsvNULggC"},
 		ExecRoot:    e.ExecRoot,
 		InputSpec:   &command.InputSpec{Inputs: []string{"i1", "a/b/i2"}, InputNodeProperties: map[string]*cpb.NodeProperties{"i1": fooProperties}},
 		OutputFiles: []string{"a/b/out"},
@@ -162,7 +162,7 @@ func TestTool_DownloadAction(t *testing.T) {
 	}
 
 	reCmdPb := &repb.Command{
-		Arguments:   []string{"foo", "bar", "baz"},
+		Arguments:   []string{"foo", "bar", "baz", "@rust_api_level_cfg_flags.txt", "--cfg=feature=\"debug\"", "--cfg=__rust_toolchain=\"ZYWVoLo8XHwkRcwBUtl83-8E559gSwiuYrDOsvNULggC"},
 		OutputFiles: []string{"a/b/out"},
 		Platform: &repb.Platform{
 			Properties: []*repb.Platform_Property{
@@ -201,6 +201,19 @@ func TestTool_DownloadAction(t *testing.T) {
 		{
 			path:     "input/a/b/i2",
 			contents: "i2",
+		},
+		// Note that we have to use proper quotes around the --cfg args' key-value
+		// pairs, these are valid examples: '--cfg=key="value"', --cfg='key="value"'
+		// and --cfg=key=\"value\" but --cfg=key="value" is invalid.
+		{
+			path: "run_command.sh",
+			contents: fmt.Sprintf(`#!/bin/bash
+
+# This script is meant to be called by %s/run_locally.sh.
+mkdir -p a/b
+foo bar baz @rust_api_level_cfg_flags.txt '--cfg=feature="debug"' '--cfg=__rust_toolchain="ZYWVoLo8XHwkRcwBUtl83-8E559gSwiuYrDOsvNULggC'
+bash
+`, tmpDir),
 		},
 	}
 	for _, ec := range expectedContents {
