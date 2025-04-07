@@ -1,5 +1,7 @@
 module github.com/bazelbuild/remote-apis-sdks
 
+// When you update the go version here, you have to also update the 
+// go version in the .github/workflows/golangci-lint.yml file.
 go 1.20
 
 require (
