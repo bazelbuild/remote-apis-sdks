@@ -182,7 +182,7 @@ func (c *Client) readStreamed(ctx context.Context, name string, offset, limit in
 			break
 		}
 		if err != nil {
-			return 0, err
+			return n, err
 		}
 		log.V(3).Infof("Read: resource:%s offset:%d len(data):%d", name, offset, len(resp.Data))
 		nm, err := w.Write(resp.Data)
