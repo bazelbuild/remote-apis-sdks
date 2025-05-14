@@ -196,6 +196,7 @@ func TestGetRequestMetadata(t *testing.T) {
 	expiredHdrs := map[string]string{"expired": "true"}
 	testHdrs := map[string]string{"expired": "false"}
 	expiredExp := time.Now().Add(-time.Hour).Truncate(time.Second)
+	aboutToExpire := time.Now().Add(time.Minute).Truncate(time.Second)
 	exp := time.Now().Add(time.Hour).Truncate(time.Second)
 	unixExp := exp.Format(time.UnixDate)
 	tests := []struct {
@@ -212,6 +213,12 @@ func TestGetRequestMetadata(t *testing.T) {
 	}, {
 		name:           "Creds Expired: Credshelper Successful",
 		tsExp:          expiredExp,
+		tsHeaders:      expiredHdrs,
+		wantExpired:    true,
+		credshelperOut: fmt.Sprintf(`{"headers":{"expired":"false"},"token":"%v","expiry":"%v"}`, testToken, unixExp),
+	}, {
+		name:           "Creds About to Expire: Credshelper Successful",
+		tsExp:          aboutToExpire,
 		tsHeaders:      expiredHdrs,
 		wantExpired:    true,
 		credshelperOut: fmt.Sprintf(`{"headers":{"expired":"false"},"token":"%v","expiry":"%v"}`, testToken, unixExp),
