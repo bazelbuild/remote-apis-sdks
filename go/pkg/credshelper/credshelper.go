@@ -141,7 +141,7 @@ func (ts *externalTokenSource) Token() (*oauth2.Token, error) {
 func (p *perRPCCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	p.headersLock.RLock()
 	defer p.headersLock.RUnlock()
-	if p.expiry.Before(nowFn().Add(-expiryBuffer)) {
+	if p.expiry.Before(nowFn().Add(expiryBuffer)) {
 		credsOut, err := runCredsHelperCmd(p.credsHelperCmd)
 		if err != nil {
 			return nil, err
