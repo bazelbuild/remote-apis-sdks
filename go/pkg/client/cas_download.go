@@ -481,6 +481,12 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 			IsExecutable: file.IsExecutable,
 		}
 	}
+	for _, sm := range ar.OutputSymlinks {
+		outs[sm.Path] = &TreeOutput{
+			Path:          sm.Path,
+			SymlinkTarget: sm.Target,
+		}
+	}
 	for _, sm := range ar.OutputFileSymlinks {
 		outs[sm.Path] = &TreeOutput{
 			Path:          sm.Path,
