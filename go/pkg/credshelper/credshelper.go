@@ -87,7 +87,7 @@ type Credentials struct {
 type perRPCCredentials struct {
 	headers        map[string]string
 	expiry         time.Time
-	headersLock    sync.RWMutex
+	mu             sync.Mutex
 	credsHelperCmd *reusableCmd
 }
 
@@ -139,8 +139,8 @@ func (ts *externalTokenSource) Token() (*oauth2.Token, error) {
 
 // GetRequestMetadata gets the current request metadata, refreshing tokens if required.
 func (p *perRPCCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
-	p.headersLock.RLock()
-	defer p.headersLock.RUnlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.expiry.Before(nowFn().Add(expiryBuffer)) {
 		credsOut, err := runCredsHelperCmd(p.credsHelperCmd)
 		if err != nil {

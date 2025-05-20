@@ -18,4 +18,5 @@ go_test(
     name = "credshelper_test",
     srcs = ["credshelper_test.go"],
     embed = [":credshelper"],
+    deps = ["@org_golang_x_sync//errgroup"],
 )
