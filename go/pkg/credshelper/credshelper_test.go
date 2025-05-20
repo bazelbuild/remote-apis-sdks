@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func TestExternalToken(t *testing.T) {
@@ -257,7 +258,6 @@ func TestGetRequestMetadata(t *testing.T) {
 				credsHelperCmd: credsHelperCmd,
 				expiry:         test.tsExp,
 				headers:        test.tsHeaders,
-				headersLock:    sync.RWMutex{},
 			}
 			hdrs, err := p.GetRequestMetadata(context.Background(), "uri")
 			if test.wantErr && err == nil {
@@ -281,6 +281,54 @@ func TestGetRequestMetadata(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetRequestMetadata_Concurrent(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip()
+	}
+	testToken := "token"
+	testHdrs := map[string]string{"expired": "false"}
+	aboutToExpire := time.Now().Add(time.Minute).Truncate(time.Second)
+	exp := time.Now().Add(time.Hour).Truncate(time.Second)
+	unixExp := exp.Format(time.UnixDate)
+	callsFile := filepath.Join(t.TempDir(), "calls.txt")
+	credsHelperScript := fmt.Sprintf(`
+	echo 1 > %v
+	sleep 5
+	echo '{"headers":{"expired":"false"},"token":"%v","expiry":"%v"}'
+`, callsFile, testToken, unixExp)
+	scriptFile := filepath.Join(t.TempDir(), "script.sh")
+	if err := os.WriteFile(scriptFile, []byte(credsHelperScript), 0755); err != nil {
+		t.Fatalf("Unable to write to file %v: %v", scriptFile, err)
+	}
+	credshelper := "bash"
+	credshelperArgs := []string{"-c", scriptFile}
+
+	credsHelperCmd := newReusableCmd(credshelper, credshelperArgs)
+	p := perRPCCredentials{
+		credsHelperCmd: credsHelperCmd,
+		expiry:         aboutToExpire,
+		headers:        testHdrs,
+	}
+	eg, eCtx := errgroup.WithContext(context.Background())
+	for i := 0; i < 10; i++ {
+		eg.Go(func() error {
+			_, err := p.GetRequestMetadata(eCtx, "uri")
+			return err
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		t.Errorf("GetRequestMetadata returned an error: %v", err)
+	}
+	callsBlob, err := os.ReadFile(callsFile)
+	if err != nil {
+		t.Fatal("Failed to read calls file")
+	}
+	wantCalls := "1\n"
+	if string(callsBlob) != wantCalls {
+		t.Errorf("Calls file had unexpected content, got: %q, want: %q", callsBlob, wantCalls)
 	}
 }
 
