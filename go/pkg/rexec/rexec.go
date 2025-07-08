@@ -554,6 +554,7 @@ func (ec *Context) DownloadSpecifiedOutputs(outs map[string]*rc.TreeOutput, outD
 func (ec *Context) GetFlattenedOutputs() (map[string]*rc.TreeOutput, error) {
 	out, err := ec.client.GrpcClient.FlattenActionOutputs(ec.ctx, ec.resPb)
 	if err != nil {
+		ec.Result = command.NewRemoteErrorResult(err)
 		return nil, fmt.Errorf("Failed to flatten outputs: %v", err)
 	}
 	return out, nil
