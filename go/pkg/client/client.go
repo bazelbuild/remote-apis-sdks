@@ -473,7 +473,7 @@ func (p *PerRPCCreds) Apply(c *Client) {
 // ExecutionPriority sets the priority to send to the server when executing actions.
 type ExecutionPriority int32
 
-// Apply saves the per-RPC creds in the Client.
+// Apply saves execution priority in the Client.
 func (p ExecutionPriority) Apply(c *Client) {
 	c.ExecutionPriority = p
 }
