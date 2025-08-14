@@ -90,6 +90,15 @@ type UploadInput struct {
 	u                   *uploader
 }
 
+// UploadBlob specifies an in-memory blob to upload.
+type UploadBlob struct {
+	// Title is only used for diagnostic messages.
+	Title string
+
+	// Contents is the blob to upload.
+	Contents []byte
+}
+
 // Digest returns the digest computed for a file/dir.
 // The relPath is relative to UploadInput.Path. Use "." for the digest of the
 // UploadInput.Path itself.
@@ -315,17 +324,17 @@ type UploadResult struct {
 	u     *uploader
 }
 
-// Upload uploads all files/directories specified by inputC.
+// Upload uploads all files/directories specified by inputC, and blobs specified by blobInputC.
 //
 // Upload assumes ownership of UploadInputs received from inputC.
 // They must not be mutated after sending.
 //
-// Close inputC to indicate that there are no more files/dirs to upload.
-// When inputC is closed, Upload finishes uploading the remaining files/dirs and
-// exits successfully.
+// Close inputC and blobInputC to indicate that there are no more files/dirs/blobs to upload.
+// When inputC and blobInputC are closed, Upload finishes uploading the remaining files/dirs/blobs
+// and exits successfully.
 //
 // If ctx is canceled, the Upload returns with an error.
-func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput) (*UploadResult, error) {
+func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput, blobInputC <-chan *UploadBlob) (*UploadResult, error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
 	defer eg.Wait()
@@ -363,7 +372,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 	u.batchBundler.BundleByteLimit = c.Config.BatchUpdateBlobs.MaxSizeBytes - int(marshalledFieldSize(int64(len(c.InstanceName)))) - 1000
 	u.batchBundler.BundleCountThreshold = c.Config.BatchUpdateBlobs.MaxItems
 
-	// Start processing path specs.
+	// Start processing path specs and input blobs.
 	eg.Go(func() error {
 		// Before exiting this main goroutine, ensure all the work has been completed.
 		// Just waiting for u.eg isn't enough because some work may be temporarily
@@ -375,21 +384,55 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 			u.batchBundler.Flush() // only after wgChecks is done.
 		}()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case in, ok := <-inputC:
-				if !ok {
-					return nil
-				}
-				log.Infof("start startProcessing %s", in.Path)
-				if err := u.startProcessing(ctx, in); err != nil {
-					return err
-				}
-				log.Infof("finish startProcessing %s", in.Path)
+		ueg, ctx := errgroup.WithContext(ctx)
+
+		// Process path specs.
+		ueg.Go(func() error {
+			if inputC == nil {
+				return nil
 			}
-		}
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case in, ok := <-inputC:
+					if !ok {
+						return nil
+					}
+					log.Infof("start startProcessing %s", in.Path)
+					if err := u.startProcessing(ctx, in); err != nil {
+						return err
+					}
+					log.Infof("finish startProcessing %s", in.Path)
+				}
+			}
+			return nil
+		})
+
+		// Process blobs.
+		ueg.Go(func() error {
+			if blobInputC == nil {
+				return nil
+			}
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case in, ok := <-blobInputC:
+					if !ok {
+						return nil
+					}
+					log.Infof("start startProcessing %s", in.Title)
+					if err := u.startProcessingBlob(ctx, in); err != nil {
+						return err
+					}
+					log.Infof("finish startProcessing %s", in.Title)
+				}
+			}
+			return nil
+		})
+
+		return ueg.Wait()
 	})
 
 	return &UploadResult{Stats: u.stats, u: u}, eg.Wait()
@@ -495,6 +538,10 @@ func (u *uploader) startProcessing(ctx context.Context, in *UploadInput) error {
 		return nil
 	})
 	return nil
+}
+
+func (u *uploader) startProcessingBlob(ctx context.Context, in *UploadBlob) error {
+	return u.scheduleCheck(ctx, uploadItemFromBlob(in.Title, in.Contents))
 }
 
 // makeFSCacheKey returns a key for u.fsCache.

@@ -304,7 +304,7 @@ func (c *Client) UploadBlobV2(ctx context.Context, path string) error {
 	})
 
 	eg.Go(func() error {
-		_, err := casC.Upload(ctx, cas.UploadOptions{}, inputC)
+		_, err := casC.Upload(ctx, cas.UploadOptions{}, inputC, nil)
 		return err
 	})
 

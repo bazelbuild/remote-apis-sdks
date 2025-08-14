@@ -2,6 +2,7 @@ package cas
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -147,6 +148,7 @@ func TestFS(t *testing.T) {
 	tests := []struct {
 		desc                string
 		inputs              []*UploadInput
+		blobs               [][]byte
 		wantDigests         []digest.Digest
 		wantScheduledChecks []*uploadItem
 		wantErr             error
@@ -303,7 +305,7 @@ func TestFS(t *testing.T) {
 			client.Config.LargeFileThreshold = 10
 			client.init()
 
-			_, err := client.Upload(ctx, tc.opt, uploadInputChanFrom(tc.inputs...))
+			_, err := client.Upload(ctx, tc.opt, uploadInputChanFrom(tc.inputs...), uploadBlobChanFrom(tc.blobs...))
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("error mismatch: want %q, got %q", tc.wantErr, err)
@@ -395,7 +397,7 @@ func TestDigest(t *testing.T) {
 		}
 	}
 
-	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(uploadInputs...)); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(uploadInputs...), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -477,7 +479,7 @@ func TestSmallFiles(t *testing.T) {
 		&UploadInput{Path: filepath.Join(tmpDir, "c")},
 		&UploadInput{Path: filepath.Join(tmpDir, "d")},
 	)
-	if _, err := client.Upload(ctx, UploadOptions{}, inputC); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, inputC, nil); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 
@@ -553,7 +555,7 @@ func TestStreaming(t *testing.T) {
 
 	res, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(
 		&UploadInput{Path: largeFilePath}, // large file
-	))
+	), nil)
 	if err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
@@ -577,7 +579,7 @@ func TestStreaming(t *testing.T) {
 	}
 
 	// Upload the large file again.
-	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(&UploadInput{Path: largeFilePath})); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(&UploadInput{Path: largeFilePath}), nil); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 }
@@ -828,6 +830,18 @@ func uploadInputChanFrom(inputs ...*UploadInput) chan *UploadInput {
 	ch := make(chan *UploadInput, len(inputs))
 	for _, in := range inputs {
 		ch <- in
+	}
+	close(ch)
+	return ch
+}
+
+func uploadBlobChanFrom(inputs ...[]byte) chan *UploadBlob {
+	ch := make(chan *UploadBlob, len(inputs))
+	for i, in := range inputs {
+		ch <- &UploadBlob{
+			Title: fmt.Sprintf("blob-%d", i),
+		  Contents: in,
+		}
 	}
 	close(ch)
 	return ch
