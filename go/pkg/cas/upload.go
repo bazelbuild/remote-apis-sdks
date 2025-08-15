@@ -384,7 +384,7 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 			u.batchBundler.Flush() // only after wgChecks is done.
 		}()
 
-		ueg, gCtx := errgroup.WithContext(ctx)
+		var ueg errgroup.Group
 
 		// Process path specs.
 		ueg.Go(func() error {
@@ -393,14 +393,14 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 			}
 			for {
 				select {
-				case <-gCtx.Done():
-					return gCtx.Err()
+				case <-ctx.Done():
+					return ctx.Err()
 				case in, ok := <-inputC:
 					if !ok {
 						return nil
 					}
 					log.Infof("start startProcessing %s", in.Path)
-					if err := u.startProcessing(gCtx, in); err != nil {
+					if err := u.startProcessing(ctx, in); err != nil {
 						return err
 					}
 					log.Infof("finish startProcessing %s", in.Path)
@@ -416,14 +416,14 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 			}
 			for {
 				select {
-				case <-gCtx.Done():
-					return gCtx.Err()
+				case <-ctx.Done():
+					return ctx.Err()
 				case in, ok := <-blobInputC:
 					if !ok {
 						return nil
 					}
 					log.Infof("start startProcessing %s", in.Title)
-					if err := u.startProcessingBlob(gCtx, in); err != nil {
+					if err := u.startProcessingBlob(ctx, in); err != nil {
 						return err
 					}
 					log.Infof("finish startProcessing %s", in.Title)
