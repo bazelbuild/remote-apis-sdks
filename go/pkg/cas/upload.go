@@ -406,7 +406,6 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 					log.Infof("finish startProcessing %s", in.Path)
 				}
 			}
-			return nil
 		})
 
 		// Process blobs.
@@ -429,7 +428,6 @@ func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *U
 					log.Infof("finish startProcessing %s", in.Title)
 				}
 			}
-			return nil
 		})
 
 		return ueg.Wait()
