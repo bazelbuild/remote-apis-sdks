@@ -144,6 +144,18 @@ func TestFS(t *testing.T) {
 		}
 		return ret
 	}
+	blobDigSlice := func(blobs ...[]byte) []digest.Digest {
+		ret := make([]digest.Digest, len(blobs))
+		for i, blob := range blobs {
+			ret[i] = digest.NewFromBlob(blob)
+		}
+		return ret
+	}
+
+	exampleBlobs := [][]byte{
+		[]byte("hello world"),
+		[]byte("Error: tool failed with syntax error on line 13"),
+	}
 
 	tests := []struct {
 		desc                string
@@ -154,6 +166,12 @@ func TestFS(t *testing.T) {
 		wantErr             error
 		opt                 UploadOptions
 	}{
+		{
+			desc:                "nothing-to-do",
+			inputs:              []*UploadInput{},
+			wantDigests:         []digest.Digest{},
+			wantScheduledChecks: []*uploadItem{},
+		},
 		{
 			desc:                "root",
 			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
@@ -285,19 +303,32 @@ func TestFS(t *testing.T) {
 			wantDigests:         digSlice(withSymlinksItemPreserved),
 			wantScheduledChecks: []*uploadItem{withSymlinksItemPreserved},
 		},
+		{
+			desc:                "blobs-only",
+			blobs:               exampleBlobs,
+			wantDigests:         blobDigSlice(exampleBlobs...),
+			wantScheduledChecks: uploadItemsFromBlobs(exampleBlobs...),
+		},
+		{
+			desc:                "root-items-mixed-with-blobs",
+			blobs:               exampleBlobs,
+			inputs:              []*UploadInput{{Path: filepath.Join(tmpDir, "root")}},
+			wantDigests:         append(digSlice(rootItem), blobDigSlice(exampleBlobs...)...),
+			wantScheduledChecks: append([]*uploadItem{rootItem, aItem, bItem, subdirItem, cItem, dItem}, uploadItemsFromBlobs(exampleBlobs...)...),
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
 			var mu sync.Mutex
-			var gotScheduledChecks []*uploadItem
+			gotScheduledChecks := make(map[string]*uploadItem)
 
 			client := &Client{
 				Config: DefaultClientConfig(),
 				testScheduleCheck: func(ctx context.Context, item *uploadItem) error {
 					mu.Lock()
 					defer mu.Unlock()
-					gotScheduledChecks = append(gotScheduledChecks, item)
+					gotScheduledChecks[item.Title] = item
 					return nil
 				},
 			}
@@ -316,14 +347,19 @@ func TestFS(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			sort.Slice(gotScheduledChecks, func(i, j int) bool {
-				return gotScheduledChecks[i].Title < gotScheduledChecks[j].Title
-			})
-			if diff := cmp.Diff(tc.wantScheduledChecks, gotScheduledChecks, cmp.Comparer(compareUploadItems)); diff != "" {
+			// check for set-equivalence, without sequential ordering
+			wantScheduledChecksMap := make(map[string]*uploadItem)
+			for _, item := range tc.wantScheduledChecks {
+				wantScheduledChecksMap[item.Title] = item
+			}
+
+			if diff := cmp.Diff(wantScheduledChecksMap, gotScheduledChecks, cmp.Comparer(compareUploadItems)); diff != "" {
 				t.Errorf("unexpected scheduled checks (-want +got):\n%s", diff)
 			}
 
-			gotDigests := make([]digest.Digest, 0, len(tc.inputs))
+			// The uploader's scheduleCheck() was mocked out, so the uploader
+			// hasn't truly "seen" any digests.
+			gotDigests := make([]digest.Digest, 0, len(tc.inputs)+len(tc.blobs))
 			for _, in := range tc.inputs {
 				dig, err := in.Digest(".")
 				if err != nil {
@@ -331,6 +367,9 @@ func TestFS(t *testing.T) {
 				} else {
 					gotDigests = append(gotDigests, dig)
 				}
+			}
+			for _, in := range tc.blobs {
+				gotDigests = append(gotDigests, digest.NewFromBlob(in))
 			}
 			if diff := cmp.Diff(tc.wantDigests, gotDigests); diff != "" {
 				t.Errorf("unexpected digests (-want +got):\n%s", diff)
@@ -839,12 +878,19 @@ func uploadBlobChanFrom(inputs ...[]byte) chan *UploadBlob {
 	ch := make(chan *UploadBlob, len(inputs))
 	for i, in := range inputs {
 		ch <- &UploadBlob{
-			Title: fmt.Sprintf("blob-%d", i),
-		  Contents: in,
+			Title:    fmt.Sprintf("<blob-%d>", i),
+			Contents: in,
 		}
 	}
 	close(ch)
 	return ch
+}
+
+func uploadItemsFromBlobs(inputs ...[]byte) (items []*uploadItem) {
+	for i, in := range inputs {
+		items = append(items, uploadItemFromBlob(fmt.Sprintf("<blob-%d>", i), in))
+	}
+	return
 }
 
 type fakeCAS struct {
