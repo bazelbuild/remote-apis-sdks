@@ -62,7 +62,11 @@ go_test(
         "tree_test.go",
         "tree_whitebox_test.go",
     ],
+    args = ["-test.parallel=1"],
     embed = [":client"],
+    tags = [
+        "exclusive",
+    ],
     deps = [
         "//go/api/command",
         "//go/pkg/chunker",
