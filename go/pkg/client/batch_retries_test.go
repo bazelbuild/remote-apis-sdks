@@ -30,6 +30,7 @@ type flakyBatchServer struct {
 	numErrors      int // A counter of errors the server has returned thus far.
 	updateRequests []*repb.BatchUpdateBlobsRequest
 	readRequests   []*repb.BatchReadBlobsRequest
+	mu             sync.Mutex
 }
 
 func (f *flakyBatchServer) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
@@ -37,6 +38,8 @@ func (f *flakyBatchServer) FindMissingBlobs(ctx context.Context, req *repb.FindM
 }
 
 func (f *flakyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (*repb.BatchReadBlobsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.readRequests = append(f.readRequests, req)
 	if f.numErrors < 1 {
 		f.numErrors++
@@ -83,6 +86,8 @@ func (f *flakyBatchServer) GetTree(req *repb.GetTreeRequest, stream regrpc.Conte
 }
 
 func (f *flakyBatchServer) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (*repb.BatchUpdateBlobsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.updateRequests = append(f.updateRequests, req)
 	if f.numErrors < 1 {
 		f.numErrors++
