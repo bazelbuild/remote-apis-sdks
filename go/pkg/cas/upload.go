@@ -324,6 +324,20 @@ type UploadResult struct {
 	u     *uploader
 }
 
+// Upload uploads all files/directories specified by inputC.
+//
+// Upload assumes ownership of UploadInputs received from inputC.
+// They must not be mutated after sending.
+//
+// Close inputC to indicate that there are no more files/dirs to upload.
+// When inputC is closed, Upload finishes uploading the remaining files/dirs
+// and exits successfully.
+//
+// If ctx is canceled, the Upload returns with an error.
+func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput) (*UploadResult, error) {
+	return c.UploadWithBlobs(ctx, opt, inputC, nil)
+}
+
 // Upload uploads all files/directories specified by inputC, and blobs specified by blobInputC.
 //
 // Upload assumes ownership of UploadInputs received from inputC.
@@ -334,7 +348,7 @@ type UploadResult struct {
 // and exits successfully.
 //
 // If ctx is canceled, the Upload returns with an error.
-func (c *Client) Upload(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput, blobInputC <-chan *UploadBlob) (*UploadResult, error) {
+func (c *Client) UploadWithBlobs(ctx context.Context, opt UploadOptions, inputC <-chan *UploadInput, blobInputC <-chan *UploadBlob) (*UploadResult, error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	// Do not exit until all sub-goroutines exit, to prevent goroutine leaks.
 	defer eg.Wait()

@@ -336,7 +336,7 @@ func TestFS(t *testing.T) {
 			client.Config.LargeFileThreshold = 10
 			client.init()
 
-			_, err := client.Upload(ctx, tc.opt, uploadInputChanFrom(tc.inputs...), uploadBlobChanFrom(tc.blobs...))
+			_, err := client.UploadWithBlobs(ctx, tc.opt, uploadInputChanFrom(tc.inputs...), uploadBlobChanFrom(tc.blobs...))
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("error mismatch: want %q, got %q", tc.wantErr, err)
@@ -436,7 +436,7 @@ func TestDigest(t *testing.T) {
 		}
 	}
 
-	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(uploadInputs...), nil); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(uploadInputs...)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -518,7 +518,7 @@ func TestSmallFiles(t *testing.T) {
 		&UploadInput{Path: filepath.Join(tmpDir, "c")},
 		&UploadInput{Path: filepath.Join(tmpDir, "d")},
 	)
-	if _, err := client.Upload(ctx, UploadOptions{}, inputC, nil); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, inputC); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 
@@ -594,7 +594,7 @@ func TestStreaming(t *testing.T) {
 
 	res, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(
 		&UploadInput{Path: largeFilePath}, // large file
-	), nil)
+	))
 	if err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
@@ -618,7 +618,7 @@ func TestStreaming(t *testing.T) {
 	}
 
 	// Upload the large file again.
-	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(&UploadInput{Path: largeFilePath}), nil); err != nil {
+	if _, err := client.Upload(ctx, UploadOptions{}, uploadInputChanFrom(&UploadInput{Path: largeFilePath})); err != nil {
 		t.Fatalf("failed to upload: %s", err)
 	}
 }
