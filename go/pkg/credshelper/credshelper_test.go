@@ -116,6 +116,7 @@ func TestNewExternalCredentials(t *testing.T) {
 	exp := time.Now().Add(time.Hour).Truncate(time.Second)
 	expStr := exp.String()
 	unixExp := exp.Format(time.UnixDate)
+	rfc3339Exp := exp.Format(time.RFC3339)
 	tests := []struct {
 		name           string
 		wantErr        bool
@@ -138,6 +139,12 @@ func TestNewExternalCredentials(t *testing.T) {
 		name:           "Wrong Expiry Format",
 		wantErr:        true,
 		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":"val"},"token":"%v","expiry":"%v"}`, testToken, expStr),
+	}, {
+		name:           "bazelCompatAndReclientLegacy",
+		credshelperOut: fmt.Sprintf(`{"headers":{"hdr":["val"]},"token":%q,"expiry":%q, "expires":%q}`, testToken, unixExp, rfc3339Exp),
+	}, {
+		name:           "bazelCompat",
+		credshelperOut: fmt.Sprintf(`{"headers":{"Authorization":["Bearer %s"]},"expires":%q}`, testToken, rfc3339Exp),
 	}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

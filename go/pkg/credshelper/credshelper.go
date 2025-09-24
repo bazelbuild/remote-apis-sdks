@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -230,12 +231,64 @@ type JSONOut struct {
 	Expiry  string            `json:"expiry"`
 }
 
+// bazelCompatJSONOut is a record the json output from the credshelper
+// that also accepts bazel credhelper output
+// https://github.com/EngFlow/credential-helper-spec/blob/main/spec.md
+// https://github.com/EngFlow/credential-helper-spec/blob/main/schemas/get-credentials-response.schema.json
+type bazelCompatJSONOut struct {
+	// value is []any (slice of string) (bazel),
+	// or string (reclient legacy).
+	Headers map[string]any `json:"headers"`
+	Expires string         `json:"expires"` // RFC3339
+	// for reclient legacy
+	Token  string `json:"token"`
+	Expiry string `json:"expiry"` // unix date
+}
+
 func parseTokenExpiryFromOutput(out string) (*credshelperOutput, error) {
 	credsOut := &credshelperOutput{}
-	var jsonOut JSONOut
-	if err := json.Unmarshal([]byte(out), &jsonOut); err != nil {
+	var jout bazelCompatJSONOut
+	if err := json.Unmarshal([]byte(out), &jout); err != nil {
 		return nil, fmt.Errorf("error while decoding credshelper output:%v", err)
 	}
+	var jsonOut JSONOut
+	var bearerToken string
+	if len(jout.Headers) > 0 {
+		h := make(http.Header)
+		for k, v := range jout.Headers {
+			switch v := v.(type) {
+			case string: // reclient legacy
+				h.Set(k, v)
+			case []any: // bazel compat?
+				for _, x := range v {
+					if s, ok := x.(string); ok {
+						h.Add(k, s)
+					} else {
+						return nil, fmt.Errorf("wrong value type for headers for %q: %v (%T)", k, x, x)
+					}
+				}
+			default:
+				return nil, fmt.Errorf("wrong value type for headers for %q: %T", k, v)
+			}
+		}
+		jsonOut.Headers = make(map[string]string)
+		for k := range jout.Headers {
+			v := h.Get(k)
+			jsonOut.Headers[k] = v
+			if http.CanonicalHeaderKey(k) == http.CanonicalHeaderKey("Authorization") && strings.HasPrefix(v, "Bearer ") {
+				bearerToken = strings.TrimSpace(strings.TrimPrefix(v, "Bearer "))
+			}
+		}
+	}
+	if jout.Token != "" {
+		jsonOut.Token = jout.Token
+	} else if bearerToken != "" {
+		jsonOut.Token = bearerToken
+	}
+	if jout.Expiry != "" {
+		jsonOut.Expiry = jout.Expiry
+	}
+
 	if jsonOut.Token == "" && len(jsonOut.Headers) == 0 {
 		return nil, fmt.Errorf("both token and headers are empty, invalid credentials")
 	}
@@ -245,6 +298,13 @@ func parseTokenExpiryFromOutput(out string) (*credshelperOutput, error) {
 		expiry, err := time.Parse(time.UnixDate, jsonOut.Expiry)
 		if err != nil {
 			return nil, fmt.Errorf("invalid expiry format: %v (Expected time.UnixDate format)", jsonOut.Expiry)
+		}
+		credsOut.tk.Expiry = expiry
+	}
+	if jout.Expires != "" {
+		expiry, err := time.Parse(time.RFC3339, jout.Expires)
+		if err != nil {
+			return nil, fmt.Errorf("invalid expires format: %v (Expected time.RFC3339 format)", jout.Expires)
 		}
 		credsOut.tk.Expiry = expiry
 	}
