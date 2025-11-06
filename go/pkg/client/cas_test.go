@@ -1014,6 +1014,10 @@ func TestFlattenActionOutputs(t *testing.T) {
 			&repb.OutputDirectory{Path: "dir", TreeDigest: treeDigest.ToProto()},
 			&repb.OutputDirectory{Path: "dir2", TreeDigest: treeADigest.ToProto()},
 		},
+		OutputSymlinks: []*repb.OutputSymlink{
+			&repb.OutputSymlink{Path: "y/bar", Target: "../dir/a/bar"},
+			&repb.OutputSymlink{Path: "y/a", Target: "../dir/a"},
+		},
 	}
 	outputs, err := c.FlattenActionOutputs(ctx, ar)
 	if err != nil {
@@ -1028,6 +1032,8 @@ func TestFlattenActionOutputs(t *testing.T) {
 		"foo":         &client.TreeOutput{Digest: fooDigest},
 		"x/a":         &client.TreeOutput{SymlinkTarget: "../dir/a"},
 		"x/bar":       &client.TreeOutput{SymlinkTarget: "../dir/a/bar"},
+		"y/a":         &client.TreeOutput{SymlinkTarget: "../dir/a"},
+		"y/bar":       &client.TreeOutput{SymlinkTarget: "../dir/a/bar"},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenActionOutputs gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))
