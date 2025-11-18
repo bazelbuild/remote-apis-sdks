@@ -130,6 +130,18 @@ func getRelPath(base, path string) (string, error) {
 	return rel, nil
 }
 
+func getAbsPath(base, relPath string) (string, error) {
+	base = filepath.Clean(base)
+	if filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("input path %q must be relative to the base directory", relPath)
+	}
+	res := filepath.Clean(filepath.Join(base, relPath))
+	if !strings.HasPrefix(res, base) {
+		return "", fmt.Errorf("path %v is not under %v", relPath, base)
+	}
+	return res, nil
+}
+
 // getTargetRelPath returns two versions of targetPath, the first is relative to execRoot
 // and the second is relative to the directory of symlinkRelPath.
 // symlinkRelPath must be relative to execRoot.
