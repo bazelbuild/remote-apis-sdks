@@ -15,12 +15,16 @@ import (
 )
 
 var (
-	credsPath = flag.String("credentials_helper_path", "", "Path to the user's credentials helper binary.")
-	uri       = flag.String("uri", "", "The URI of the credentials request.")
+	credsPath      = flag.String("credentials_helper_path", "", "Path to the user's credentials helper binary.")
+	uri            = flag.String("uri", "", "The URI of the credentials request.")
+	expiryTimeZone = flag.String("expiry_time_zone", "local", "Time zone to use when formatting the expiry time; valid values are 'utc' and 'local'.")
 )
 
 func main() {
 	flag.Parse()
+	if *expiryTimeZone != "local" && *expiryTimeZone != "utc" {
+		log.Errorf("invalid value for --expiry_time_zone: %q; valid values are 'utc' and 'local'", *expiryTimeZone)
+	}
 	var err error
 	if *credsPath == "" {
 		log.Errorf("No credentials helper path provided.")
@@ -53,6 +57,9 @@ func main() {
 	if err != nil {
 		log.Error(err)
 		os.Exit(1)
+	}
+	if *expiryTimeZone == "utc" {
+		expiry = expiry.UTC()
 	}
 	fmt.Printf(`{"headers":%s, "token":"%s", "expiry":"%s"}`, jsonHdrs,
 		"", expiry.Format(time.UnixDate))

@@ -8,3 +8,7 @@ This will run the user provided bazel-style credentials helper and output creden
 `--credentials_helper=path/to/remote-apis-sdks/bazel-bin/go/cmd/bazelcredswrapper/bazelcredswrapper_/bazelcredswrapper`
 
 `--credentials_helper_args=--credentials_helper_path=[Path to user's bazel-style credshelper] --uri=[URI of the credentials request]`
+
+If your build system requires an unambiguous expiry time, use the `--expiry_time_zone=utc` flag:
+
+`--credentials_helper_args=--credentials_helper_path=[Path to user's bazel-style credshelper] --uri=[URI of the credentials request] --expiry_time_zone=utc`
