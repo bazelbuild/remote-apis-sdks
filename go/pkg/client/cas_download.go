@@ -85,7 +85,10 @@ func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 	downloads := make(map[digest.Digest]*TreeOutput)
 	fullStats := &MovedBytesMetadata{}
 	for _, out := range outs {
-		path := filepath.Join(outDir, out.Path)
+		path, err := getAbsPath(outDir, out.Path)
+		if err != nil {
+			return fullStats, err
+		}
 		if out.IsEmptyDirectory {
 			if err := os.MkdirAll(path, c.DirMode); err != nil {
 				return fullStats, err
@@ -784,12 +787,13 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 			if r.output.IsExecutable {
 				perm = c.ExecutableMode
 			}
+			path, err := getAbsPath(r.outDir, r.output.Path)
+			if err == nil {
+				err = os.WriteFile(path, bi.Data, perm)
+			}
 			// bytesMoved will be zero for error cases.
 			// We only report it to the first client to prevent double accounting.
-			r.wait <- &downloadResponse{
-				stats: stats,
-				err:   os.WriteFile(filepath.Join(r.outDir, r.output.Path), bi.Data, perm),
-			}
+			r.wait <- &downloadResponse{stats, err}
 			if i == 0 {
 				// Prevent races by not writing to the original stats.
 				newStats := &MovedBytesMetadata{}
@@ -816,7 +820,10 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	}
 	r := rs[0]
 	rs = rs[1:]
-	path := filepath.Join(r.outDir, r.output.Path)
+	path, err := getAbsPath(r.outDir, r.output.Path)
+	if err != nil {
+		return err
+	}
 	contextmd.Infof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
 	stats, err := c.ReadBlobToFile(ctx, r.output.Digest, path)
 	if err != nil {
@@ -832,6 +839,9 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 		perm := c.RegularMode
 		if cp.output.IsExecutable {
 			perm = c.ExecutableMode
+		}
+		if _, err := getAbsPath(cp.outDir, cp.output.Path); err != nil {
+			return err
 		}
 		if err := copyFile(r.outDir, cp.outDir, r.output.Path, cp.output.Path, perm); err != nil {
 			return err
@@ -905,7 +915,11 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 					if out.IsExecutable {
 						perm = c.ExecutableMode
 					}
-					if err := os.WriteFile(filepath.Join(outDir, out.Path), bi.Data, perm); err != nil {
+					path, err := getAbsPath(outDir, out.Path)
+					if err != nil {
+						return err
+					}
+					if err := os.WriteFile(path, bi.Data, perm); err != nil {
 						return err
 					}
 					statsMu.Lock()
@@ -918,7 +932,10 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 				}
 			} else {
 				out := outputs[batch[0]]
-				path := filepath.Join(outDir, out.Path)
+				path, err := getAbsPath(outDir, out.Path)
+				if err != nil {
+					return err
+				}
 				contextmd.Infof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
 				stats, err := c.ReadBlobToFile(ctx, out.Digest, path)
 				if err != nil {

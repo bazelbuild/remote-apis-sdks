@@ -1106,7 +1106,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 	treeADigest := fake.Put(treeABlob)
 	ar := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
-			&repb.OutputFile{Path: "../foo", Digest: fooDigest.ToProto()}},
+			&repb.OutputFile{Path: "foo/../foo", Digest: fooDigest.ToProto()}},
 		OutputFileSymlinks: []*repb.OutputSymlink{
 			&repb.OutputSymlink{Path: "x/bar", Target: "../dir/a/bar"}},
 		OutputDirectorySymlinks: []*repb.OutputSymlink{
@@ -1172,7 +1172,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 			contents: []byte("bar"),
 		},
 		{
-			path:       "foo",
+			path:       "wd/foo",
 			contents:   []byte("foo"),
 			fileDigest: &fooDigest,
 		},
@@ -2048,5 +2048,151 @@ func TestBatchDownloadBlobsBrokenCompression(t *testing.T) {
 				t.Errorf("client.BatchDownloadBlobs(ctx, digests) had diff (want -> got):\n%s", diff)
 			}
 		})
+	}
+}
+
+type escapedPathTestEnv struct {
+	ctx           context.Context
+	c             *client.Client
+	cache         filemetadata.Cache
+	outDir        string
+	escapedDigest digest.Digest
+	safeDigest    digest.Digest
+	escapedPath   string
+	safePath      string
+}
+
+func createEscapedPathTestEnv(t *testing.T) escapedPathTestEnv {
+	t.Helper()
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	t.Cleanup(cleanup)
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+	cache := filemetadata.NewSingleFlightCache()
+
+	escapedContent := []byte("escaped vulnerability test")
+	escapedDigest := fake.Put(escapedContent)
+	escapedPath := "../escaped_file.txt"
+
+	safeContent := []byte("safe content")
+	safeDigest := fake.Put(safeContent)
+	safePath := "safe_file.txt"
+
+	outDir := filepath.Join(t.TempDir(), "real_out_dir")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatalf("Failed to create outDir: %v", err)
+	}
+
+	// Verify that the hardcoded escapedPath indeed attempts to escape.
+	targetPath := filepath.Clean(filepath.Join(outDir, escapedPath))
+	if strings.HasPrefix(targetPath, outDir) {
+		t.Fatalf("Failed to construct an escaped path: %s is still within %s", targetPath, outDir)
+	}
+
+	return escapedPathTestEnv{
+		ctx:           ctx,
+		c:             c,
+		cache:         cache,
+		outDir:        outDir,
+		escapedDigest: escapedDigest,
+		safeDigest:    safeDigest,
+		escapedPath:   escapedPath,
+		safePath:      safePath,
+	}
+}
+
+func TestEscapeDownloadOutputs(t *testing.T) {
+	t.Parallel()
+	env := createEscapedPathTestEnv(t)
+
+	outputs := map[string]*client.TreeOutput{
+		env.escapedPath: {
+			Digest: env.escapedDigest,
+			Path:   env.escapedPath,
+		},
+	}
+
+	if _, err := env.c.DownloadOutputs(env.ctx, outputs, env.outDir, env.cache); err == nil {
+		t.Errorf("DownloadOutputs didn't fail when output path %v try to escape from outDir %v", env.escapedPath, env.outDir)
+	}
+}
+
+func TestEscapeDownloadFiles_Single(t *testing.T) {
+	t.Parallel()
+	env := createEscapedPathTestEnv(t)
+
+	outputs := map[digest.Digest]*client.TreeOutput{
+		env.escapedDigest: {
+			Digest: env.escapedDigest,
+			Path:   env.escapedPath,
+		},
+	}
+
+	if _, err := env.c.DownloadFiles(env.ctx, env.outDir, outputs); err == nil {
+		t.Errorf("DownloadFiles didn't fail when output path try to escape from outDir %v", env.outDir)
+	}
+}
+
+func TestEscapeDownloadFiles_Batch(t *testing.T) {
+	t.Parallel()
+	env := createEscapedPathTestEnv(t)
+
+	outputs := map[digest.Digest]*client.TreeOutput{
+		env.escapedDigest: {
+			Digest: env.escapedDigest,
+			Path:   env.escapedPath,
+		},
+		env.safeDigest: {
+			Digest: env.safeDigest,
+			Path:   env.safePath,
+		},
+	}
+	client.UseBatchOps(true).Apply(env.c)
+	client.MaxBatchDigests(2).Apply(env.c)
+	env.c.RunBackgroundTasks(env.ctx)
+
+	if _, err := env.c.DownloadFiles(env.ctx, env.outDir, outputs); err == nil {
+		t.Errorf("DownloadFiles didn't fail when output path try to escape from outDir %v", env.outDir)
+	}
+}
+
+func TestEscapeDownloadNonUnified_Single(t *testing.T) {
+	t.Parallel()
+	env := createEscapedPathTestEnv(t)
+
+	outputs := map[digest.Digest]*client.TreeOutput{
+		env.escapedDigest: {
+			Digest: env.escapedDigest,
+			Path:   env.escapedPath,
+		},
+	}
+	client.UnifiedDownloads(false).Apply(env.c)
+	if _, err := env.c.DownloadFiles(env.ctx, env.outDir, outputs); err == nil {
+		t.Errorf("DownloadFiles didn't fail when output path try to escape from outDir %v", env.outDir)
+	}
+}
+
+func TestEscapeDownloadNonUnified_Batch(t *testing.T) {
+	t.Parallel()
+	env := createEscapedPathTestEnv(t)
+
+	outputs := map[digest.Digest]*client.TreeOutput{
+		env.escapedDigest: {
+			Digest: env.escapedDigest,
+			Path:   env.escapedPath,
+		},
+		env.safeDigest: {
+			Digest: env.safeDigest,
+			Path:   env.safePath,
+		},
+	}
+	client.UnifiedDownloads(false).Apply(env.c)
+	client.UseBatchOps(true).Apply(env.c)
+	client.MaxBatchDigests(2).Apply(env.c)
+	env.c.RunBackgroundTasks(env.ctx)
+
+	if _, err := env.c.DownloadFiles(env.ctx, env.outDir, outputs); err == nil {
+		t.Errorf("DownloadFiles didn't fail when output path try to escape from outDir %v", env.outDir)
 	}
 }
