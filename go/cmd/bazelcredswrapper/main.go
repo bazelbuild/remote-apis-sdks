@@ -59,18 +59,11 @@ func main() {
 	// problematic because RFC3339 is a standardized, unambiguous format with timezone
 	// information (e.g., "2023-01-01T12:00:00Z"), while UnixDate is a human-readable
 	// format without explicit timezone indicators (e.g., "Sun Jan 1 12:00:00 GMT 2023").
-	// This conversion can lead to timezone ambiguity and parsing errors in systems
-	// expecting RFC3339 format, potentially causing authentication failures.
+	// This conversion can lead to timezone ambiguity and parsing errors and potentially
+	// causing authentication failures.
 	// Convert to UTC to avoid parsing errors when timezone can't be determined.
-	loc, err := time.LoadLocation("UTC")
-	if err != nil {
-		log.Fatalf("Failed to load timezone data.")
-	}
-	// Convert expiry to GMT time
-	expiry_utc := expiry.In(loc)
-
 	fmt.Printf(`{"headers":%s, "token":"%s", "expiry":"%s"}`, jsonHdrs,
-		"", expiry_utc.Format(time.UnixDate))
+		"", expiry.UTC().Format(time.UnixDate))
 }
 
 type CredshelperOut struct {
