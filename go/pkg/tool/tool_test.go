@@ -166,7 +166,7 @@ func TestTool_DownloadAction(t *testing.T) {
 		OutputFiles: []string{"a/b/out"},
 		Platform: &repb.Platform{
 			Properties: []*repb.Platform_Property{
-				&repb.Platform_Property{
+				{
 					Name:  "container-image",
 					Value: "foo",
 				},
@@ -455,5 +455,64 @@ func TestTool_UploadBlob(t *testing.T) {
 	}
 	if cas.BlobWrites(dg) != 1 {
 		t.Fatalf("Expected 1 write for blob '%v', got %v", dg.String(), cas.BlobWrites(dg))
+	}
+}
+
+func TestTool_FlattenActionIO(t *testing.T) {
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	cmd := &command.Command{
+		Args:     []string{"tool"},
+		ExecRoot: e.ExecRoot,
+		InputSpec: &command.InputSpec{
+			Inputs:          []string{"foo.c", "bar.c"},
+			SymlinkBehavior: command.PreserveSymlink,
+		},
+	}
+	opt := command.DefaultExecutionOptions()
+	_, acDg, _, _ := e.Set(
+		cmd,
+		opt,
+		&command.Result{Status: command.CacheHitResultStatus},
+		&fakes.InputFile{Path: "foo.c", Contents: "foo"},
+		&fakes.InputSymlink{Path: "bar.c", TargetContent: "bar", Target: "previous_dir/old_target_file"},
+		&fakes.OutputFile{Path: "a/b/out", Contents: "foo"},
+		&fakes.OutputSymlink{Path: "a/b/sl", Target: "a/b/out"},
+	)
+	toolClient := &Client{GrpcClient: e.Client.GrpcClient}
+	tmpDir := t.TempDir()
+	io, err := toolClient.FlattenActionIO(context.Background(), acDg.String())
+	if err != nil {
+		t.Fatalf("DownloadActionResult(%v,%v) failed: %v", acDg.String(), tmpDir, err)
+	}
+
+	getInputRootDg := io.RootDg
+	wantInputRootDg := "ea520b417ef2887249b4ea2d24ff64f5d7d6c419eb1a0ce2067c39ece5c37b56/206"
+	if diff := cmp.Diff(wantInputRootDg, getInputRootDg); diff != "" {
+		t.Errorf("FlattenActionIO returned diff in Inputs' list: (-want +got)\n%s", diff)
+	}
+
+	getInputPaths := io.InputPaths
+	wantInputsPaths := map[string]string{"foo.c": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae/3",
+		"previous_dir/old_target_file": "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9/3"}
+	if diff := cmp.Diff(wantInputsPaths, getInputPaths); diff != "" {
+		t.Errorf("FlattenActionIO returned diff in InputPaths: (-want +got)\n%s", diff)
+	}
+	getInputPathSymlinks := io.InputPathSymlinks
+	wantInputPathSymlinks := map[string]string{"bar.c->previous_dir/old_target_file": "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9/3"}
+	if diff := cmp.Diff(wantInputPathSymlinks, getInputPathSymlinks); diff != "" {
+		t.Errorf("FlattenActionIO returned diff in InputPathSymlinks: (-want +got)\n%s", diff)
+	}
+
+	getOutputFiles := io.OutputFiles
+	getOutputFileSymlinks := io.OutputFileSymlinks
+
+	wantOutputFiles := map[string]string{"a/b/out": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae/3"}
+	wantOutputFileSymlinks := map[string]string{"a/b/sl->a/b/out": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae/3"}
+	if diff := cmp.Diff(wantOutputFiles, getOutputFiles); diff != "" {
+		t.Errorf("FlattenActionIO returned diff in Output Files: (-want +got)\n%s", diff)
+	}
+	if diff := cmp.Diff(wantOutputFileSymlinks, getOutputFileSymlinks); diff != "" {
+		t.Errorf("FlattenActionIO returned diff in Output File Symlinks: (-want +got)\n%s", diff)
 	}
 }
