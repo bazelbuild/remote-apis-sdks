@@ -15,6 +15,7 @@ import (
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/client"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
+	"github.com/bazelbuild/remote-apis-sdks/go/pkg/retry"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/klauspost/compress/zstd"
@@ -46,6 +47,10 @@ type flakyServer struct {
 	retriableForever bool             // Set to true to make the flaky server return a retriable error forever, rather than eventually a non-retriable error.
 	sleepDelay       time.Duration    // How long to sleep on each RPC.
 	useBSCompression bool             // Whether to use/expect compression on ByteStream calls.
+
+	// Test toggles for WaitExecution NOT_FOUND scenarios.
+	waitNotFoundOnStart      bool // If true, the first WaitExecution call returns NOT_FOUND before any stream messages.
+	waitNotFoundDuringStream bool // If true, the first WaitExecution call sends one in-progress message then returns NOT_FOUND.
 }
 
 func (f *flakyServer) incNumCalls(method string) int {
@@ -201,6 +206,31 @@ func (f *flakyServer) Execute(req *repb.ExecuteRequest, stream regrpc.Execution_
 
 func (f *flakyServer) WaitExecution(req *repb.WaitExecutionRequest, stream regrpc.Execution_WaitExecutionServer) error {
 	numCalls := f.incNumCalls("WaitExecution")
+	if f.waitNotFoundOnStart {
+		if numCalls == 1 {
+			return status.Error(codes.NotFound, "simulated NOT_FOUND at WaitExecution start")
+		}
+		execResp := &repb.ExecuteResponse{Status: status.New(codes.Aborted, "transient operation failure!").Proto()}
+		a, e := anypb.New(execResp)
+		if e != nil {
+			return e
+		}
+		return stream.Send(&oppb.Operation{Name: "op", Done: true, Result: &oppb.Operation_Response{Response: a}})
+	}
+	if f.waitNotFoundDuringStream {
+		if numCalls == 1 {
+			if err := stream.Send(&oppb.Operation{Done: false, Name: "dummy"}); err != nil {
+				return err
+			}
+			return status.Error(codes.NotFound, "simulated NOT_FOUND during WaitExecution stream")
+		}
+		execResp := &repb.ExecuteResponse{Status: status.New(codes.Aborted, "transient operation failure!").Proto()}
+		a, e := anypb.New(execResp)
+		if e != nil {
+			return e
+		}
+		return stream.Send(&oppb.Operation{Name: "op", Done: true, Result: &oppb.Operation_Response{Response: a}})
+	}
 	if numCalls < 2 {
 		return status.Error(codes.Canceled, "transient error!")
 	}
@@ -211,11 +241,11 @@ func (f *flakyServer) WaitExecution(req *repb.WaitExecutionRequest, stream regrp
 	// Execute (above) will fail twice (and be retried twice) before ExecuteAndWait() switches to
 	// WaitExecution. WaitExecution will fail 4 more times more before succeeding, for a total of 6 retries.
 	execResp := &repb.ExecuteResponse{Status: status.New(codes.Aborted, "transient operation failure!").Proto()}
-	any, e := anypb.New(execResp)
+	a, e := anypb.New(execResp)
 	if e != nil {
 		return e
 	}
-	return stream.Send(&oppb.Operation{Name: "op", Done: true, Result: &oppb.Operation_Response{Response: any}})
+	return stream.Send(&oppb.Operation{Name: "op", Done: true, Result: &oppb.Operation_Response{Response: a}})
 }
 
 func (f *flakyServer) GetOperation(ctx context.Context, req *oppb.GetOperationRequest) (*oppb.Operation, error) {
@@ -484,6 +514,75 @@ func TestExecuteAndWaitRetries(t *testing.T) {
 	// 3 separate transient WaitExecution errors + the final successful call.
 	if f.fake.numCalls["WaitExecution"] != 4 {
 		t.Errorf("Expected 4 WaitExecution calls, got %v", f.fake.numCalls["WaitExecution"])
+	}
+}
+
+// Verifies that when WaitExecution returns NOT_FOUND immediately (before any stream messages),
+// the client switches back to Execute on the next retry, per Remote Execution spec.
+func TestExecuteAndWait_WaitExecutionNotFoundOnStart(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	defer f.shutDown()
+
+	// Configure fake to return NOT_FOUND on the first WaitExecution call, then succeed quickly.
+	f.fake.waitNotFoundOnStart = true
+	// Use an immediate retrier with 5 attempts so the terminal Aborted status occurs on the last
+	// attempt, preventing a follow-up Execute call from overwriting lastOp with an in-progress op.
+	(&client.Retrier{Backoff: retry.Immediately(retry.Attempts(5)), ShouldRetry: retry.TransientOnly}).Apply(f.client)
+
+	op, err := f.client.ExecuteAndWait(f.ctx, &repb.ExecuteRequest{})
+	if err != nil {
+		t.Fatalf("client.ExecuteAndWait(ctx, {}) = %v", err)
+	}
+
+	st := client.OperationStatus(op)
+	if st == nil {
+		t.Fatalf("client.ExecuteAndWait(ctx, {}) returned no status, expected Aborted")
+	}
+	if st.Code() != codes.Aborted {
+		t.Fatalf("client.ExecuteAndWait(ctx, {}) returned unexpected status code %s", st.Code())
+	}
+
+	if f.fake.numCalls["WaitExecution"] < 1 {
+		t.Fatalf("expected WaitExecution to be called at least once, got %d", f.fake.numCalls["WaitExecution"])
+	}
+	// After NOT_FOUND on WaitExecution, client should call Execute again before final success.
+	if f.fake.numCalls["Execute"] < 2 {
+		t.Fatalf("expected Execute to be called at least twice (initial + after NOT_FOUND), got %d", f.fake.numCalls["Execute"])
+	}
+}
+
+// Verifies that when NOT_FOUND occurs during the WaitExecution stream (after an in-progress
+// update), the client switches back to Execute on the next retry, per Remote Execution spec.
+func TestExecuteAndWait_WaitExecutionNotFoundDuringStream(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	defer f.shutDown()
+
+	// Configure fake to send one in-progress update then return NOT_FOUND, then succeed on next try.
+	f.fake.waitNotFoundDuringStream = true
+	// Ensure terminal Aborted status happens on the last retry budgeted attempt to avoid overwrite.
+	(&client.Retrier{Backoff: retry.Immediately(retry.Attempts(5)), ShouldRetry: retry.TransientOnly}).Apply(f.client)
+
+	op, err := f.client.ExecuteAndWait(f.ctx, &repb.ExecuteRequest{})
+	if err != nil {
+		t.Fatalf("client.ExecuteAndWait(ctx, {}) = %v", err)
+	}
+
+	st := client.OperationStatus(op)
+	if st == nil {
+		t.Fatalf("client.ExecuteAndWait(ctx, {}) returned no status, expected Aborted")
+	}
+	if st.Code() != codes.Aborted {
+		t.Fatalf("client.ExecuteAndWait(ctx, {}) returned unexpected status code %s", st.Code())
+	}
+
+	if f.fake.numCalls["WaitExecution"] < 1 {
+		t.Fatalf("expected WaitExecution to be called at least once, got %d", f.fake.numCalls["WaitExecution"])
+	}
+	// After NOT_FOUND during stream, client should call Execute again before final success.
+	if f.fake.numCalls["Execute"] < 2 {
+		t.Fatalf("expected Execute to be called at least twice (initial + after NOT_FOUND), got %d", f.fake.numCalls["Execute"])
 	}
 }
 

@@ -213,27 +213,39 @@ func buildCommand(ac *Action) *repb.Command {
 // ExecuteAndWait calls Execute on the underlying client and WaitExecution if necessary. It returns
 // the completed operation or an error.
 //
-// The retry logic is complicated. Assuming retries are enabled, we want the retry to call
-// WaitExecution if there's an Operation "in progress", and to call Execute otherwise. In practice
-// that means:
-//  1. If an error occurs before the first operation is returned, or after the final operation is
-//     returned (i.e. the one with op.Done==true), retry by calling Execute again.
-//  2. Otherwise, retry by calling WaitExecution with the last operation name.
+// Retry model:
+//   - If there's no current Operation (i.e., before the first Operation is received) or after the
+//     terminal Operation (op.Done == true) has been received, the next retry calls Execute again.
+//   - Otherwise, the next retry calls WaitExecution with the last known operation name.
 //
-// In addition, we want the retrier to trigger based on certain operation statuses as well as on
-// explicit errors. (The shouldRetry function knows which statuses.) We do this by mapping statuses,
-// if present, to errors inside the closure and then throwing away such "fake" errors outside the
-// closure (if we ran out of retries or if there was never a retrier enabled). The exception is
-// deadline-exceeded statuses, which we never give to the retrier (and hence will always propagate
-// directly to the caller).
+// Special handling for WaitExecution NOT_FOUND (spec compliance):
+//   - Per the Remote Execution API, WaitExecution may return NOT_FOUND and the client should retry by
+//     calling Execute. When a NOT_FOUND is seen while invoking WaitExecution or while receiving from
+//     the WaitExecution stream, this method flips back to Execute on the next retry by returning a
+//     transient error to the retrier.
+//   - This behavior is localized to the WaitExecution path only. The global retry policy
+//     (retry.TransientOnly) remains unchanged.
+//
+// Status-driven retries:
+//   - The retrier can also be triggered based on certain operation statuses (in addition to explicit
+//     RPC errors). We surface such statuses as temporary "fake" errors inside the retry closure so the
+//     retrier can decide whether to retry. Those synthetic errors are discarded at the boundary once
+//     retries are exhausted or when no retrier is configured.
+//   - DeadlineExceeded statuses are never handed to the retrier and are returned directly to the
+//     caller.
 func (c *Client) ExecuteAndWait(ctx context.Context, req *repb.ExecuteRequest) (op *oppb.Operation, err error) {
 	return c.ExecuteAndWaitProgress(ctx, req, nil)
 }
 
-// ExecuteAndWaitProgress calls Execute on the underlying client and WaitExecution if necessary. It returns
-// the completed operation or an error.
-// The supplied callback function is called for each message received to update the state of
-// the remote action.
+// ExecuteAndWaitProgress calls Execute on the underlying client and, when appropriate, switches to
+// WaitExecution to follow the in-progress operation. It returns the completed operation or an error.
+// The supplied callback is invoked for each streamed Operation metadata update.
+//
+// Behavior notes:
+//   - If WaitExecution returns NOT_FOUND (either on call or mid-stream), the next retry will call
+//     Execute again, per the Remote Execution API.
+//   - Certain operation statuses are mapped to errors to drive retries; DeadlineExceeded statuses are
+//     not given to the retrier and propagate to the caller.
 func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRequest, progress func(metadata *repb.ExecuteOperationMetadata)) (op *oppb.Operation, err error) {
 	wait := false    // Should we retry by calling WaitExecution instead of Execute?
 	opError := false // Are we propagating an Operation status as an error for the retrier's benefit?
@@ -246,6 +258,13 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 			res, e = c.Execute(ctx, req)
 		}
 		if e != nil {
+			// Per Remote Execution API spec: handle NOT_FOUND during WaitExecution by retrying Execute.
+			if wait {
+				if st, ok := status.FromError(e); ok && st.Code() == codes.NotFound {
+					wait = false
+					return status.Errorf(codes.Unavailable, "WaitExecution returned NOT_FOUND: retrying Execute: %v", e)
+				}
+			}
 			return e
 		}
 		for {
@@ -254,6 +273,13 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 				break
 			}
 			if e != nil {
+				// Per Remote Execution API spec: handle NOT_FOUND during WaitExecution by retrying Execute.
+				if wait {
+					if st, ok := status.FromError(e); ok && st.Code() == codes.NotFound {
+						wait = false
+						return status.Errorf(codes.Unavailable, "WaitExecution stream returned NOT_FOUND: retrying Execute: %v", e)
+					}
+				}
 				return e
 			}
 			wait = !op.Done
