@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -20,6 +21,9 @@ var (
 	sInvalid1 = fmt.Sprintf("%d/%s", dSHA256.Size, dSHA256.Hash)
 	sInvalid2 = fmt.Sprintf("%s/test", sInvalid1)
 	sInvalid3 = fmt.Sprintf("x%s", sGood[1:])
+
+	// hexStringRegex doesn't contain the size because that's checked separately.
+	hexStringRegex = regexp.MustCompile("^[a-f0-9]+$")
 )
 
 func TestProtoConversion(t *testing.T) {
@@ -30,6 +34,24 @@ func TestProtoConversion(t *testing.T) {
 	}
 	if dSHA256 != d {
 		t.Errorf("NewFromProto(%v.ToProto()) = (%s, _), want (%s, _)", dSHA256, d, dSHA256)
+	}
+}
+
+func BenchmarkIsHex(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for i := range dSHA256.Hash {
+			if !isHex(dSHA256.Hash[i]) {
+				b.Errorf("expected isHex(%q) = true, got false", dSHA256.Hash[i])
+			}
+		}
+	}
+}
+
+func BenchmarkHexStringRegex(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		if !hexStringRegex.MatchString(dSHA256.Hash) {
+			b.Errorf("expected true, got false")
+		}
 	}
 }
 

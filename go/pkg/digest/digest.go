@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,9 +17,6 @@ import (
 )
 
 var (
-	// hexStringRegex doesn't contain the size because that's checked separately.
-	hexStringRegex = regexp.MustCompile("^[a-f0-9]+$")
-
 	// HashFn is the digest function used.
 	HashFn crypto.Hash = crypto.SHA256
 
@@ -66,6 +62,11 @@ func (d Digest) IsEmpty() bool {
 	return d.Size == 0 && d.Hash == Empty.Hash
 }
 
+// isHex returns true if c is a lowercase hexadecimal character.
+func isHex(c byte) bool {
+	return (c-'0' <= 9) || (c-'a' <= 5)
+}
+
 // Validate returns nil if a digest appears to be valid, or a descriptive error
 // if it is not. All functions accepting digests directly from clients should
 // call this function, whether it's via an RPC call or by reading a serialized
@@ -76,8 +77,10 @@ func (d Digest) Validate() error {
 	if length != HashFn.Size()*2 {
 		return fmt.Errorf("valid hash length is %d, got length %d (%s)", HashFn.Size()*2, length, d.Hash)
 	}
-	if !hexStringRegex.MatchString(d.Hash) {
-		return fmt.Errorf("hash is not a lowercase hex string (%s)", d.Hash)
+	for i := range d.Hash {
+		if !isHex(d.Hash[i]) {
+			return fmt.Errorf("hash is not a lowercase hex string (%s)", d.Hash)
+		}
 	}
 	if d.Size < 0 {
 		return fmt.Errorf("expected non-negative size, got %d", d.Size)
