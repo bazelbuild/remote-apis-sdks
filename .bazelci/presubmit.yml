@@ -16,7 +16,7 @@ tasks:
     shell_commands:
       - "echo --- Downloading and extracting Go 1.25.7 to $GO_HOME"
       - "mkdir $GO_HOME"
-      - "curl -fL https://mirror.bazel.build/go.dev/dl/go1.25.7.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
+      - "curl -fL https://go.dev/dl/go1.25.7.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
       - "echo +++ Running go build"
       - "go build ./..."
       - "echo +++ Running go test"
