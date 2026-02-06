@@ -37,6 +37,8 @@ import (
 var zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
 
 type flakyServer struct {
+	repb.UnimplementedContentAddressableStorageServer
+
 	// TODO(jsharpe): This is a hack to work around WaitOperation not existing in some versions of
 	// the long running operations API that we need to support.
 	opgrpc.OperationsServer

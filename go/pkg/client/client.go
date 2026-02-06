@@ -1123,7 +1123,7 @@ func (c *Client) DeleteOperation(ctx context.Context, req *oppb.DeleteOperationR
 // https://github.com/grpc/grpc-go/issues/3115
 func statusWrap(err error) error {
 	if st, ok := status.FromError(err); ok {
-		return status.Errorf(st.Code(), err.Error())
+		return status.Error(st.Code(), err.Error())
 	}
 	return err
 }

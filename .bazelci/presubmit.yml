@@ -1,35 +1,28 @@
 ---
 validate_config: 1
 tasks:
-  ubuntu1804:
-    environment:
-      GO_HOME: "$HOME/go-1.20.7"
-      PATH: "$PATH:$GO_HOME/bin"
-    shell_commands:
-      - "echo --- Downloading and extracting Go 1.20.7 to $GO_HOME"
-      - "mkdir $GO_HOME"
-      - "curl https://mirror.bazel.build/go.dev/dl/go1.20.7.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
-      - "echo +++ Check go format"
-      - "./check-gofmt.sh `find go -name '*.go'`"
-      - "./check-golint.sh"
-      - "echo +++ Check go vet"
-      - "go vet ./..."
+  ubuntu2404:
     build_targets:
       - "//..."
     test_targets:
       - "//..."
   # Check that "go build / test" works, too.
-  ubuntu1804_gobuild:
-    platform: ubuntu1804
+  ubuntu2404_gobuild:
+    platform: ubuntu2404
     name: "go build / test"
     environment:
-      GO_HOME: "$HOME/go-1.20.7"
+      GO_HOME: "$HOME/go-1.25.7"
       PATH: "$PATH:$GO_HOME/bin"
     shell_commands:
-      - "echo --- Downloading and extracting Go 1.20.7 to $GO_HOME"
+      - "echo --- Downloading and extracting Go 1.25.7 to $GO_HOME"
       - "mkdir $GO_HOME"
-      - "curl https://mirror.bazel.build/go.dev/dl/go1.20.7.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
+      - "curl -fL https://mirror.bazel.build/go.dev/dl/go1.25.7.linux-amd64.tar.gz | tar xvz --strip-components=1 -C $GO_HOME"
       - "echo +++ Running go build"
       - "go build ./..."
       - "echo +++ Running go test"
       - "go test ./..."
+      - "echo +++ Check go format"
+      - "./check-gofmt.sh `find go -name '*.go'`"
+      - "./check-golint.sh"
+      - "echo +++ Check go vet"
+      - "go vet ./..."
