@@ -1,4 +1,6 @@
-# ref: https://golangci-lint.run/usage/configuration/#config-file
+# ref: https://golangci-lint.run/docs/configuration/file/
+
+version: "2"
 
 issues:
   # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
@@ -8,24 +10,4 @@ issues:
   max-same-issues: 0
 
 linters:
-  enable:
-    - wrapcheck
-    - stylecheck
-
-linters-settings:
-  stylecheck:
-    go: "1.15"
-  staticcheck:
-    go: "1.15"
-  wrapcheck:
-    # An array of strings that specify substrings of signatures to ignore.
-    # If this set, it will override the default set of ignored signatures.
-    # See https://github.com/tomarrell/wrapcheck#configuration for more information.
-    ignoreSigs:
-      - .Errorf(
-      - errors.New(
-      - errors.Unwrap(
-      - errors.WithStack(
-      - .Wrap(
-      - .Wrapf(
-      - .WithMessage(
+  default: standard
