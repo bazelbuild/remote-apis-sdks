@@ -64,7 +64,7 @@ func (d Digest) IsEmpty() bool {
 
 // isHex returns true if c is a lowercase hexadecimal character.
 func isHex(c byte) bool {
-	return (c-'0' <= 9) || (c-'a' <= 5)
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f'
 }
 
 // Validate returns nil if a digest appears to be valid, or a descriptive error
