@@ -125,9 +125,9 @@ func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 			Digest:       output.Digest,
 			IsExecutable: output.IsExecutable,
 		}
-		absPath := path
-		if !filepath.IsAbs(absPath) {
-			absPath = filepath.Join(outDir, absPath)
+		absPath, err := getAbsPath(outDir, path)
+		if err != nil {
+			return fullStats, err
 		}
 		if err := cache.Update(absPath, md); err != nil {
 			return fullStats, err
