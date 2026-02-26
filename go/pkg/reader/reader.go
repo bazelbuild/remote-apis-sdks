@@ -16,9 +16,9 @@ import (
 // errNotInitialized is the error returned from Read() by a ReedSeeker that
 // hasn't yet had Initialize() called.
 //
-// stylecheck is disabled because the error text starts with a capital letter,
+// staticcheck is disabled because the error text starts with a capital letter,
 // and changing the text would be an API change.
-var errNotInitialized = errors.New("Not yet initialized") // nolint:stylecheck
+var errNotInitialized = errors.New("Not yet initialized") // nolint:staticcheck
 
 // Initializable is an interface containing methods to initialize a ReadSeeker.
 type Initializable interface {

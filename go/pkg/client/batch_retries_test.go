@@ -27,6 +27,8 @@ import (
 var timeout100ms = client.RPCTimeouts(map[string]time.Duration{"default": 100 * time.Millisecond})
 
 type flakyBatchServer struct {
+	repb.UnimplementedContentAddressableStorageServer
+
 	numErrors      int // A counter of errors the server has returned thus far.
 	updateRequests []*repb.BatchUpdateBlobsRequest
 	readRequests   []*repb.BatchReadBlobsRequest
@@ -285,6 +287,8 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 }
 
 type sleepyBatchServer struct {
+	repb.UnimplementedContentAddressableStorageServer
+
 	timeout        time.Duration
 	numErrors      int // A counter of DEADLINE_EXCEEDED errors the server has returned thus far.
 	updateRequests int
