@@ -333,6 +333,65 @@ func TestRemoteHeaders(t *testing.T) {
 	})
 }
 
+func TestRemoteHeadersMerged(t *testing.T) {
+	one := []byte{1}
+	oneDigest := digest.NewFromBlob(one)
+	want := map[string][]string{"x-test": {"test123"}, "x-context": {"context123"}}
+
+	checkHeaders := func(t *testing.T, got metadata.MD) {
+		t.Helper()
+		for k, wantV := range want {
+			if gotV := got[k]; len(gotV) != 1 {
+				t.Errorf("header %s seen %d times: %v", k, len(gotV), gotV)
+			} else if diff := cmp.Diff(gotV, wantV); diff != "" {
+				t.Errorf("got header %s value %q; want %q; diff (-got, +want) %s", k, gotV, wantV, diff)
+			}
+		}
+	}
+
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("Cannot listen: %v", err)
+	}
+	defer listener.Close()
+	server := grpc.NewServer()
+	fake := &fakeByteStreamForRemoteHeaders{}
+	bsgrpc.RegisterByteStreamServer(server, fake)
+	regrpc.RegisterCapabilitiesServer(server, &fakeCapabilitiesForRemoteHeaders{})
+	go server.Serve(listener)
+	defer server.Stop()
+
+	// Use empty context as base
+	ctx := context.Background()
+
+	client, err := NewClient(ctx, "instance", DialParams{
+		Service:       listener.Addr().String(),
+		NoSecurity:    true,
+		RemoteHeaders: map[string][]string{"x-test": {"test123"}},
+	})
+	if err != nil {
+		t.Fatalf("Cannot create client: %v", err)
+	}
+	defer client.Close()
+
+	// Add context metadata to the call context
+	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("x-context", "context123"))
+
+	t.Run("unary", func(t *testing.T) {
+		if _, err := client.WriteBlob(ctx, one); err != nil {
+			t.Fatalf("Writing blob: %v", err)
+		}
+		checkHeaders(t, fake.writeHeaders)
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		if _, _, err := client.ReadBlob(ctx, oneDigest); err != nil {
+			t.Fatalf("Reading blob: %v", err)
+		}
+		checkHeaders(t, fake.readHeaders)
+	})
+}
+
 type fakeByteStreamForRemoteHeaders struct {
 	bsgrpc.UnimplementedByteStreamServer
 	readHeaders, writeHeaders metadata.MD
