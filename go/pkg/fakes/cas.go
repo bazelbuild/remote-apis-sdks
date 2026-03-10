@@ -262,7 +262,7 @@ func (f *Writer) QueryWriteStatus(context.Context, *bspb.QueryWriteStatusRequest
 // CAS is a fake CAS that implements FindMissingBlobs, Read and Write, storing stored blobs
 // in a map. It also counts the number of requests to store received, for validating batching logic.
 type CAS struct {
-	repb.UnimplementedContentAddressableStorageServer
+	regrpc.UnimplementedContentAddressableStorageServer
 
 	// InstanceName is the expected instance name for all requests.
 	InstanceName string
