@@ -28,7 +28,7 @@ func TestCapToLimit(t *testing.T) {
 			},
 		},
 		{
-			name:  "new fields counted toward limit",
+			name:  "new fields dropped before ActionID and InvocationID",
 			limit: 24,
 			input: &Metadata{
 				ToolName:       "toolName",
@@ -38,9 +38,9 @@ func TestCapToLimit(t *testing.T) {
 			},
 			want: &Metadata{
 				ToolName:       "toolName",
-				ActionID:       "acti",
-				InvocationID:   "invo",
-				ActionMnemonic: "12345678",
+				ActionID:       "actionID",
+				InvocationID:   "invocID*",
+				ActionMnemonic: "",
 			},
 		},
 		{
@@ -115,6 +115,26 @@ func TestCapToLimit(t *testing.T) {
 				InvocationID: "invocID*",
 			},
 		},
+		{
+			name:  "new fields dropped before trimming ActionID and InvocationID",
+			limit: 40,
+			input: &Metadata{
+				ToolName:        "toolName",
+				ActionID:        "actionID",
+				InvocationID:    "invocID*",
+				ActionMnemonic:  "CppCompile",
+				TargetID:        "//pkg:target",
+				ConfigurationID: "config-abc",
+			},
+			want: &Metadata{
+				ToolName:        "toolName",
+				ActionID:        "actionID",
+				InvocationID:    "invocID*",
+				ActionMnemonic:  "CppCompile",
+				TargetID:        "//pkg:",
+				ConfigurationID: "",
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,6 +179,9 @@ func TestWithExtractMetadataRoundTrip(t *testing.T) {
 	}
 	if got, want := got.InvocationID, input.InvocationID; got != want {
 		t.Errorf("InvocationID: got %q, want %q", got, want)
+	}
+	if got, want := got.CorrelatedInvocationsID, input.CorrelatedInvocationsID; got != want {
+		t.Errorf("CorrelatedInvocationsID: got %q, want %q", got, want)
 	}
 	if got, want := got.ActionMnemonic, input.ActionMnemonic; got != want {
 		t.Errorf("ActionMnemonic: got %q, want %q", got, want)
