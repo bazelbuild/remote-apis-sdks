@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"errors"
+
 	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -130,14 +131,26 @@ func getRelPath(base, path string) (string, error) {
 	return rel, nil
 }
 
-func getAbsPath(base, relPath string) (string, error) {
-	base = filepath.Clean(base)
-	if filepath.IsAbs(relPath) {
-		return "", fmt.Errorf("input path %q must be relative to the base directory", relPath)
+// getAbsPath returns the absolute path for filePath. If filePath is relative,
+// it's joined with base; if absolute, it's cleaned.
+// It returns an error if the resulting path is not contained in base.
+func getAbsPath(base, filePath string) (string, error) {
+	base, err := filepath.Abs(base)
+	if err != nil {
+		return "", err
 	}
-	res := filepath.Clean(filepath.Join(base, relPath))
-	if !strings.HasPrefix(res, base) {
-		return "", fmt.Errorf("path %v is not under %v", relPath, base)
+	var res string
+	if filepath.IsAbs(filePath) {
+		res = filepath.Clean(filePath)
+	} else {
+		res = filepath.Join(base, filePath)
+	}
+	rel, err := filepath.Rel(base, res)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("path %q is not under %q", filePath, base)
 	}
 	return res, nil
 }

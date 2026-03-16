@@ -4,3 +4,4 @@
 .*.sw*
 # Ignore bazel directories.
 /bazel-*
+.ijwb

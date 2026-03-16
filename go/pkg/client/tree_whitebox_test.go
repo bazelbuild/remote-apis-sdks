@@ -295,3 +295,120 @@ func TestEvalParentSymlinks(t *testing.T) {
 		})
 	}
 }
+
+func TestGetAbsPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "base", "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd failed: %v", err)
+	}
+	cwd = filepath.Clean(cwd)
+
+	absBaseInTmp := filepath.Join(tmpDir, "base")
+
+	tests := []struct {
+		name      string
+		base      string
+		path      string
+		wantError bool
+		want      string
+	}{
+		// Absolute base
+		{
+			name: "abs_base,_rel_path",
+			base: absBaseInTmp,
+			path: "sub",
+			want: filepath.Join(absBaseInTmp, "sub"),
+		},
+		{
+			name: "abs_base,_rel_path_cleaned",
+			base: absBaseInTmp,
+			path: "sub/../other",
+			want: filepath.Join(absBaseInTmp, "other"),
+		},
+		{
+			name:      "abs_base,_rel_path_escaping",
+			base:      absBaseInTmp,
+			path:      "../other",
+			wantError: true,
+		},
+		{
+			name: "abs_base,_abs_path",
+			base: absBaseInTmp,
+			path: filepath.Join(absBaseInTmp, "sub"),
+			want: filepath.Join(absBaseInTmp, "sub"),
+		},
+		{
+			name:      "abs_base,_abs_path_escaping",
+			base:      tmpDir,
+			path:      cwd,
+			wantError: true,
+		},
+		// Relative base "."
+		{
+			name: "dot_base,_rel_path",
+			base: ".",
+			path: "foo",
+			want: filepath.Join(cwd, "foo"),
+		},
+		{
+			name:      "dot_base,_rel_path_escaping",
+			base:      ".",
+			path:      "../foo",
+			wantError: true,
+		},
+		{
+			name: "dot_base,_abs_path_in_cwd",
+			base: ".",
+			path: filepath.Join(cwd, "foo"),
+			want: filepath.Join(cwd, "foo"),
+		},
+		{
+			name:      "dot_base,_abs_path_outside_cwd",
+			base:      ".",
+			path:      tmpDir,
+			wantError: true,
+		},
+		{
+			name: "dot_base,_dot_path",
+			base: ".",
+			path: ".",
+			want: cwd,
+		},
+		// Relative base "foo/bar"
+		{
+			name: "rel_base_dir,_rel_path",
+			base: "foo/bar",
+			path: "baz",
+			want: filepath.Join(cwd, "foo", "bar", "baz"),
+		},
+		{
+			name:      "rel_base_dir,_rel_path_escaping",
+			base:      "foo/bar",
+			path:      "../../baz",
+			wantError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := getAbsPath(tc.base, tc.path)
+			if tc.wantError {
+				if err == nil {
+					t.Errorf("getAbsPath(%q, %q) succeeded, want error", tc.base, tc.path)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("getAbsPath(%q, %q) failed: %v", tc.base, tc.path, err)
+			}
+			if got != tc.want {
+				t.Errorf("getAbsPath(%q, %q) = %q, want %q", tc.base, tc.path, got, tc.want)
+			}
+		})
+	}
+}
