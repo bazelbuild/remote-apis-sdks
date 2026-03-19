@@ -33,6 +33,12 @@ type Metadata struct {
 	ToolName string
 	// ToolVersion is an optional tool version to pass to the remote server for logging.
 	ToolVersion string
+	// ActionMnemonic is an optional mnemonic describing the type of action (e.g. "CppCompile", "GoLink").
+	ActionMnemonic string
+	// TargetID is an optional id for the target being built.
+	TargetID string
+	// ConfigurationID is an optional id for the configuration used for the build.
+	ConfigurationID string
 }
 
 // Infof is equivalent to log.V(x).Infof(...) except it
@@ -69,6 +75,9 @@ func ExtractMetadata(ctx context.Context) (m *Metadata, err error) {
 		ActionID:                meta.ActionId,
 		InvocationID:            meta.ToolInvocationId,
 		CorrelatedInvocationsID: meta.CorrelatedInvocationsId,
+		ActionMnemonic:          meta.ActionMnemonic,
+		TargetID:                meta.TargetId,
+		ConfigurationID:         meta.ConfigurationId,
 	}, nil
 }
 
@@ -97,12 +106,16 @@ func WithMetadata(ctx context.Context, ms ...*Metadata) (context.Context, error)
 	}
 
 	meta := &repb.RequestMetadata{
-		ActionId:         actionID,
-		ToolInvocationId: invocationID,
+		ActionId:                actionID,
+		ToolInvocationId:        invocationID,
+		CorrelatedInvocationsId: m.CorrelatedInvocationsID,
 		ToolDetails: &repb.ToolDetails{
 			ToolName:    m.ToolName,
 			ToolVersion: m.ToolVersion,
 		},
+		ActionMnemonic:  m.ActionMnemonic,
+		TargetId:        m.TargetID,
+		ConfigurationId: m.ConfigurationID,
 	}
 
 	// Marshal the proto to a binary buffer
@@ -117,9 +130,10 @@ func WithMetadata(ctx context.Context, ms ...*Metadata) (context.Context, error)
 	return metadata.NewOutgoingContext(ctx, mdPair), nil
 }
 
-// MergeMetadata returns a new instance that has the tool name, tool version and correlated action id from
-// the first argument, and joins a sorted and unique set of action IDs and invocation IDs from all arguments.
-// Nil is never returned.
+// MergeMetadata returns a new instance that has the tool name, tool version,
+// correlated invocations ID, action mnemonic, target ID, and configuration ID
+// from the first argument, and joins a sorted and unique set of action IDs and
+// invocation IDs from all arguments. Nil is never returned.
 func MergeMetadata(metas ...*Metadata) *Metadata {
 	if len(metas) == 0 {
 		return &Metadata{}
@@ -137,6 +151,9 @@ func MergeMetadata(metas ...*Metadata) *Metadata {
 		CorrelatedInvocationsID: metas[0].CorrelatedInvocationsID,
 		ToolName:                metas[0].ToolName,
 		ToolVersion:             metas[0].ToolVersion,
+		ActionMnemonic:          metas[0].ActionMnemonic,
+		TargetID:                metas[0].TargetID,
+		ConfigurationID:         metas[0].ConfigurationID,
 	}
 
 	return md
@@ -182,13 +199,28 @@ func mergeSet(set map[string]struct{}) string {
 
 // capToLimit ensures total length does not exceed max header size.
 func capToLimit(m *Metadata, limit int) *Metadata {
-	total := len(m.ToolName) + len(m.ToolVersion) + len(m.ActionID) + len(m.InvocationID) + len(m.CorrelatedInvocationsID)
+	total := len(m.ToolName) + len(m.ToolVersion) + len(m.ActionID) + len(m.InvocationID) + len(m.CorrelatedInvocationsID) + len(m.ActionMnemonic) + len(m.TargetID) + len(m.ConfigurationID)
 	excess := total - limit
 	if excess <= 0 {
 		return m
 	}
-	// We ignore the tool name, because in practice this is a
-	// very short constant which makes no sense to truncate.
+
+	// First, drop less critical fields to bring the total down.
+	for _, f := range []*string{&m.ConfigurationID, &m.TargetID, &m.ActionMnemonic} {
+		if excess <= 0 {
+			break
+		}
+		t := min(excess, len(*f))
+		*f = (*f)[:len(*f)-t]
+		excess -= t
+	}
+	if excess <= 0 {
+		return m
+	}
+
+	// If still over limit, trim ActionID and InvocationID, keeping them
+	// balanced in length. We ignore the tool name, because in practice
+	// this is a very short constant which makes no sense to truncate.
 	diff := len(m.ActionID) - len(m.InvocationID)
 	if diff > 0 {
 		if diff > excess {
