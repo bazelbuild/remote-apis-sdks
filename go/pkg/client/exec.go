@@ -118,6 +118,9 @@ func (c *Client) executeJob(ctx context.Context, skipCache bool, acDg *repb.Dige
 		InstanceName:    c.InstanceName,
 		SkipCacheLookup: skipCache,
 		ActionDigest:    acDg,
+		ExecutionPolicy: &repb.ExecutionPolicy{
+			Priority: int32(c.ExecutionPriority),
+		},
 	}
 	op, err := c.ExecuteAndWait(ctx, execReq)
 	if err != nil {
