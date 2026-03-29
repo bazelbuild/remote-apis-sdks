@@ -136,7 +136,9 @@ func getAbsPath(base, relPath string) (string, error) {
 		return "", fmt.Errorf("input path %q must be relative to the base directory", relPath)
 	}
 	res := filepath.Clean(filepath.Join(base, relPath))
-	if !strings.HasPrefix(res, base) {
+	// Use separator-aware prefix check to prevent traversal into sibling directories
+	// whose names share a prefix with base (e.g. base="/tmp/out", sibling="/tmp/output").
+	if res != base && !strings.HasPrefix(res, base+string(filepath.Separator)) {
 		return "", fmt.Errorf("path %v is not under %v", relPath, base)
 	}
 	return res, nil

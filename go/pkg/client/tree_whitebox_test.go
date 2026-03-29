@@ -11,6 +11,74 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
+func TestGetAbsPath(t *testing.T) {
+	tests := []struct {
+		desc    string
+		base    string
+		relPath string
+		wantErr bool
+		wantRes string
+	}{
+		{
+			desc:    "simple file under base",
+			base:    "/tmp/output",
+			relPath: "subdir/file.txt",
+			wantRes: "/tmp/output/subdir/file.txt",
+		},
+		{
+			desc:    "base itself",
+			base:    "/tmp/output",
+			relPath: ".",
+			wantRes: "/tmp/output",
+		},
+		{
+			desc:    "absolute path rejected",
+			base:    "/tmp/output",
+			relPath: "/etc/passwd",
+			wantErr: true,
+		},
+		{
+			desc:    "full escape rejected",
+			base:    "/tmp/output",
+			relPath: "../../etc/passwd",
+			wantErr: true,
+		},
+		{
+			// Sibling directory whose name starts with the same prefix as base.
+			// e.g. base="/tmp/output", sibling="/tmp/outputevil"
+			// Previously HasPrefix check was tricked into allowing this.
+			desc:    "sibling directory with shared prefix rejected",
+			base:    "/tmp/output",
+			relPath: "../outputevil/secret",
+			wantErr: true,
+		},
+		{
+			desc:    "another sibling prefix bypass rejected",
+			base:    "/home/user/build/output",
+			relPath: "../outputextra/malware.sh",
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			res, err := getAbsPath(tc.base, tc.relPath)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("getAbsPath(%q, %q) = %q, want error", tc.base, tc.relPath, res)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("getAbsPath(%q, %q) unexpected error: %v", tc.base, tc.relPath, err)
+				return
+			}
+			if res != tc.wantRes {
+				t.Errorf("getAbsPath(%q, %q) = %q, want %q", tc.base, tc.relPath, res, tc.wantRes)
+			}
+		})
+	}
+}
+
 func TestGetTargetRelPath(t *testing.T) {
 	execRoot := "/execRoot"
 	defaultSym := "symDir/sym"
