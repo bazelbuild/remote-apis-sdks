@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -147,7 +148,21 @@ func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 		}
 	}
 	for _, out := range symlinks {
-		if err := os.Symlink(out.SymlinkTarget, filepath.Join(outDir, out.Path)); err != nil {
+		symlinkPath, err := getAbsPath(outDir, out.Path)
+		if err != nil {
+			return fullStats, err
+		}
+		// Validate that the symlink target resolves within outDir to prevent
+		// symlink-based path traversal (e.g. target = "/etc/shadow").
+		target := out.SymlinkTarget
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(symlinkPath), target)
+		}
+		target = filepath.Clean(target)
+		if target != outDir && !strings.HasPrefix(target, outDir+string(filepath.Separator)) {
+			return fullStats, fmt.Errorf("symlink target %q resolves to %q which is outside output directory %q", out.SymlinkTarget, target, outDir)
+		}
+		if err := os.Symlink(out.SymlinkTarget, symlinkPath); err != nil {
 			return fullStats, err
 		}
 	}
@@ -522,7 +537,11 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	}
 	// Remove the existing output directories before downloading.
 	for _, dir := range resPb.OutputDirectories {
-		if err := os.RemoveAll(filepath.Join(outDir, dir.Path)); err != nil {
+		absPath, err := getAbsPath(outDir, dir.Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.RemoveAll(absPath); err != nil {
 			return nil, err
 		}
 	}
