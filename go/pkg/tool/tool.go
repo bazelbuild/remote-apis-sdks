@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -485,10 +486,18 @@ func (c *Client) DownloadAction(ctx context.Context, actionDigest, outputPath st
 	return nil
 }
 
-// shellSprintf is intended to add args sanitization before using them.
-func shellSprintf(format string, args ...any) string {
-	// TODO: check args for flag injection
-	return fmt.Sprintf(format, args...)
+// posixEnvName matches a POSIX-compatible shell environment variable name.
+// Names that don't match are dropped with a warning rather than emitted as an
+// invalid `export` line in the generated script.
+var posixEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// shellQuote returns s wrapped in single quotes, with any embedded single
+// quotes safely escaped. The returned string is safe to interpolate verbatim
+// into a POSIX shell command. Single-quote wrapping is preferred over double
+// quotes because no character inside a single-quoted string is interpreted by
+// the shell except `'` itself.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filename string) error {
@@ -498,37 +507,36 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 
 	var runActionScript bytes.Buffer
 	runActionFilename := filepath.Join(filepath.Dir(filename), "run_command.sh")
-	wd := cmd.WorkingDirectory
 	cmdArgs := make([]string, len(cmd.GetArguments()))
 	for i, arg := range cmd.GetArguments() {
-		if strings.Contains(arg, " ") {
-			cmdArgs[i] = fmt.Sprintf("'%s'", arg)
-			continue
-		}
-		if strings.HasPrefix(arg, "--cfg") {
-			cmdArgs[i] = fmt.Sprintf("'%s'", arg)
-			continue
-		}
-		cmdArgs[i] = arg
+		// Server-controlled values can contain shell metacharacters and even
+		// embedded single quotes; quote unconditionally rather than relying on
+		// "contains a space" heuristics.
+		cmdArgs[i] = shellQuote(arg)
 	}
 	execCmd := strings.Join(cmdArgs, " ")
-	runActionScript.WriteString(shellSprintf("#!/bin/bash\n\n"))
-	runActionScript.WriteString(shellSprintf("# This script is meant to be called by %v.\n", filename))
-	if wd != "" {
-		runActionScript.WriteString(shellSprintf("cd %v\n", wd))
+	runActionScript.WriteString("#!/bin/bash\n\n")
+	fmt.Fprintf(&runActionScript, "# This script is meant to be called by %s.\n", filename)
+	if wd := cmd.WorkingDirectory; wd != "" {
+		fmt.Fprintf(&runActionScript, "cd %s\n", shellQuote(wd))
 	}
 	for _, od := range cmd.GetOutputDirectories() {
-		runActionScript.WriteString(shellSprintf("mkdir -p %v\n", od))
+		fmt.Fprintf(&runActionScript, "mkdir -p %s\n", shellQuote(od))
 	}
 	for _, of := range cmd.GetOutputFiles() {
-		runActionScript.WriteString(shellSprintf("mkdir -p %v\n", filepath.Dir(of)))
+		fmt.Fprintf(&runActionScript, "mkdir -p %s\n", shellQuote(filepath.Dir(of)))
 	}
 	for _, e := range cmd.GetEnvironmentVariables() {
-		runActionScript.WriteString(shellSprintf("export %v=%v\n", e.GetName(), e.GetValue()))
+		name := e.GetName()
+		if !posixEnvName.MatchString(name) {
+			log.Warningf("writeExecScript: skipping environment variable with non-POSIX name: %q", name)
+			continue
+		}
+		fmt.Fprintf(&runActionScript, "export %s=%s\n", name, shellQuote(e.GetValue()))
 	}
 	runActionScript.WriteString(execCmd)
 	runActionScript.WriteRune('\n')
-	runActionScript.WriteString(shellSprintf("bash\n"))
+	runActionScript.WriteString("bash\n")
 	if err := os.WriteFile(runActionFilename, runActionScript.Bytes(), 0755); err != nil {
 		return err
 	}
@@ -548,11 +556,11 @@ func (c *Client) writeExecScript(ctx context.Context, cmd *repb.Command, filenam
 		return fmt.Errorf("container-image platform property missing from command proto: %v", cmd)
 	}
 	var execScript bytes.Buffer
-	execScript.WriteString(shellSprintf("#!/bin/bash\n\n"))
-	execScript.WriteString(shellSprintf("# This script can be used to run the action locally on\n"))
-	execScript.WriteString(shellSprintf("# this machine.\n"))
-	execScript.WriteString(shellSprintf("echo \"WARNING: The results from executing the action through this script may differ from results from RBE.\"\n"))
-	execScript.WriteString(shellSprintf("set -x\n"))
+	execScript.WriteString("#!/bin/bash\n\n")
+	execScript.WriteString("# This script can be used to run the action locally on\n")
+	execScript.WriteString("# this machine.\n")
+	execScript.WriteString("echo \"WARNING: The results from executing the action through this script may differ from results from RBE.\"\n")
+	execScript.WriteString("set -x\n")
 	execScript.WriteString("docker run -i -t -w /b/f/w -v `pwd`/input:/b/f/w -v `pwd`/run_command.sh:/b/f/w/run_command.sh ")
 	execScript.WriteString(dockerParams)
 	execScript.WriteString(" ")
