@@ -28,7 +28,10 @@ go_library(
 
 go_test(
     name = "tool_test",
-    srcs = ["tool_test.go"],
+    srcs = [
+        "tool_shellquote_test.go",
+        "tool_test.go",
+    ],
     embed = [":tool"],
     deps = [
         "//go/api/command",

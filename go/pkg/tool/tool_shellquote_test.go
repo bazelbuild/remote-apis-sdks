@@ -21,7 +21,7 @@ func runBashScript(t *testing.T, path string) {
 }
 
 // stripSingleQuotedRegions returns line with every single-quoted region
-// (including the standard `'\''` escape sequence for an embedded single quote)
+// (including the standard `'\”` escape sequence for an embedded single quote)
 // removed. The resulting string contains only the parts of the line that bash
 // would parse as unquoted; if any shell metacharacter appears in it, the line
 // is unsafe.
