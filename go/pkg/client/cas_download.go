@@ -522,7 +522,11 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	}
 	// Remove the existing output directories before downloading.
 	for _, dir := range resPb.OutputDirectories {
-		if err := os.RemoveAll(filepath.Join(outDir, dir.Path)); err != nil {
+		absPath, err := getAbsPath(outDir, dir.Path)
+		if err != nil {
+			return nil, fmt.Errorf("invalid output directory path %q: %v", dir.Path, err)
+		}
+		if err := os.RemoveAll(absPath); err != nil {
 			return nil, err
 		}
 	}
