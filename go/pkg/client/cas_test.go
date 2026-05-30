@@ -2051,6 +2051,55 @@ func TestBatchDownloadBlobsBrokenCompression(t *testing.T) {
 	}
 }
 
+func TestBatchDownloadBlobsDigestMismatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("Cannot listen: %v", err)
+	}
+	defer listener.Close()
+	fakeCAS := fakes.NewCAS()
+	server := grpc.NewServer()
+	s := invalidReadServer{
+		ContentAddressableStorageServer: fakeCAS,
+	}
+	regrpc.RegisterContentAddressableStorageServer(server, &s)
+	go server.Serve(listener)
+	defer server.Stop()
+	c, err := client.NewClient(ctx, instance, client.DialParams{
+		Service:    listener.Addr().String(),
+		NoSecurity: true,
+	}, client.StartupCapabilities(false))
+	if err != nil {
+		t.Fatalf("Error connecting to server: %v", err)
+	}
+	defer c.Close()
+
+	fooDigest := fakeCAS.Put([]byte("foo"))
+	barDigest := fakeCAS.Put([]byte("bar"))
+	digests := []digest.Digest{fooDigest, barDigest}
+
+	// Server returns bytes that do not hash to the requested digest for one blob.
+	s.setModifier(func(idx int, resp *repb.BatchReadBlobsResponse_Response) {
+		if resp.GetDigest().GetHash() == fooDigest.Hash {
+			resp.Data = []byte("tampered")
+		}
+	})
+	defer s.setModifier(nil)
+
+	gotBlobs, err := c.BatchDownloadBlobsWithStats(ctx, digests)
+	if err == nil {
+		t.Fatal("client.BatchDownloadBlobsWithStats(ctx, digests) should return an error when returned bytes do not match the requested digest")
+	}
+	if !strings.Contains(err.Error(), "calculated digest") {
+		t.Errorf("expected a calculated-digest mismatch error, got: %v", err)
+	}
+	if _, ok := gotBlobs[fooDigest]; ok {
+		t.Error("a blob whose bytes do not match the requested digest must not be returned to the caller")
+	}
+}
+
 type escapedPathTestEnv struct {
 	ctx           context.Context
 	c             *client.Client

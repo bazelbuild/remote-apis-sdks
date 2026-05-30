@@ -271,11 +271,21 @@ func (c *Client) BatchDownloadBlobsWithStats(ctx context.Context, dgs []digest.D
 					allRetriable = false
 					continue
 				}
+				// Verify the returned bytes hash to the requested digest before
+				// trusting them, matching the streamed path (readBlobStreamed).
+				dg := digest.NewFromProtoUnvalidated(r.Digest)
+				if got := digest.NewFromBlob(r.Data); got != dg {
+					errDg = r.Digest
+					errMsg = fmt.Sprintf("calculated digest %s != expected digest %s", got, dg)
+					numErrs++
+					allRetriable = false
+					continue
+				}
 				bi := CompressedBlobInfo{
 					CompressedSize: int64(CompressedSize),
 					Data:           r.Data,
 				}
-				res[digest.NewFromProtoUnvalidated(r.Digest)] = bi
+				res[dg] = bi
 			}
 		}
 		req.Digests = failedDgs
