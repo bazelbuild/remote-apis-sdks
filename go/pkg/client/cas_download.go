@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -147,7 +148,20 @@ func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 		}
 	}
 	for _, out := range symlinks {
-		if err := os.Symlink(out.SymlinkTarget, filepath.Join(outDir, out.Path)); err != nil {
+		linkPath := filepath.Join(outDir, out.Path)
+		// out.SymlinkTarget is provided by the (untrusted) server. Reject
+		// targets that resolve outside outDir (absolute paths or ".." escapes)
+		// so that downloading a result cannot create links to arbitrary
+		// locations on the client filesystem.
+		resolvedTarget := out.SymlinkTarget
+		if !filepath.IsAbs(resolvedTarget) {
+			resolvedTarget = filepath.Join(filepath.Dir(linkPath), resolvedTarget)
+		}
+		if rel, err := filepath.Rel(outDir, resolvedTarget); err != nil ||
+			rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fullStats, fmt.Errorf("symlink target %q for %q escapes the output directory", out.SymlinkTarget, out.Path)
+		}
+		if err := os.Symlink(out.SymlinkTarget, linkPath); err != nil {
 			return fullStats, err
 		}
 	}
