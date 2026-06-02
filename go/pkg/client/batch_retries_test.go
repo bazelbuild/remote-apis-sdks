@@ -47,9 +47,9 @@ func (f *flakyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchRe
 		f.numErrors++
 		resp := &repb.BatchReadBlobsResponse{
 			Responses: []*repb.BatchReadBlobsResponse_Response{
-				{Digest: digest.TestNew("a", 1).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}, Data: []byte{1}},
+				{Digest: digest.NewFromBlob([]byte{1}).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}, Data: []byte{1}},
 				// all retriable errors.
-				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
+				{Digest: digest.NewFromBlob([]byte{2}).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
 				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Canceled)}},
 				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Aborted)}},
 			},
@@ -60,7 +60,7 @@ func (f *flakyBatchServer) BatchReadBlobs(ctx context.Context, req *repb.BatchRe
 		f.numErrors++
 		resp := &repb.BatchReadBlobsResponse{
 			Responses: []*repb.BatchReadBlobsResponse_Response{
-				{Digest: digest.TestNew("b", 1).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}, Data: []byte{2}},
+				{Digest: digest.NewFromBlob([]byte{2}).ToProto(), Status: &spb.Status{Code: int32(codes.OK)}, Data: []byte{2}},
 				// all retriable errors.
 				{Digest: digest.TestNew("c", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Internal)}},
 				{Digest: digest.TestNew("d", 1).ToProto(), Status: &spb.Status{Code: int32(codes.Canceled)}},
@@ -228,14 +228,14 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 	defer client.Close()
 
 	digests := []digest.Digest{
-		digest.TestNew("a", 1),
-		digest.TestNew("b", 1),
+		digest.NewFromBlob([]byte{1}),
+		digest.NewFromBlob([]byte{2}),
 		digest.TestNew("c", 1),
 		digest.TestNew("d", 1),
 	}
 	wantBlobs := map[digest.Digest][]byte{
-		digest.TestNew("a", 1): []byte{1},
-		digest.TestNew("b", 1): []byte{2},
+		digest.NewFromBlob([]byte{1}): []byte{1},
+		digest.NewFromBlob([]byte{2}): []byte{2},
 	}
 	gotBlobs, err := client.BatchDownloadBlobs(ctx, digests)
 	if err == nil {
@@ -249,8 +249,8 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 	wantRequests := []*repb.BatchReadBlobsRequest{
 		{
 			Digests: []*repb.Digest{
-				digest.TestNew("a", 1).ToProto(),
-				digest.TestNew("b", 1).ToProto(),
+				digest.NewFromBlob([]byte{1}).ToProto(),
+				digest.NewFromBlob([]byte{2}).ToProto(),
 				digest.TestNew("c", 1).ToProto(),
 				digest.TestNew("d", 1).ToProto(),
 			},
@@ -258,7 +258,7 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 		},
 		{
 			Digests: []*repb.Digest{
-				digest.TestNew("b", 1).ToProto(),
+				digest.NewFromBlob([]byte{2}).ToProto(),
 				digest.TestNew("c", 1).ToProto(),
 				digest.TestNew("d", 1).ToProto(),
 			},
@@ -273,15 +273,20 @@ func TestBatchReadBlobsIndividualRequestRetries(t *testing.T) {
 		},
 	}
 	if len(fake.readRequests) != len(wantRequests) {
-		t.Errorf("client.BatchWriteBlobs(ctx, blobs) wrong number of requests; expected %d, got %d", len(wantRequests), len(fake.readRequests))
+		t.Fatalf("client.BatchDownloadBlobs(ctx, digests) wrong number of requests; expected %d, got %d", len(wantRequests), len(fake.readRequests))
 	}
 	for i, req := range wantRequests {
 		dgs := fake.readRequests[i].Digests
 		sort.Slice(dgs, func(a, b int) bool {
 			return fmt.Sprint(dgs[a]) < fmt.Sprint(dgs[b])
 		})
+		// The order of digests within a batch request is not significant, so sort
+		// the expected digests the same way to keep the comparison order-independent.
+		sort.Slice(req.Digests, func(a, b int) bool {
+			return fmt.Sprint(req.Digests[a]) < fmt.Sprint(req.Digests[b])
+		})
 		if diff := cmp.Diff(req, fake.readRequests[i], cmp.Comparer(proto.Equal)); diff != "" {
-			t.Errorf("client.BatchWriteBlobs(ctx, blobs) diff on request at index %d (want -> got):\n%s", i, diff)
+			t.Errorf("client.BatchDownloadBlobs(ctx, digests) diff on request at index %d (want -> got):\n%s", i, diff)
 		}
 	}
 }
