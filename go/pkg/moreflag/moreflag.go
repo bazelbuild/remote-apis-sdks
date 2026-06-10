@@ -145,23 +145,75 @@ func (m *StringListMapValue) Get() interface{} {
 	return map[string][]string(*m)
 }
 
+var matchingBracket = map[rune]rune{
+	'[': ']',
+	'{': '}',
+	'(': ')',
+}
+
 // parsePairs parses a string of the form "key1=value1,key2=value2", returning
 // a slice with an even number of strings like "key1", "value1", "key2",
 // "value2". Pairs are separated by ','; keys and values are separated by '='.
+//
+// Commas are ignored as pair delimiters if they are:
+//   - Escaped with a backslash (e.g. '\,')
+//   - Contained within single (”) or double ("") quotes
+//   - Nested inside matching brackets ('[]'), braces ('{}'), or parentheses ('()')
 func parsePairs(s string) ([]string, error) {
 	var pairs []string
-	for _, p := range strings.Split(s, ",") {
+	var currentPair strings.Builder
+	var escaped bool
+	var inQuote rune
+	var stack []rune
+
+	addPair := func(p string) error {
 		if p == "" {
-			continue
+			return nil
 		}
 		k, v, ok := strings.Cut(p, "=")
 		if !ok {
-			return nil, fmt.Errorf("wrong format for key=value pair: %v", p)
+			return fmt.Errorf("wrong format for key=value pair: %v", p)
 		}
 		if k == "" {
-			return nil, fmt.Errorf("key not provided")
+			return fmt.Errorf("key not provided")
 		}
 		pairs = append(pairs, k, v)
+		return nil
 	}
+
+	for _, r := range s {
+		switch {
+		case escaped:
+			currentPair.WriteRune(r)
+			escaped = false
+		case r == '\\':
+			escaped = true
+		case inQuote != 0:
+			if r == inQuote {
+				inQuote = 0
+			}
+			currentPair.WriteRune(r)
+		case r == '"' || r == '\'':
+			inQuote = r
+			currentPair.WriteRune(r)
+		case r == ',' && len(stack) == 0:
+			if err := addPair(currentPair.String()); err != nil {
+				return nil, err
+			}
+			currentPair.Reset()
+		default:
+			if closing, ok := matchingBracket[r]; ok {
+				stack = append(stack, closing)
+			} else if len(stack) > 0 && stack[len(stack)-1] == r {
+				stack = stack[:len(stack)-1]
+			}
+			currentPair.WriteRune(r)
+		}
+	}
+
+	if err := addPair(currentPair.String()); err != nil {
+		return nil, err
+	}
+
 	return pairs, nil
 }

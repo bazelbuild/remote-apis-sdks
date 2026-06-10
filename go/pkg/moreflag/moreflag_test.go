@@ -83,6 +83,24 @@ func TestMapValueSet(t *testing.T) {
 			wantStr: "type=compile",
 		},
 		{
+			name:    "ok - escaped comma",
+			str:     `key=val\,ue,key2=val2`,
+			wantMap: map[string]string{"key": "val,ue", "key2": "val2"},
+			wantStr: "key=val,ue,key2=val2",
+		},
+		{
+			name:    "ok - nested JSON with escaped comma",
+			str:     `a=[{"k1":"v1"\,"k2":"v2"}],b=c`,
+			wantMap: map[string]string{"a": `[{"k1":"v1","k2":"v2"}]`, "b": "c"},
+			wantStr: `a=[{"k1":"v1","k2":"v2"}],b=c`,
+		},
+		{
+			name:    "ok - nested JSON with unescaped comma",
+			str:     `a=[{"k1":"v1","k2":"v2"}],b=c`,
+			wantMap: map[string]string{"a": `[{"k1":"v1","k2":"v2"}]`, "b": "c"},
+			wantStr: `a=[{"k1":"v1","k2":"v2"}],b=c`,
+		},
+		{
 			name:    "empty",
 			str:     "",
 			wantMap: map[string]string{},
