@@ -660,6 +660,12 @@ func OptsFromParams(ctx context.Context, params DialParams) ([]grpc.DialOption, 
 
 	if len(params.RemoteHeaders) > 0 {
 		md := metadata.MD(params.RemoteHeaders)
+		attachMetadata := func(ctx context.Context) context.Context {
+			if existingMd, ok := metadata.FromOutgoingContext(ctx); ok {
+				return metadata.NewOutgoingContext(ctx, metadata.Join(existingMd, md))
+			}
+			return metadata.NewOutgoingContext(ctx, md)
+		}
 		opts = append(
 			opts,
 			grpc.WithChainUnaryInterceptor(func(
@@ -669,8 +675,7 @@ func OptsFromParams(ctx context.Context, params DialParams) ([]grpc.DialOption, 
 				cc *grpc.ClientConn,
 				invoker grpc.UnaryInvoker,
 				opts ...grpc.CallOption) error {
-				ctx = metadata.NewOutgoingContext(ctx, md)
-				return invoker(ctx, method, req, reply, cc, opts...)
+				return invoker(attachMetadata(ctx), method, req, reply, cc, opts...)
 			}),
 			grpc.WithChainStreamInterceptor(func(
 				ctx context.Context,
@@ -679,8 +684,7 @@ func OptsFromParams(ctx context.Context, params DialParams) ([]grpc.DialOption, 
 				method string,
 				streamer grpc.Streamer,
 				opts ...grpc.CallOption) (grpc.ClientStream, error) {
-				ctx = metadata.NewOutgoingContext(ctx, md)
-				return streamer(ctx, desc, cc, method, opts...)
+				return streamer(attachMetadata(ctx), desc, cc, method, opts...)
 			}))
 	}
 
