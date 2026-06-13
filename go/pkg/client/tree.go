@@ -110,13 +110,21 @@ func shouldIgnore(inp string, t command.InputType, excl []*command.InputExclusio
 }
 
 // shouldIgnoreErr returns whether a given error should be ignored.
-func shouldIgnoreErr(err error) bool {
+func shouldIgnoreErr(path string, err error) bool {
 	// We should skip files without read permissions. If the user doesn't have read permissions,
 	// the file is unlikely to be used in the build in the first place.
 	if e, ok := err.(*filemetadata.FileError); ok {
-		return os.IsPermission(e.Err)
+		if os.IsPermission(e.Err) {
+			log.V(3).Infof("Skipping %s due to permission error: %v", path, err)
+			return true
+		}
+		return false
 	}
-	return os.IsPermission(err)
+	if os.IsPermission(err) {
+		log.V(3).Infof("Skipping %s due to permission error: %v", path, err)
+		return true
+	}
+	return false
 }
 
 func getRelPath(base, path string) (string, error) {
@@ -373,7 +381,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			if shouldIgnore(absPath, command.DirectoryInputType, excl) {
 				continue
 			} else if meta.Err != nil {
-				if shouldIgnoreErr(meta.Err) {
+				if shouldIgnoreErr(absPath, meta.Err) {
 					continue
 				}
 				return meta.Err
@@ -381,7 +389,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 
 			f, err := os.Open(absPath)
 			if err != nil {
-				if shouldIgnoreErr(err) {
+				if shouldIgnoreErr(absPath, err) {
 					continue
 				}
 				return err
@@ -406,7 +414,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			if shouldIgnore(absPath, command.FileInputType, excl) {
 				continue
 			} else if meta.Err != nil {
-				if shouldIgnoreErr(meta.Err) {
+				if shouldIgnoreErr(absPath, meta.Err) {
 					continue
 				}
 				return meta.Err
@@ -739,7 +747,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 			if e, ok := meta.Err.(*filemetadata.FileError); ok && e.IsNotFound {
 				continue // Ignore missing outputs.
 			}
-			if shouldIgnoreErr(meta.Err) {
+			if shouldIgnoreErr(absPath, meta.Err) {
 				continue
 			}
 			return nil, nil, meta.Err
