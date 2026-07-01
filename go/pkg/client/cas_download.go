@@ -239,7 +239,7 @@ func (c *Client) BatchDownloadBlobsWithStats(ctx context.Context, dgs []digest.D
 			st := status.FromProto(r.Status)
 			if st.Code() != codes.OK {
 				e := st.Err()
-				if c.Retrier.ShouldRetry(e) {
+				if c.getRetrier("BatchReadBlobs").ShouldRetry(e) {
 					failedDgs = append(failedDgs, r.Digest)
 					retriableError = e
 				} else {
@@ -287,7 +287,7 @@ func (c *Client) BatchDownloadBlobsWithStats(ctx context.Context, dgs []digest.D
 		}
 		return nil
 	}
-	return res, c.Retrier.Do(ctx, closure)
+	return res, c.getRetrier("BatchReadBlobs").Do(ctx, closure)
 }
 
 // BatchDownloadBlobs downloads a number of blobs from the CAS to memory. They must collectively be below the
@@ -410,7 +410,7 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 		return nil
 	}
 	// Only retry on transient backend issues.
-	if err := c.Retrier.Do(ctx, closure); err != nil {
+	if err := c.getRetrier("Read").Do(ctx, closure); err != nil {
 		return stats, err
 	}
 	if wt.n != sz {
@@ -467,7 +467,7 @@ func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result [
 		}
 		return nil
 	}
-	if err := c.Retrier.Do(ctx, func() error { return c.CallWithTimeout(ctx, "GetTree", closure) }); err != nil {
+	if err := c.getRetrier("GetTree").Do(ctx, func() error { return c.CallWithTimeout(ctx, "GetTree", closure) }); err != nil {
 		return nil, err
 	}
 	return result, nil
