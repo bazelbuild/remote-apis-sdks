@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -147,11 +148,32 @@ func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutpu
 		}
 	}
 	for _, out := range symlinks {
-		if err := os.Symlink(out.SymlinkTarget, filepath.Join(outDir, out.Path)); err != nil {
+		linkPath := filepath.Join(outDir, out.Path)
+		if err := checkSymlinkTargetContained(outDir, linkPath, out.SymlinkTarget); err != nil {
+			return fullStats, err
+		}
+		if err := os.Symlink(out.SymlinkTarget, linkPath); err != nil {
 			return fullStats, err
 		}
 	}
 	return fullStats, nil
+}
+
+// checkSymlinkTargetContained verifies that a symlink at linkPath (already known to be
+// under outDir) does not resolve to a location outside outDir once target is applied.
+// target follows normal symlink semantics: an absolute target is used as-is, a relative
+// one is resolved relative to the directory containing linkPath.
+func checkSymlinkTargetContained(outDir, linkPath, target string) error {
+	resolved := target
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(filepath.Dir(linkPath), resolved)
+	}
+	resolved = filepath.Clean(resolved)
+	base := filepath.Clean(outDir)
+	if resolved != base && !strings.HasPrefix(resolved, base+string(filepath.Separator)) {
+		return fmt.Errorf("symlink target %q for %q resolves outside outDir %q", target, linkPath, outDir)
+	}
+	return nil
 }
 
 // DownloadDirectory downloads the entire directory of given digest.
