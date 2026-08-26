@@ -1237,6 +1237,33 @@ func TestDownloadActionOutputs(t *testing.T) {
 	}
 }
 
+func TestUnifiedDownloadReturnsCASErrors(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	c := e.Client.GrpcClient
+	c.UnifiedDownloads = true
+	c.RunBackgroundTasks(ctx)
+
+	missingDigest := digest.NewFromBlob([]byte("not in cas"))
+	ar := &repb.ActionResult{OutputFiles: []*repb.OutputFile{{
+		Path:   "missing",
+		Digest: missingDigest.ToProto(),
+	}}}
+	_, err := c.DownloadActionOutputs(ctx, ar, t.TempDir(), filemetadata.NewSingleFlightCache())
+	if err == nil {
+		t.Fatal("DownloadActionOutputs succeeded with a missing CAS blob")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("DownloadActionOutputs waited for the context deadline instead of returning the CAS error")
+	}
+	if got := status.Code(err); got != codes.NotFound {
+		t.Fatalf("DownloadActionOutputs returned code %s, want %s", got, codes.NotFound)
+	}
+}
+
 func TestDownloadActionOutputs_TestFileModifiedTimestamp(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

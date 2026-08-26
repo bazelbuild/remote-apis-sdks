@@ -974,8 +974,7 @@ func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequ
 		}
 		stats, ok := bytesMoved[dg]
 		if !ok {
-			log.Errorf("Internal tool error - matching map entry")
-			continue
+			stats = &MovedBytesMetadata{Requested: dg.Size}
 		}
 		// If there's no real bytes moved it likely means there was an error moving these.
 		for i, r := range rs {
