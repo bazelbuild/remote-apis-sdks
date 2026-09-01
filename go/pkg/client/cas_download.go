@@ -81,21 +81,34 @@ func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[d
 // It returns the number of logical and real bytes downloaded, which may be different from sum
 // of sizes of the files due to dedupping and compression.
 func (c *Client) DownloadOutputs(ctx context.Context, outs map[string]*TreeOutput, outDir string, cache filemetadata.Cache) (*MovedBytesMetadata, error) {
+	if err := os.MkdirAll(outDir, c.DirMode); err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(outDir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close() // nolint:errcheck
+
 	var symlinks, copies []*TreeOutput
 	downloads := make(map[digest.Digest]*TreeOutput)
 	fullStats := &MovedBytesMetadata{}
 	for _, out := range outs {
-		path, err := getAbsPath(outDir, out.Path)
+		absPath, err := getAbsPath(outDir, out.Path)
+		if err != nil {
+			return fullStats, err
+		}
+		relPath, err := filepath.Rel(outDir, absPath)
 		if err != nil {
 			return fullStats, err
 		}
 		if out.IsEmptyDirectory {
-			if err := os.MkdirAll(path, c.DirMode); err != nil {
+			if err := root.MkdirAll(relPath, c.DirMode); err != nil {
 				return fullStats, err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(path), c.DirMode); err != nil {
+		if err := root.MkdirAll(filepath.Dir(relPath), c.DirMode); err != nil {
 			return fullStats, err
 		}
 		// We create the symbolic links after all regular downloads are finished, because dangling
@@ -440,7 +453,7 @@ func (c *Client) readBlobStreamed(ctx context.Context, d digest.Digest, offset, 
 // a Directory stored in the CAS).
 func (c *Client) GetDirectoryTree(ctx context.Context, d *repb.Digest) (result []*repb.Directory, err error) {
 	if digest.NewFromProtoUnvalidated(d).IsEmpty() {
-		return []*repb.Directory{&repb.Directory{}}, nil
+		return []*repb.Directory{{}}, nil
 	}
 	pageTok := ""
 	result = []*repb.Directory{}
@@ -520,9 +533,25 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 	if err != nil {
 		return nil, err
 	}
+	if err := os.MkdirAll(outDir, c.DirMode); err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(outDir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close() // nolint:errcheck
 	// Remove the existing output directories before downloading.
 	for _, dir := range resPb.OutputDirectories {
-		if err := os.RemoveAll(filepath.Join(outDir, dir.Path)); err != nil {
+		absPath, err := getAbsPath(outDir, dir.Path)
+		if err != nil {
+			return nil, err
+		}
+		relPath, err := filepath.Rel(outDir, absPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := root.RemoveAll(relPath); err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
 	}
@@ -766,6 +795,47 @@ func (c *Client) download(ctx context.Context, data []*downloadRequest) {
 	}
 }
 
+// openFileUnder opens or creates relPath under baseDir, rejecting symlinks outside baseDir.
+// The caller must close both *os.File and *os.Root.
+func openFileUnder(baseDir, relPath string, flag int, perm os.FileMode) (*os.File, *os.Root, error) {
+	abs, err := getAbsPath(baseDir, relPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanRel, err := filepath.Rel(baseDir, abs)
+	if err != nil {
+		return nil, nil, err
+	}
+	root, err := os.OpenRoot(baseDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	f, err := root.OpenFile(cleanRel, flag, perm)
+	if err != nil {
+		root.Close() // nolint:errcheck
+		return nil, nil, err
+	}
+	return f, root, nil
+}
+
+// writeFileUnder writes data to relPath under baseDir, rejecting symlinks outside baseDir.
+func writeFileUnder(baseDir, relPath string, data []byte, perm os.FileMode) error {
+	abs, err := getAbsPath(baseDir, relPath)
+	if err != nil {
+		return err
+	}
+	cleanRel, err := filepath.Rel(baseDir, abs)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(baseDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close() // nolint:errcheck
+	return root.WriteFile(cleanRel, data, perm)
+}
+
 func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest) {
 	contextmd.Infof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 	bchMap, err := c.BatchDownloadBlobsWithStats(ctx, batch)
@@ -787,10 +857,7 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 			if r.output.IsExecutable {
 				perm = c.ExecutableMode
 			}
-			path, err := getAbsPath(r.outDir, r.output.Path)
-			if err == nil {
-				err = os.WriteFile(path, bi.Data, perm)
-			}
+			err := writeFileUnder(r.outDir, r.output.Path, bi.Data, perm)
 			// bytesMoved will be zero for error cases.
 			// We only report it to the first client to prevent double accounting.
 			r.wait <- &downloadResponse{stats, err}
@@ -808,6 +875,32 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 	}
 }
 
+// readBlobToFileUnder downloads a blob to relPath under baseDir, rejecting symlinks outside baseDir.
+func (c *Client) readBlobToFileUnder(ctx context.Context, d digest.Digest, baseDir, relPath string, mode os.FileMode) (*MovedBytesMetadata, error) {
+	absPath, err := getAbsPath(baseDir, relPath)
+	if err != nil {
+		return nil, err
+	}
+	contextmd.Infof(ctx, log.Level(3), "Downloading single file with digest %s to %s", d, absPath)
+	f, root, err := openFileUnder(baseDir, relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, c.RegularMode)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close() // nolint:errcheck
+	defer f.Close()    // nolint:errcheck
+	stats, err := c.readBlobStreamed(ctx, d, 0, 0, f)
+	if err != nil {
+		return nil, err
+	}
+	if mode != c.RegularMode {
+		cleanRel, _ := filepath.Rel(baseDir, absPath)
+		if err := root.Chmod(cleanRel, mode); err != nil {
+			return nil, err
+		}
+	}
+	return stats, nil
+}
+
 func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[digest.Digest][]*downloadRequest) (err error) {
 	// The lock is released when all file copies are finished.
 	// We cannot release the lock after each individual file copy, because
@@ -820,34 +913,25 @@ func (c *Client) downloadSingle(ctx context.Context, dg digest.Digest, reqs map[
 	}
 	r := rs[0]
 	rs = rs[1:]
-	path, err := getAbsPath(r.outDir, r.output.Path)
-	if err != nil {
-		return err
+	perm := c.RegularMode
+	if r.output.IsExecutable {
+		perm = c.ExecutableMode
 	}
-	contextmd.Infof(ctx, log.Level(3), "Downloading single file with digest %s to %s", r.output.Digest, path)
-	stats, err := c.ReadBlobToFile(ctx, r.output.Digest, path)
+	stats, err := c.readBlobToFileUnder(ctx, r.output.Digest, r.outDir, r.output.Path, perm)
 	if err != nil {
 		return err
 	}
 	bytesMoved[r.output.Digest] = stats
-	if r.output.IsExecutable {
-		if err := os.Chmod(path, c.ExecutableMode); err != nil {
-			return err
-		}
-	}
 	for _, cp := range rs {
 		perm := c.RegularMode
 		if cp.output.IsExecutable {
 			perm = c.ExecutableMode
 		}
-		if _, err := getAbsPath(cp.outDir, cp.output.Path); err != nil {
-			return err
-		}
 		if err := copyFile(r.outDir, cp.outDir, r.output.Path, cp.output.Path, perm); err != nil {
 			return err
 		}
 	}
-	return err
+	return nil
 }
 
 // This is a legacy function used only when UnifiedDownloads=false.
@@ -915,11 +999,7 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 					if out.IsExecutable {
 						perm = c.ExecutableMode
 					}
-					path, err := getAbsPath(outDir, out.Path)
-					if err != nil {
-						return err
-					}
-					if err := os.WriteFile(path, bi.Data, perm); err != nil {
+					if err := writeFileUnder(outDir, out.Path, bi.Data, perm); err != nil {
 						return err
 					}
 					statsMu.Lock()
@@ -932,23 +1012,17 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 				}
 			} else {
 				out := outputs[batch[0]]
-				path, err := getAbsPath(outDir, out.Path)
-				if err != nil {
-					return err
+				perm := c.RegularMode
+				if out.IsExecutable {
+					perm = c.ExecutableMode
 				}
-				contextmd.Infof(ctx, log.Level(3), "Downloading single file with digest %s to %s", out.Digest, path)
-				stats, err := c.ReadBlobToFile(ctx, out.Digest, path)
+				stats, err := c.readBlobToFileUnder(ctx, out.Digest, outDir, out.Path, perm)
 				if err != nil {
 					return err
 				}
 				statsMu.Lock()
 				fullStats.addFrom(stats)
 				statsMu.Unlock()
-				if out.IsExecutable {
-					if err := os.Chmod(path, c.ExecutableMode); err != nil {
-						return err
-					}
-				}
 			}
 			if eCtx.Err() != nil {
 				return eCtx.Err()

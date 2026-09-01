@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
@@ -155,19 +154,20 @@ func marshalledRequestSize(d digest.Digest) int64 {
 }
 
 func copyFile(srcOutDir, dstOutDir, from, to string, mode os.FileMode) error {
-	src := filepath.Join(srcOutDir, from)
-	s, err := os.Open(src)
+	s, srcRoot, err := openFileUnder(srcOutDir, from, os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
+	defer srcRoot.Close() // nolint:errcheck
 	defer s.Close()
 
-	dst := filepath.Join(dstOutDir, to)
-	t, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
+	t, dstRoot, err := openFileUnder(dstOutDir, to, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
+	defer dstRoot.Close() // nolint:errcheck
 	defer t.Close()
+
 	_, err = io.Copy(t, s)
 	return err
 }
