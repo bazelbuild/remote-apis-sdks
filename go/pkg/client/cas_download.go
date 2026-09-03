@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -551,7 +552,7 @@ func (c *Client) DownloadActionOutputs(ctx context.Context, resPb *repb.ActionRe
 		if err != nil {
 			return nil, err
 		}
-		if err := root.RemoveAll(relPath); err != nil && !os.IsNotExist(err) {
+		if err := removeAllUnder(root, relPath); err != nil {
 			return nil, err
 		}
 	}
@@ -834,6 +835,27 @@ func writeFileUnder(baseDir, relPath string, data []byte, perm os.FileMode) erro
 	}
 	defer root.Close() // nolint:errcheck
 	return root.WriteFile(cleanRel, data, perm)
+}
+
+// removeAllUnder removes relPath under root. If relPath resolves to ".", all contents of root are removed.
+func removeAllUnder(root *os.Root, relPath string) error {
+	relPath = filepath.Clean(relPath)
+	if relPath == "." {
+		entries, err := fs.ReadDir(root.FS(), ".")
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := root.RemoveAll(e.Name()); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := root.RemoveAll(relPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs map[digest.Digest][]*downloadRequest) {

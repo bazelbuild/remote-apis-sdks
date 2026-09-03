@@ -1104,6 +1104,18 @@ func TestDownloadActionOutputs(t *testing.T) {
 	}
 	treeDigest := fake.Put(treeBlob)
 	treeADigest := fake.Put(treeABlob)
+	treeRoot := &repb.Tree{
+		Root: &repb.Directory{
+			Files: []*repb.FileNode{
+				{Name: "root_file", Digest: fooDigest.ToProto()},
+			},
+		},
+	}
+	treeRootBlob, err := proto.Marshal(treeRoot)
+	if err != nil {
+		t.Fatalf("failed marshalling Tree: %s", err)
+	}
+	treeRootDigest := fake.Put(treeRootBlob)
 	ar := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
 			&repb.OutputFile{Path: "foo/../foo", Digest: fooDigest.ToProto()}},
@@ -1114,6 +1126,7 @@ func TestDownloadActionOutputs(t *testing.T) {
 		OutputDirectories: []*repb.OutputDirectory{
 			&repb.OutputDirectory{Path: "dir", TreeDigest: treeDigest.ToProto()},
 			&repb.OutputDirectory{Path: "dir2", TreeDigest: treeADigest.ToProto()},
+			&repb.OutputDirectory{Path: "", TreeDigest: treeRootDigest.ToProto()},
 		},
 	}
 	execRoot := t.TempDir()
