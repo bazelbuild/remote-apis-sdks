@@ -135,6 +135,10 @@ type Client struct {
 	cas          regrpc.ContentAddressableStorageClient
 	execution    regrpc.ExecutionClient
 	operations   opgrpc.OperationsClient
+
+	// Execution priority is the priority value to send to the server when executing actions.
+	ExecutionPriority ExecutionPriority
+
 	// Retrier is the Retrier that is used for RPCs made by this client.
 	//
 	// These fields are logically "protected" and are intended for use by extensions of Client.
@@ -464,6 +468,14 @@ type PerRPCCreds struct {
 // Apply saves the per-RPC creds in the Client.
 func (p *PerRPCCreds) Apply(c *Client) {
 	c.creds = p.Creds
+}
+
+// ExecutionPriority sets the priority to send to the server when executing actions.
+type ExecutionPriority int32
+
+// Apply saves execution priority in the Client.
+func (p ExecutionPriority) Apply(c *Client) {
+	c.ExecutionPriority = p
 }
 
 func getImpersonatedRPCCreds(ctx context.Context, actAs string, cred credentials.PerRPCCredentials) credentials.PerRPCCredentials {
