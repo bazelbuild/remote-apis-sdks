@@ -109,7 +109,7 @@ func (c *Client) writeChunked(ctx context.Context, name string, ch *chunker.Chun
 		}
 		return nil
 	}
-	err := c.Retrier.Do(ctx, closure)
+	err := c.getRetrier("Write").Do(ctx, closure)
 	return totalBytes, err
 }
 
@@ -212,5 +212,5 @@ func (c *Client) readStreamedRetried(ctx context.Context, name string, offset, l
 		n += m
 		return err
 	}
-	return n, c.Retrier.Do(ctx, closure)
+	return n, c.getRetrier("Read").Do(ctx, closure)
 }

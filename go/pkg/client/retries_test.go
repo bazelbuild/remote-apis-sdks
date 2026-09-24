@@ -690,3 +690,46 @@ func TestNonStreamingRpcRetriesSleep(t *testing.T) {
 		t.Errorf("QueryWriteStatus(ctx, {}) = %v; expected Unimplemented error (status.FromError failed)", err)
 	}
 }
+
+func TestPerMethodRetries(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	defer f.shutDown()
+
+	// 1. Default retrier: only 2 attempts (1 retry).
+	// flakeAndFail("GetActionResult") returns Canceled on 2nd attempt, and retrier stops after 2 attempts.
+	// numCalls: 1 (DeadlineExceeded), 2 (Canceled).
+	defaultRetrier := &client.Retrier{
+		Backoff:     retry.Immediately(retry.Attempts(2)),
+		ShouldRetry: retry.TransientOnly,
+	}
+	defaultRetrier.Apply(f.client)
+
+	// 2. Per-method retrier for "ExecuteAndWait": 10 attempts.
+	execRetrier := &client.Retrier{
+		Backoff:     retry.Immediately(retry.Attempts(10)),
+		ShouldRetry: retry.TransientOnly,
+	}
+	client.RPCRetriers{"ExecuteAndWait": execRetrier}.Apply(f.client)
+
+	// ExecuteAndWait should succeed because it uses execRetrier (10 attempts > 6 needed).
+	_, err := f.client.ExecuteAndWait(f.ctx, &repb.ExecuteRequest{})
+	if err != nil {
+		t.Errorf("ExecuteAndWait failed with per-method retrier: %v", err)
+	}
+
+	// GetActionResult should fail because it uses defaultRetrier (2 attempts < 4 needed to reach Unimplemented/Success).
+	_, err = f.client.GetActionResult(f.ctx, &repb.GetActionResultRequest{})
+	if err == nil {
+		t.Error("GetActionResult should have failed with default retrier")
+	} else if s, ok := status.FromError(err); !ok || s.Code() != codes.Canceled {
+		t.Errorf("GetActionResult failed with %v, expected Canceled", err)
+	}
+
+	f.fake.mu.RLock()
+	calls := f.fake.numCalls["GetActionResult"]
+	f.fake.mu.RUnlock()
+	if calls != 2 {
+		t.Errorf("Expected 2 GetActionResult calls, got %v", calls)
+	}
+}
