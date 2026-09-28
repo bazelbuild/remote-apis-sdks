@@ -2209,3 +2209,34 @@ func TestEscapeDownloadNonUnified_Batch(t *testing.T) {
 		t.Errorf("DownloadFiles didn't fail when output path try to escape from outDir %v", env.outDir)
 	}
 }
+
+func TestBatchDownloadBlobsRejectsDigestMismatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	fake := e.Server.CAS
+	c := e.Client.GrpcClient
+
+	blob := []byte("battery-horse-staple")
+	dg := fake.Put(blob)
+
+	// Honest CAS: batch download succeeds and returns the blob.
+	got, err := c.BatchDownloadBlobs(ctx, []digest.Digest{dg})
+	if err != nil {
+		t.Fatalf("BatchDownloadBlobs() with honest CAS failed: %v", err)
+	}
+	if string(got[dg]) != string(blob) {
+		t.Fatalf("BatchDownloadBlobs() = %q, want %q", got[dg], blob)
+	}
+
+	// Compromised/MITM'd CAS returns content that does not hash to the requested
+	// digest. The client must reject it rather than trust the server-claimed
+	// digest and hand back attacker-controlled bytes.
+	fake.CorruptBatchData = true
+	if _, err := c.BatchDownloadBlobs(ctx, []digest.Digest{dg}); err == nil {
+		t.Fatal("BatchDownloadBlobs() accepted content not matching the requested digest; want a verification error")
+	} else if !strings.Contains(err.Error(), "calculated digest") {
+		t.Errorf("BatchDownloadBlobs() error = %q, want it to report a digest mismatch", err)
+	}
+}

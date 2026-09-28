@@ -267,7 +267,11 @@ type CAS struct {
 	// InstanceName is the expected instance name for all requests.
 	InstanceName string
 	// Maximum batch byte size to verify requests against.
-	BatchSize         int
+	BatchSize int
+	// CorruptBatchData, when true, makes BatchReadBlobs return content that does
+	// not match the requested digest, simulating a compromised/MITM'd CAS. Used
+	// to exercise the client's batch-download digest verification.
+	CorruptBatchData  bool
 	ReqSleepDuration  time.Duration
 	ReqSleepRandomize bool
 	PerDigestBlockFn  map[digest.Digest]func()
@@ -518,6 +522,11 @@ func (f *CAS) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsReques
 		f.mu.Lock()
 		f.reads[dg]++
 		f.mu.Unlock()
+
+		if f.CorruptBatchData {
+			// Return content that does not hash to the requested digest.
+			data = append([]byte("corrupt"), data...)
+		}
 
 		useZSTDCompression := false
 		compressor := repb.Compressor_IDENTITY
