@@ -2,10 +2,16 @@ package client_test
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/chunker"
@@ -104,6 +110,7 @@ func construct(dir string, ips []*inputPath) error {
 }
 
 type callCountingMetadataCache struct {
+	mu       sync.Mutex // Guards calls; the cache may be used concurrently.
 	calls    map[string]int
 	cache    filemetadata.Cache
 	execRoot string
@@ -125,7 +132,9 @@ func (c *callCountingMetadataCache) Get(path string) *filemetadata.Metadata {
 	if err != nil {
 		c.t.Errorf("expected %v to be under %v", path, c.execRoot)
 	}
+	c.mu.Lock()
 	c.calls[p]++
+	c.mu.Unlock()
 	return c.cache.Get(path)
 }
 
@@ -135,7 +144,9 @@ func (c *callCountingMetadataCache) Delete(path string) error {
 	if err != nil {
 		c.t.Errorf("expected %v to be under %v", path, c.execRoot)
 	}
+	c.mu.Lock()
 	c.calls[p]++
+	c.mu.Unlock()
 	return c.cache.Delete(path)
 }
 
@@ -145,7 +156,9 @@ func (c *callCountingMetadataCache) Update(path string, ce *filemetadata.Metadat
 	if err != nil {
 		c.t.Errorf("expected %v to be under %v", path, c.execRoot)
 	}
+	c.mu.Lock()
 	c.calls[p]++
+	c.mu.Unlock()
 	return c.cache.Update(path, ce)
 }
 
@@ -266,7 +279,7 @@ func TestComputeMerkleTreeEmptySubdirs(t *testing.T) {
 		bDirDg:       bDirBlob,
 		cDirDg:       cDirBlob,
 		fileDg:       fileBlob,
-		digest.Empty: []byte{},
+		digest.Empty: {},
 	}
 
 	gotBlobs := make(map[digest.Digest][]byte)
@@ -356,15 +369,15 @@ func TestComputeMerkleTreeEmptyStructureVirtualInputs(t *testing.T) {
 
 	root := t.TempDir()
 	inputSpec := &command.InputSpec{VirtualInputs: []*command.VirtualInput{
-		&command.VirtualInput{Path: "b/c/empty", IsEmptyDirectory: true},
-		&command.VirtualInput{Path: "b/empty", IsEmptyDirectory: true},
-		&command.VirtualInput{Path: "empty", IsEmptyDirectory: true},
+		{Path: "b/c/empty", IsEmptyDirectory: true},
+		{Path: "b/empty", IsEmptyDirectory: true},
+		{Path: "empty", IsEmptyDirectory: true},
 	}}
 	wantBlobs := map[digest.Digest][]byte{
 		aDirDg:       aDirBlob,
 		bDirDg:       bDirBlob,
 		cDirDg:       cDirBlob,
-		digest.Empty: []byte{},
+		digest.Empty: {},
 	}
 
 	gotBlobs := make(map[digest.Digest][]byte)
@@ -1214,7 +1227,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "barDir"},
 				InputExclusions: []*command.InputExclusion{
-					&command.InputExclusion{Regex: `txt$`, Type: command.FileInputType},
+					{Regex: `txt$`, Type: command.FileInputType},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1247,7 +1260,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"foo", "fooDir", "barDir"},
 				InputExclusions: []*command.InputExclusion{
-					&command.InputExclusion{Regex: `foo`, Type: command.DirectoryInputType},
+					{Regex: `foo`, Type: command.DirectoryInputType},
 				},
 			},
 			rootDir: &repb.Directory{
@@ -1277,7 +1290,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"foo", "fooDir", "barDir"},
 				InputExclusions: []*command.InputExclusion{
-					&command.InputExclusion{Regex: `foo`, Type: command.UnspecifiedInputType},
+					{Regex: `foo`, Type: command.UnspecifiedInputType},
 				},
 			},
 			rootDir: &repb.Directory{
@@ -1300,8 +1313,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Virtual inputs",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "fooDir/foo", Contents: fooBlob, IsExecutable: true},
-					&command.VirtualInput{Path: "barDir/bar", Contents: barBlob},
+					{Path: "fooDir/foo", Contents: fooBlob, IsExecutable: true},
+					{Path: "barDir/bar", Contents: barBlob},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1325,8 +1338,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "barDir"},
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "fooDir/foo", Contents: barBlob, IsExecutable: true},
-					&command.VirtualInput{Path: "barDir/bar", IsEmptyDirectory: true},
+					{Path: "fooDir/foo", Contents: barBlob, IsExecutable: true},
+					{Path: "barDir/bar", IsEmptyDirectory: true},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1356,7 +1369,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "barDir"},
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "barDir", IsEmptyDirectory: true},
+					{Path: "barDir", IsEmptyDirectory: true},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1386,7 +1399,7 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "bar"},
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "bar/baz", IsEmptyDirectory: true},
+					{Path: "bar/baz", IsEmptyDirectory: true},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1397,7 +1410,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				},
 				Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}},
 			},
-			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, []byte{}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, {}},
 			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
@@ -1418,8 +1431,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			spec: &command.InputSpec{
 				Inputs: []string{"fooDir", "bar"},
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "bar/baz", IsEmptyDirectory: true},
-					&command.VirtualInput{Path: "bar", IsEmptyDirectory: true},
+					{Path: "bar/baz", IsEmptyDirectory: true},
+					{Path: "bar", IsEmptyDirectory: true},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1430,7 +1443,7 @@ func TestComputeMerkleTree(t *testing.T) {
 				},
 				Files: []*repb.FileNode{{Name: "bar", Digest: barDgPb}},
 			},
-			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, []byte{}},
+			additionalBlobs: [][]byte{fooBlob, barBlob, fooDirBlob, vBarDirBlob, {}},
 			wantCacheCalls: map[string]int{
 				"fooDir":     1,
 				"fooDir/foo": 1,
@@ -1446,8 +1459,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Normalizing virtual inputs paths",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "//fooDir/../fooDir/foo", Contents: fooBlob, IsExecutable: true},
-					&command.VirtualInput{Path: "barDir///bar", Contents: barBlob},
+					{Path: "//fooDir/../fooDir/foo", Contents: fooBlob, IsExecutable: true},
+					{Path: "barDir///bar", Contents: barBlob},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1466,8 +1479,8 @@ func TestComputeMerkleTree(t *testing.T) {
 			desc: "Virtual inputs with digests",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "fooDir/foo", Digest: fooDg.String(), IsExecutable: true},
-					&command.VirtualInput{Path: "barDir/bar", Digest: barDg.String()},
+					{Path: "fooDir/foo", Digest: fooDg.String(), IsExecutable: true},
+					{Path: "barDir/bar", Digest: barDg.String()},
 				},
 				InputNodeProperties: map[string]*cpb.NodeProperties{"fooDir/foo": fooProperties},
 			},
@@ -1640,7 +1653,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			desc: "empty virtual input",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "", Contents: []byte("foo")},
+					{Path: "", Contents: []byte("foo")},
 				},
 			},
 		},
@@ -1648,7 +1661,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			desc: "virtual input specifies content and digest",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "", Contents: fooBlob, Digest: fooDg.String()},
+					{Path: "", Contents: fooBlob, Digest: fooDg.String()},
 				},
 			},
 		},
@@ -1656,7 +1669,7 @@ func TestComputeMerkleTreeErrors(t *testing.T) {
 			desc: "virtual input has invalid digest",
 			spec: &command.InputSpec{
 				VirtualInputs: []*command.VirtualInput{
-					&command.VirtualInput{Path: "", Digest: "Not a real digest"},
+					{Path: "", Digest: "Not a real digest"},
 				},
 			},
 		},
@@ -1774,14 +1787,14 @@ func TestFlattenTreeRepeated(t *testing.T) {
 		t.Errorf("FlattenTree gave error %v", err)
 	}
 	wantOutputs := map[string]*client.TreeOutput{
-		"x/baz":     &client.TreeOutput{Digest: bazDigest},
-		"x/a/b/c":   &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
-		"x/a/b/foo": &client.TreeOutput{Digest: fooDigest},
-		"x/a/b/bar": &client.TreeOutput{Digest: barDigest, IsExecutable: true},
-		"x/b/c":     &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
-		"x/b/foo":   &client.TreeOutput{Digest: fooDigest},
-		"x/b/bar":   &client.TreeOutput{Digest: barDigest, IsExecutable: true},
-		"x/c":       &client.TreeOutput{IsEmptyDirectory: true, Digest: digest.Empty},
+		"x/baz":     {Digest: bazDigest},
+		"x/a/b/c":   {IsEmptyDirectory: true, Digest: digest.Empty},
+		"x/a/b/foo": {Digest: fooDigest},
+		"x/a/b/bar": {Digest: barDigest, IsExecutable: true},
+		"x/b/c":     {IsEmptyDirectory: true, Digest: digest.Empty},
+		"x/b/foo":   {Digest: fooDigest},
+		"x/b/bar":   {Digest: barDigest, IsExecutable: true},
+		"x/c":       {IsEmptyDirectory: true, Digest: digest.Empty},
 	}
 	if len(outputs) != len(wantOutputs) {
 		t.Errorf("FlattenTree gave wrong number of outputs: want %d, got %d", len(wantOutputs), len(outputs))
@@ -1828,7 +1841,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			nodeProperties: map[string]*cpb.NodeProperties{"foo": fooProperties},
 			wantBlobs:      [][]byte{fooBlob},
 			wantResult: &repb.ActionResult{
-				OutputFiles: []*repb.OutputFile{&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)}},
+				OutputFiles: []*repb.OutputFile{{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)}},
 			},
 			wantCacheCalls: map[string]int{
 				"bar": 1,
@@ -1847,8 +1860,8 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
-					&repb.OutputFile{Path: "bar", Digest: barDgPb},
+					{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
+					{Path: "bar", Digest: barDgPb},
 				},
 			},
 			wantCacheCalls: map[string]int{
@@ -1869,8 +1882,8 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
-					&repb.OutputFile{Path: "../bar", Digest: barDgPb},
+					{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
+					{Path: "../bar", Digest: barDgPb},
 				},
 			},
 			wantCacheCalls: map[string]int{
@@ -1888,7 +1901,7 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantBlobs: [][]byte{barBlob},
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
-					&repb.OutputFile{Path: "dir1/dir2/bar", Digest: barDgPb},
+					{Path: "dir1/dir2/bar", Digest: barDgPb},
 				},
 			},
 			wantCacheCalls: map[string]int{
@@ -1907,8 +1920,8 @@ func TestComputeOutputsToUploadFiles(t *testing.T) {
 			wantResult: &repb.ActionResult{
 				OutputFiles: []*repb.OutputFile{
 					// Note the outputs are not sorted.
-					&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
-					&repb.OutputFile{Path: "bar", Digest: fooDgPb},
+					{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
+					{Path: "bar", Digest: fooDgPb},
 				},
 			},
 			wantCacheCalls: map[string]int{
@@ -2202,7 +2215,7 @@ func TestComputeOutputsToUploadFileNoPermissions(t *testing.T) {
 	wantBlob := [][]byte{fooBlob}
 	wantResult := &repb.ActionResult{
 		OutputFiles: []*repb.OutputFile{
-			&repb.OutputFile{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
+			{Path: "foo", Digest: fooDgPb, IsExecutable: true, NodeProperties: command.NodePropertiesToAPI(fooProperties)},
 		},
 	}
 	wantCacheCalls := map[string]int{
@@ -2290,5 +2303,647 @@ func BenchmarkComputeMerkleTree(b *testing.B) {
 		if err != nil {
 			b.Errorf("Failed to compute merkle tree: %v", err)
 		}
+	}
+}
+
+// hashConcurrencies are the FileHashConcurrency values exercised by the equivalence tests.
+var hashConcurrencies = []int{-1, 0, 2, 3, 16}
+
+// constructHashConcurrencyTree creates a tree under <base>/execroot that exercises regular files,
+// nested and empty directories, excluded files, and relative/absolute/dangling/escaping symlinks
+// (to both files and directories). It returns the exec root.
+func constructHashConcurrencyTree(t testing.TB, numFiles int) string {
+	t.Helper()
+	base := t.TempDir()
+	execRoot := filepath.Join(base, "execroot")
+	randGen := rand.New(rand.NewSource(42))
+	ips := []*inputPath{
+		{path: "../outside/o", fileContents: []byte("outside")},
+		{path: "empty", emptyDir: true},
+		{path: "d/empty", emptyDir: true},
+		{path: "d/skip.me", fileContents: []byte("skip")},
+		{path: "links/rel", isSymlink: true, relSymlinkTarget: "../d/f0"},
+		{path: "links/abs", isSymlink: true, isAbsolute: true, relSymlinkTarget: "d/f1"},
+		{path: "links/dir", isSymlink: true, relSymlinkTarget: "../d/sub0"},
+		{path: "links/dangling", isSymlink: true, relSymlinkTarget: "../does/not/exist"},
+		{path: "outlinks/escaping", isSymlink: true, relSymlinkTarget: "../../outside/o"},
+		{path: "outlinks/escapingDangling", isSymlink: true, relSymlinkTarget: "../../outside/nope"},
+		{path: "symdir", isSymlink: true, relSymlinkTarget: "d"},
+		{path: "chain_a", isSymlink: true, relSymlinkTarget: "chain_y"},
+		{path: "chain_y", isSymlink: true, relSymlinkTarget: "d"},
+	}
+	for i := 0; i < numFiles; i++ {
+		ips = append(ips, &inputPath{
+			path:         fmt.Sprintf("d/sub%d/f%d", i%7, i),
+			fileContents: randomBytes(randGen, 1+randGen.Intn(4096)),
+			isExecutable: i%3 == 0,
+		})
+	}
+	ips = append(ips,
+		&inputPath{path: "d/f0", fileContents: []byte("f0")},
+		&inputPath{path: "d/f1", fileContents: []byte("f1"), isExecutable: true},
+	)
+	if err := construct(execRoot, ips); err != nil {
+		t.Fatalf("failed to construct input dir structure: %v", err)
+	}
+	return execRoot
+}
+
+type merkleTreeResult struct {
+	root     digest.Digest
+	inputs   []digest.Digest
+	stats    *client.TreeStats
+	err      string
+	calls    map[string]int
+	execRoot string
+}
+
+// hashed returns how many times each regular file was looked up, i.e. hashed with a noop cache.
+func (r merkleTreeResult) hashed() map[string]int {
+	out := make(map[string]int)
+	for p, n := range r.calls {
+		if fi, err := os.Lstat(filepath.Join(r.execRoot, p)); err == nil && fi.Mode().IsRegular() {
+			out[p] = n
+		}
+	}
+	return out
+}
+
+func computeMerkleTreeWithHashConcurrency(t *testing.T, execRoot string, spec *command.InputSpec, opts *client.TreeSymlinkOpts, hc int) merkleTreeResult {
+	t.Helper()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	if opts != nil {
+		// Copy, since treeSymlinkOpts may mutate the options.
+		o := *opts
+		o.Apply(e.Client.GrpcClient)
+	}
+	client.FileHashConcurrency(hc).Apply(e.Client.GrpcClient)
+	cache := newCallCountingMetadataCache(execRoot, t)
+	root, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), execRoot, "", "", spec, cache)
+	res := merkleTreeResult{root: root, stats: stats, calls: cache.calls, execRoot: execRoot}
+	if err != nil {
+		res.err = err.Error()
+	}
+	for _, ue := range inputs {
+		res.inputs = append(res.inputs, ue.Digest)
+	}
+	sort.Slice(res.inputs, func(i, j int) bool { return res.inputs[i].String() < res.inputs[j].String() })
+	return res
+}
+
+func TestComputeMerkleTreeHashConcurrencyEquivalence(t *testing.T) {
+	execRoot := constructHashConcurrencyTree(t, 300)
+	excl := []*command.InputExclusion{{Regex: `\.me$`, Type: command.FileInputType}}
+	specs := []struct {
+		desc string
+		spec *command.InputSpec
+	}{
+		{desc: "whole exec root", spec: &command.InputSpec{Inputs: []string{"."}, InputExclusions: excl}},
+		{desc: "whole exec root with nodeproperties", spec: &command.InputSpec{
+			Inputs:              []string{"."},
+			InputNodeProperties: map[string]*cpb.NodeProperties{"d/f0": fooProperties, "d/sub1": fooProperties},
+		}},
+		{desc: "explicit, duplicate and parent-symlinked inputs", spec: &command.InputSpec{
+			Inputs:          []string{"d/f0", "d", "d/sub3", "d/f0", "symdir/sub2/f2", "symdir/f1", "links", "empty"},
+			InputExclusions: excl,
+		}},
+		{desc: "excluded directory", spec: &command.InputSpec{
+			Inputs:          []string{"d", "links"},
+			InputExclusions: []*command.InputExclusion{{Regex: `sub[0-3]$`, Type: command.DirectoryInputType}},
+		}},
+		{desc: "escaping symlinks", spec: &command.InputSpec{Inputs: []string{"d", "outlinks/escaping"}}},
+		{desc: "escaping dangling symlink", spec: &command.InputSpec{Inputs: []string{"d", "outlinks/escapingDangling"}}},
+		{desc: "missing input after many valid ones", spec: &command.InputSpec{Inputs: []string{"d", "empty", "nope", "links"}}},
+		{desc: "empty input after many valid ones", spec: &command.InputSpec{Inputs: []string{"d", ""}}},
+		{desc: "chained directory symlink input", spec: &command.InputSpec{Inputs: []string{"chain_a/sub0"}}},
+	}
+	symlinkOpts := []struct {
+		desc string
+		opts *client.TreeSymlinkOpts
+	}{
+		{desc: "default", opts: nil},
+		{desc: "preserved", opts: &client.TreeSymlinkOpts{Preserved: true}},
+		{desc: "preserved+follow", opts: &client.TreeSymlinkOpts{Preserved: true, FollowsTarget: true}},
+		{desc: "preserved+follow+materialize", opts: &client.TreeSymlinkOpts{Preserved: true, FollowsTarget: true, MaterializeOutsideExecRoot: true}},
+	}
+	for _, sc := range specs {
+		for _, so := range symlinkOpts {
+			t.Run(sc.desc+"/"+so.desc, func(t *testing.T) {
+				want := computeMerkleTreeWithHashConcurrency(t, execRoot, sc.spec, so.opts, 1)
+				for _, hc := range hashConcurrencies {
+					got := computeMerkleTreeWithHashConcurrency(t, execRoot, sc.spec, so.opts, hc)
+					if got.err != want.err {
+						t.Errorf("FileHashConcurrency=%d: got error %q, want %q (as with serial)", hc, got.err, want.err)
+						continue
+					}
+					if want.err != "" {
+						// On error, parallel mode may have looked up paths ahead of the failure.
+						continue
+					}
+					if diff := cmp.Diff(want.root, got.root); diff != "" {
+						t.Errorf("FileHashConcurrency=%d: root digest diff (-serial +parallel):\n%s", hc, diff)
+					}
+					if diff := cmp.Diff(want.inputs, got.inputs); diff != "" {
+						t.Errorf("FileHashConcurrency=%d: inputs diff (-serial +parallel):\n%s", hc, diff)
+					}
+					if diff := cmp.Diff(want.stats, got.stats); diff != "" {
+						t.Errorf("FileHashConcurrency=%d: stats diff (-serial +parallel):\n%s", hc, diff)
+					}
+					if diff := cmp.Diff(want.hashed(), got.hashed()); diff != "" {
+						t.Errorf("FileHashConcurrency=%d: files hashed diff (-serial +parallel):\n%s", hc, diff)
+					}
+					// With Preserved symlinks, prefetch workers also evaluate parent symlinks of
+					// queued inputs, which adds (cheap) directory/symlink lookups.
+					if so.opts != nil && so.opts.Preserved {
+						continue
+					}
+					if diff := cmp.Diff(want.calls, got.calls); diff != "" {
+						t.Errorf("FileHashConcurrency=%d: cache calls diff (-serial +parallel):\n%s", hc, diff)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestComputeOutputsToUploadHashConcurrencyEquivalence(t *testing.T) {
+	execRoot := constructHashConcurrencyTree(t, 300)
+	compute := func(hc int, sb command.SymlinkBehaviorType) (map[digest.Digest]*uploadinfo.Entry, *repb.ActionResult, error) {
+		e, cleanup := fakes.NewTestEnv(t)
+		defer cleanup()
+		client.FileHashConcurrency(hc).Apply(e.Client.GrpcClient)
+		return e.Client.GrpcClient.ComputeOutputsToUpload(execRoot, "", []string{"d", "empty", "d/f0"}, filemetadata.NewNoopCache(), sb, nil)
+	}
+	for _, sb := range []command.SymlinkBehaviorType{command.ResolveSymlink, command.PreserveSymlink} {
+		t.Run(sb.String(), func(t *testing.T) {
+			wantOuts, wantRes, wantErr := compute(1, sb)
+			if wantErr != nil {
+				t.Fatalf("ComputeOutputsToUpload(serial) failed: %v", wantErr)
+			}
+			for _, hc := range hashConcurrencies {
+				gotOuts, gotRes, err := compute(hc, sb)
+				if err != nil {
+					t.Fatalf("ComputeOutputsToUpload(FileHashConcurrency=%d) failed: %v", hc, err)
+				}
+				if diff := cmp.Diff(wantRes, gotRes, protocmp.Transform()); diff != "" {
+					t.Errorf("FileHashConcurrency=%d: action result diff (-serial +parallel):\n%s", hc, diff)
+				}
+				if len(gotOuts) != len(wantOuts) {
+					t.Errorf("FileHashConcurrency=%d: got %d outputs, want %d", hc, len(gotOuts), len(wantOuts))
+				}
+				for dg := range wantOuts {
+					if _, ok := gotOuts[dg]; !ok {
+						t.Errorf("FileHashConcurrency=%d: missing output %v", hc, dg)
+					}
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkComputeMerkleTreeHashConcurrency(b *testing.B) {
+	execRoot := constructHashConcurrencyTree(b, 2000)
+	inputSpec := &command.InputSpec{Inputs: []string{"d", "links", "empty"}}
+	for _, preserved := range []bool{false, true} {
+		for _, warm := range []bool{false, true} {
+			for _, hc := range []int{1, 2, 4, 8, 16} {
+				b.Run(fmt.Sprintf("preserved=%v/warm=%v/hash_concurrency=%d", preserved, warm, hc), func(b *testing.B) {
+					e, cleanup := fakes.NewTestEnv(b)
+					defer cleanup()
+					if preserved {
+						(&client.TreeSymlinkOpts{Preserved: true}).Apply(e.Client.GrpcClient)
+					}
+					client.FileHashConcurrency(hc).Apply(e.Client.GrpcClient)
+					fmc := filemetadata.NewNoopCache()
+					if warm {
+						filemetadata.ResetGlobalCache()
+						fmc = filemetadata.NewSingleFlightCache()
+						if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), execRoot, "", "", inputSpec, fmc); err != nil {
+							b.Fatalf("Failed to compute merkle tree: %v", err)
+						}
+					}
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), execRoot, "", "", inputSpec, fmc); err != nil {
+							b.Fatalf("Failed to compute merkle tree: %v", err)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkComputeMerkleTreeSerialVsParallel(b *testing.B) {
+	shapes := []struct{ files, size int }{
+		{5, 1 << 10},     // tiny action
+		{200, 4 << 10},   // typical action
+		{2000, 4 << 10},  // many small files: traversal/overhead-bound
+		{200, 1 << 20},   // few large files: hashing-bound
+		{20000, 1 << 10}, // very large input set
+	}
+	fuchsiaOpts := &client.TreeSymlinkOpts{Preserved: true, FollowsTarget: true, MaterializeOutsideExecRoot: true}
+	for _, s := range shapes {
+		b.Run(fmt.Sprintf("files=%d/size=%d", s.files, s.size), func(b *testing.B) {
+			execRoot := filepath.Join(b.TempDir(), "execroot")
+			r := rand.New(rand.NewSource(1))
+			var ips []*inputPath
+			for i := 0; i < s.files; i++ {
+				ips = append(ips, &inputPath{path: fmt.Sprintf("d/sub%d/f%d", i%16, i), fileContents: randomBytes(r, s.size)})
+			}
+			if err := construct(execRoot, ips); err != nil {
+				b.Fatal(err)
+			}
+			spec := &command.InputSpec{Inputs: []string{"d"}}
+			for _, cache := range []string{"cold", "warm", "mixed"} {
+				for _, optName := range []string{"default", "fuchsia"} {
+					hcs := []int{1, 2, 4, 8, 16}
+					if maxP := runtime.GOMAXPROCS(0); maxP != 1 && maxP != 2 && maxP != 4 && maxP != 8 && maxP != 16 {
+						hcs = append(hcs, maxP)
+					}
+					for _, hc := range hcs {
+						name := fmt.Sprintf("cache=%s/opts=%s/hc=%d", cache, optName, hc)
+						b.Run(name, func(b *testing.B) {
+							e, cleanup := fakes.NewTestEnv(b)
+							defer cleanup()
+							if optName == "fuchsia" {
+								o := *fuchsiaOpts
+								o.Apply(e.Client.GrpcClient)
+							}
+							client.FileHashConcurrency(hc).Apply(e.Client.GrpcClient)
+							fmc := filemetadata.NewNoopCache()
+							if cache == "warm" {
+								filemetadata.ResetGlobalCache()
+								fmc = filemetadata.NewSingleFlightCache()
+								if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), execRoot, "", "", spec, fmc); err != nil {
+									b.Fatal(err)
+								}
+							} else if cache == "mixed" {
+								filemetadata.ResetGlobalCache()
+								fmc = filemetadata.NewSingleFlightCache()
+								for i, ip := range ips {
+									if i%10 != 0 {
+										fmc.Get(filepath.Join(execRoot, ip.path))
+									}
+								}
+							}
+							b.SetBytes(int64(s.files * s.size))
+							b.ReportAllocs()
+							b.ResetTimer()
+							for i := 0; i < b.N; i++ {
+								if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), execRoot, "", "", spec, fmc); err != nil {
+									b.Fatal(err)
+								}
+							}
+						})
+					}
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkComputeMerkleTreeRealTree(b *testing.B) {
+	root := os.Getenv("REAL_EXEC_ROOT") // e.g. a Fuchsia out/ dir
+	if root == "" {
+		b.Skip("set REAL_EXEC_ROOT")
+	}
+	spec := &command.InputSpec{Inputs: []string{"."}}
+	for _, hc := range []int{1, 4, 8, 16} {
+		b.Run(fmt.Sprintf("hc=%d", hc), func(b *testing.B) {
+			e, cleanup := fakes.NewTestEnv(b)
+			defer cleanup()
+			(&client.TreeSymlinkOpts{Preserved: true, FollowsTarget: true, MaterializeOutsideExecRoot: true}).Apply(e.Client.GrpcClient)
+			client.FileHashConcurrency(hc).Apply(e.Client.GrpcClient)
+			for i := 0; i < b.N; i++ {
+				if _, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), root, "", "", spec, filemetadata.NewNoopCache()); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// runWithin fails the test if fn doesn't return within d, dumping all goroutines (possible deadlock).
+func runWithin(t *testing.T, d time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		buf := make([]byte, 1<<20)
+		t.Fatalf("did not return within %v, possible deadlock. Goroutines:\n%s", d, buf[:runtime.Stack(buf, true)])
+	}
+}
+
+// checkNoPrefetchWorkers fails if any metaPrefetcher worker goroutine outlives its loadFiles call.
+func checkNoPrefetchWorkers(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		buf := make([]byte, 1<<20)
+		stacks := string(buf[:runtime.Stack(buf, true)])
+		if !strings.Contains(stacks, "newMetaPrefetcher") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("metaPrefetcher workers leaked:\n%s", stacks)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// slowMetadataCache delays each lookup by a random duration so prefetches complete out of order and
+// loadFiles regularly has to wait on them.
+type slowMetadataCache struct {
+	filemetadata.Cache
+	mu  sync.Mutex
+	rnd *rand.Rand
+	max time.Duration
+}
+
+func newSlowMetadataCache(c filemetadata.Cache, max time.Duration) *slowMetadataCache {
+	return &slowMetadataCache{Cache: c, rnd: rand.New(rand.NewSource(1)), max: max}
+}
+
+func (c *slowMetadataCache) Get(path string) *filemetadata.Metadata {
+	c.mu.Lock()
+	d := time.Duration(c.rnd.Int63n(int64(c.max)))
+	c.mu.Unlock()
+	time.Sleep(d)
+	return c.Cache.Get(path)
+}
+
+// gatedMetadataCache blocks every lookup until gate is closed.
+type gatedMetadataCache struct {
+	filemetadata.Cache
+	gate chan struct{}
+}
+
+func (c *gatedMetadataCache) Get(path string) *filemetadata.Metadata {
+	<-c.gate
+	return c.Cache.Get(path)
+}
+
+// computeMerkleTreeWithCache is like computeMerkleTreeWithHashConcurrency, but optionally wraps the
+// call-counting cache, guards against deadlock, and checks that no prefetch workers leak.
+func computeMerkleTreeWithCache(t *testing.T, execRoot string, spec *command.InputSpec, opts *client.TreeSymlinkOpts, hc int, wrap func(filemetadata.Cache) filemetadata.Cache) merkleTreeResult {
+	t.Helper()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	if opts != nil {
+		o := *opts
+		o.Apply(e.Client.GrpcClient)
+	}
+	client.FileHashConcurrency(hc).Apply(e.Client.GrpcClient)
+	counting := newCallCountingMetadataCache(execRoot, t)
+	var cache filemetadata.Cache = counting
+	if wrap != nil {
+		cache = wrap(counting)
+	}
+	var res merkleTreeResult
+	runWithin(t, 2*time.Minute, func() {
+		root, inputs, stats, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), execRoot, "", "", spec, cache)
+		res = merkleTreeResult{root: root, stats: stats, calls: counting.calls, execRoot: execRoot}
+		if err != nil {
+			res.err = err.Error()
+		}
+		for _, ue := range inputs {
+			res.inputs = append(res.inputs, ue.Digest)
+		}
+		sort.Slice(res.inputs, func(i, j int) bool { return res.inputs[i].String() < res.inputs[j].String() })
+	})
+	checkNoPrefetchWorkers(t)
+	return res
+}
+
+func diffMerkleTreeResults(t *testing.T, hc int, want, got merkleTreeResult) {
+	t.Helper()
+	if got.err != want.err {
+		t.Errorf("FileHashConcurrency=%d: got error %q, want %q (as with serial)", hc, got.err, want.err)
+		return
+	}
+	if want.err != "" {
+		return
+	}
+	if diff := cmp.Diff(want.root, got.root); diff != "" {
+		t.Errorf("FileHashConcurrency=%d: root digest diff (-serial +parallel):\n%s", hc, diff)
+	}
+	if diff := cmp.Diff(want.inputs, got.inputs); diff != "" {
+		t.Errorf("FileHashConcurrency=%d: inputs diff (-serial +parallel):\n%s", hc, diff)
+	}
+	if diff := cmp.Diff(want.stats, got.stats); diff != "" {
+		t.Errorf("FileHashConcurrency=%d: stats diff (-serial +parallel):\n%s", hc, diff)
+	}
+	if diff := cmp.Diff(want.hashed(), got.hashed()); diff != "" {
+		t.Errorf("FileHashConcurrency=%d: files hashed diff (-serial +parallel):\n%s", hc, diff)
+	}
+}
+
+var hashConcurrencySymlinkOpts = []struct {
+	desc string
+	opts *client.TreeSymlinkOpts
+}{
+	{desc: "default", opts: nil},
+	{desc: "preserved", opts: &client.TreeSymlinkOpts{Preserved: true}},
+	{desc: "preserved+follow+materialize", opts: &client.TreeSymlinkOpts{Preserved: true, FollowsTarget: true, MaterializeOutsideExecRoot: true}},
+}
+
+// A single directory with more entries than prefetchQueueSize (4096) makes loadFiles block on sends
+// while slow workers drain the queue, including when traversal then fails with work still queued.
+func TestComputeMerkleTreeHashConcurrencyBackpressure(t *testing.T) {
+	const numFiles = 5000
+	execRoot := filepath.Join(t.TempDir(), "execroot")
+	ips := []*inputPath{{path: "small", fileContents: []byte("small")}}
+	for i := 0; i < numFiles; i++ {
+		ips = append(ips, &inputPath{path: fmt.Sprintf("big/f%05d", i), fileContents: []byte(fmt.Sprintf("contents %d", i))})
+	}
+	if err := construct(execRoot, ips); err != nil {
+		t.Fatalf("failed to construct input dir structure: %v", err)
+	}
+	slow := func(c filemetadata.Cache) filemetadata.Cache { return newSlowMetadataCache(c, 50*time.Microsecond) }
+	specs := []struct {
+		desc string
+		spec *command.InputSpec
+	}{
+		{desc: "big dir", spec: &command.InputSpec{Inputs: []string{"big", "small"}}},
+		{desc: "error with full queue", spec: &command.InputSpec{Inputs: []string{"big", "nope", "small"}}},
+		{desc: "error first", spec: &command.InputSpec{Inputs: []string{"nope", "big"}}},
+		{desc: "overlapping inputs", spec: &command.InputSpec{Inputs: []string{"big", "big/f00001", "small", "big/f04999"}}},
+	}
+	for _, sc := range specs {
+		for _, so := range hashConcurrencySymlinkOpts {
+			t.Run(sc.desc+"/"+so.desc, func(t *testing.T) {
+				want := computeMerkleTreeWithCache(t, execRoot, sc.spec, so.opts, 1, nil)
+				for _, hc := range []int{2, 16} {
+					diffMerkleTreeResults(t, hc, want, computeMerkleTreeWithCache(t, execRoot, sc.spec, so.opts, hc, slow))
+				}
+			})
+		}
+	}
+}
+
+// Random lookup latency makes futures complete out of order.
+func TestComputeMerkleTreeHashConcurrencyOutOfOrder(t *testing.T) {
+	execRoot := constructHashConcurrencyTree(t, 300)
+	slow := func(c filemetadata.Cache) filemetadata.Cache { return newSlowMetadataCache(c, 200*time.Microsecond) }
+	specs := []*command.InputSpec{
+		{Inputs: []string{"."}},
+		{Inputs: []string{"d/f0", "d", "d/sub3", "d/f0", "symdir/sub2/f2", "symdir/f1", "links", "empty"}},
+		{Inputs: []string{"chain_a/sub0", "d"}},
+		{Inputs: []string{"d", "empty", "nope", "links"}},
+	}
+	for i, spec := range specs {
+		for _, so := range hashConcurrencySymlinkOpts {
+			t.Run(fmt.Sprintf("spec%d/%s", i, so.desc), func(t *testing.T) {
+				want := computeMerkleTreeWithCache(t, execRoot, spec, so.opts, 1, nil)
+				for _, hc := range []int{2, 3, 16} {
+					diffMerkleTreeResults(t, hc, want, computeMerkleTreeWithCache(t, execRoot, spec, so.opts, hc, slow))
+				}
+			})
+		}
+	}
+}
+
+// With every worker stuck inside the cache and the queue full, ComputeMerkleTree must wait (not skip
+// futures or return early), then complete once the cache unblocks.
+func TestComputeMerkleTreeHashConcurrencyBlockedCache(t *testing.T) {
+	execRoot := constructHashConcurrencyTree(t, 300)
+	spec := &command.InputSpec{Inputs: []string{"d", "links", "empty"}}
+	want := computeMerkleTreeWithCache(t, execRoot, spec, nil, 1, nil)
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	client.FileHashConcurrency(4).Apply(e.Client.GrpcClient)
+	cache := &gatedMetadataCache{Cache: filemetadata.NewNoopCache(), gate: make(chan struct{})}
+	type result struct {
+		root digest.Digest
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		root, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), execRoot, "", "", spec, cache)
+		done <- result{root, err}
+	}()
+	select {
+	case r := <-done:
+		t.Fatalf("ComputeMerkleTree returned while the cache was blocked: %v", r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(cache.gate)
+	var r result
+	runWithin(t, time.Minute, func() { r = <-done })
+	if r.err != nil {
+		t.Fatalf("ComputeMerkleTree failed: %v", r.err)
+	}
+	if r.root != want.root {
+		t.Errorf("got root %v, want %v (as with serial)", r.root, want.root)
+	}
+	checkNoPrefetchWorkers(t)
+}
+
+// Concurrent calls sharing one client and one SingleFlight cache (run under -race).
+func TestComputeMerkleTreeHashConcurrencyConcurrentCalls(t *testing.T) {
+	execRoot := constructHashConcurrencyTree(t, 300)
+	spec := &command.InputSpec{Inputs: []string{"d", "links", "empty", "symdir/sub2/f2"}}
+	want := computeMerkleTreeWithCache(t, execRoot, spec, nil, 1, nil)
+	if want.err != "" {
+		t.Fatalf("serial ComputeMerkleTree failed: %v", want.err)
+	}
+	filemetadata.ResetGlobalCache()
+	t.Cleanup(filemetadata.ResetGlobalCache)
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	client.FileHashConcurrency(8).Apply(e.Client.GrpcClient)
+	shared := filemetadata.NewSingleFlightCache()
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cache := shared
+			if i%2 == 1 {
+				cache = filemetadata.NewNoopCache()
+			}
+			for j := 0; j < 3; j++ {
+				root, _, _, err := e.Client.GrpcClient.ComputeMerkleTree(context.Background(), execRoot, "", "", spec, cache)
+				if err != nil {
+					t.Errorf("goroutine %d: ComputeMerkleTree failed: %v", i, err)
+					return
+				}
+				if root != want.root {
+					t.Errorf("goroutine %d: got root %v, want %v", i, root, want.root)
+				}
+			}
+		}(i)
+	}
+	runWithin(t, 2*time.Minute, wg.Wait)
+	checkNoPrefetchWorkers(t)
+}
+
+// Unreadable files and directories must fail (or be ignored) exactly as in serial mode.
+func TestComputeMerkleTreeHashConcurrencyUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission checks are bypassed when running as root")
+	}
+	execRoot := filepath.Join(t.TempDir(), "execroot")
+	ips := []*inputPath{
+		{path: "d/noread", fileContents: []byte("secret")},
+		{path: "locked/x", fileContents: []byte("x")},
+	}
+	for i := 0; i < 200; i++ {
+		ips = append(ips, &inputPath{path: fmt.Sprintf("d/f%d", i), fileContents: []byte(fmt.Sprintf("f%d", i))})
+	}
+	if err := construct(execRoot, ips); err != nil {
+		t.Fatalf("failed to construct input dir structure: %v", err)
+	}
+	locked := filepath.Join(execRoot, "locked")
+	if err := os.Chmod(filepath.Join(execRoot, "d/noread"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0755) })
+	for _, spec := range []*command.InputSpec{
+		{Inputs: []string{"d"}},
+		{Inputs: []string{"locked"}},
+		{Inputs: []string{"d", "locked"}},
+	} {
+		t.Run(strings.Join(spec.Inputs, ","), func(t *testing.T) {
+			want := computeMerkleTreeWithCache(t, execRoot, spec, nil, 1, nil)
+			for _, hc := range []int{2, 16} {
+				diffMerkleTreeResults(t, hc, want, computeMerkleTreeWithCache(t, execRoot, spec, nil, hc, nil))
+			}
+		})
+	}
+}
+
+// Degenerate inputs: many more workers than files, duplicates only, no inputs.
+func TestComputeMerkleTreeHashConcurrencyTinyInputs(t *testing.T) {
+	execRoot := filepath.Join(t.TempDir(), "execroot")
+	if err := construct(execRoot, []*inputPath{
+		{path: "one", fileContents: []byte("one")},
+		{path: "emptydir", emptyDir: true},
+	}); err != nil {
+		t.Fatalf("failed to construct input dir structure: %v", err)
+	}
+	for i, spec := range []*command.InputSpec{
+		{Inputs: []string{"one"}},
+		{Inputs: []string{"emptydir"}},
+		{Inputs: []string{"one", "one", "one"}},
+		{Inputs: []string{}},
+		{Inputs: []string{"."}},
+	} {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			want := computeMerkleTreeWithCache(t, execRoot, spec, nil, 1, nil)
+			for _, hc := range []int{2, 64} {
+				diffMerkleTreeResults(t, hc, want, computeMerkleTreeWithCache(t, execRoot, spec, nil, hc, nil))
+			}
+		})
 	}
 }

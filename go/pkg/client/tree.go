@@ -9,8 +9,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"errors"
+
 	cpb "github.com/bazelbuild/remote-apis-sdks/go/api/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/command"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/digest"
@@ -289,16 +292,149 @@ func loadIntermediateSymlinks(symlinks []string, execRoot, workingDir, remoteWor
 	return nil
 }
 
-// loadFiles reads all files specified by the given InputSpec (descending into subdirectories
-// recursively), and loads their contents into the provided map.
-func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts, nodeProperties map[string]*cpb.NodeProperties) error {
+// metaPrefetcher computes file metadata (which, on a cache miss, includes hashing the file) on a
+// pool of background goroutines, ahead of when loadFiles needs it.
+//
+// Only the owning goroutine may call prefetch, prefetchOne, get, and stop. A nil *metaPrefetcher
+// is valid: prefetch/prefetchOne is a no-op and get falls through to cache.Get.
+type metaPrefetcher struct {
+	cache    filemetadata.Cache
+	execRoot string
+	opts     *TreeSymlinkOpts
+	pending  map[string]*metaFuture // Keyed by queued path; prevents duplicate in-flight prefetches. Owned by calling goroutine.
+	work     chan *metaFuture
+	stopped  atomic.Bool
+	wg       sync.WaitGroup
+}
+
+type metaFuture struct {
+	relPath string      // As queued in loadFiles, relative to execRoot.
+	claimed atomic.Bool // Set by whichever goroutine (worker or get) performs the lookup.
+	// Set by the worker before done is closed.
+	absPath string // The path whose metadata was computed.
+	meta    *filemetadata.Metadata
+	done    chan struct{}
+}
+
+// prefetchQueueSize bounds how many paths may be queued ahead of the hash workers. When the
+// queue is full, loadFiles blocks until a worker frees a slot (backpressure).
+const prefetchQueueSize = 4096
+
+func newMetaPrefetcher(cache filemetadata.Cache, execRoot string, opts *TreeSymlinkOpts, workers int) *metaPrefetcher {
+	if workers < 1 {
+		return nil // A blocking send with no workers would deadlock.
+	}
 	if opts == nil {
 		opts = DefaultTreeSymlinkOpts()
+	}
+	p := &metaPrefetcher{
+		cache:    cache,
+		execRoot: execRoot,
+		opts:     opts,
+		pending:  make(map[string]*metaFuture),
+		work:     make(chan *metaFuture, prefetchQueueSize),
+	}
+	p.wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer p.wg.Done()
+			for f := range p.work {
+				if f.claimed.CompareAndSwap(false, true) && !p.stopped.Load() {
+					p.lookup(f)
+				}
+				close(f.done)
+			}
+		}()
+	}
+	return p
+}
+
+// lookup computes the metadata of the same path that loadFiles will look up for f.relPath.
+func (p *metaPrefetcher) lookup(f *metaFuture) {
+	rel := f.relPath
+	if p.opts != nil && p.opts.Preserved {
+		// Mirror loadFiles: with preserved symlinks it looks up the path with its parent symlinks
+		// evaluated. On error loadFiles fails before looking anything up, so skip the lookup.
+		evaled, _, err := evalParentSymlinks(p.execRoot, rel, p.opts.MaterializeOutsideExecRoot, p.cache)
+		if err != nil {
+			return
+		}
+		rel = evaled
+	}
+	f.absPath = filepath.Join(p.execRoot, rel)
+	f.meta = p.cache.Get(f.absPath)
+}
+
+// prefetchOne schedules a metadata lookup for a single exec-root-relative path as queued in
+// loadFiles.
+func (p *metaPrefetcher) prefetchOne(rel string) {
+	if p == nil || rel == "" || p.stopped.Load() {
+		return
+	}
+	if _, ok := p.pending[rel]; ok {
+		return
+	}
+	f := &metaFuture{relPath: rel, done: make(chan struct{})}
+	p.pending[rel] = f
+	p.work <- f
+}
+
+// prefetch schedules metadata lookups for the given exec-root-relative paths.
+func (p *metaPrefetcher) prefetch(relPaths ...string) {
+	for _, rel := range relPaths {
+		p.prefetchOne(rel)
+	}
+}
+
+// get returns the metadata for absPath, the resolved form of queuedPath, waiting for an in-flight
+// prefetch if there is one.
+func (p *metaPrefetcher) get(cache filemetadata.Cache, queuedPath, absPath string) *filemetadata.Metadata {
+	if p != nil {
+		if f, ok := p.pending[queuedPath]; ok {
+			delete(p.pending, queuedPath)
+			if f.claimed.CompareAndSwap(false, true) {
+				// No worker has started it; look it up here rather than waiting for one.
+				return cache.Get(absPath)
+			}
+			<-f.done
+			if f.meta != nil && f.absPath == absPath {
+				return f.meta
+			}
+		}
+	}
+	return cache.Get(absPath)
+}
+
+// stop cancels outstanding prefetches and waits for the workers to exit.
+func (p *metaPrefetcher) stop() {
+	if p == nil || !p.stopped.CompareAndSwap(false, true) {
+		return
+	}
+	close(p.work)
+	p.wg.Wait()
+}
+
+// loadFiles reads all files specified by the given InputSpec (descending into subdirectories
+// recursively), and loads their contents into the provided map.
+//
+// If hashConcurrency > 1, file metadata (including content digests) is prefetched on that many
+// goroutines; cache must then be safe for concurrent use. The traversal itself stays serial, so
+// the resulting map and any returned error are the same regardless of hashConcurrency.
+func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*command.InputExclusion, filesToProcess []string, fs map[string]*fileSysNode, cache filemetadata.Cache, opts *TreeSymlinkOpts, nodeProperties map[string]*cpb.NodeProperties, hashConcurrency int) error {
+	if opts == nil {
+		opts = DefaultTreeSymlinkOpts()
+	}
+	var pf *metaPrefetcher
+	if hashConcurrency > 1 {
+		pf = newMetaPrefetcher(cache, execRoot, opts, hashConcurrency)
+		defer pf.stop()
+		pf.prefetch(filesToProcess...)
 	}
 
 	for len(filesToProcess) != 0 {
 		relPath := filesToProcess[0]
 		filesToProcess = filesToProcess[1:]
+		queuedPath := relPath
 
 		if relPath == "" {
 			return errors.New("empty Input, use \".\" for entire exec root")
@@ -320,7 +456,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 			return err
 		}
 		np := nodeProperties[remoteNormPath]
-		meta := cache.Get(absPath)
+		meta := pf.get(cache, queuedPath, absPath)
 
 		// An implication of this is that, if a path is a symlink to a
 		// directory, then the symlink attribute takes precedence.
@@ -360,6 +496,7 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 				// getTargetRelPath validates this target is under execRoot,
 				// and the iteration loop will get the relative path to execRoot,
 				filesToProcess = append(filesToProcess, targetExecRoot)
+				pf.prefetchOne(targetExecRoot)
 			}
 
 			// Done processing this symlink, a subsequent iteration will process
@@ -400,7 +537,9 @@ func loadFiles(execRoot, localWorkingDir, remoteWorkingDir string, excl []*comma
 				continue
 			}
 			for _, f := range files {
-				filesToProcess = append(filesToProcess, filepath.Join(normPath, f))
+				childPath := filepath.Join(normPath, f)
+				filesToProcess = append(filesToProcess, childPath)
+				pf.prefetchOne(childPath)
 			}
 		} else {
 			if shouldIgnore(absPath, command.FileInputType, excl) {
@@ -478,7 +617,7 @@ func (c *Client) ComputeMerkleTree(ctx context.Context, execRoot, workingDir, re
 			nodeProperties: np,
 		}
 	}
-	if err := loadFiles(execRoot, workingDir, remoteWorkingDir, is.InputExclusions, is.Inputs, fs, cache, slOpts, is.InputNodeProperties); err != nil {
+	if err := loadFiles(execRoot, workingDir, remoteWorkingDir, is.InputExclusions, is.Inputs, fs, cache, slOpts, is.InputNodeProperties, int(c.FileHashConcurrency)); err != nil {
 		return digest.Empty, nil, nil, err
 	}
 	ft, err := buildTree(fs)
@@ -757,7 +896,7 @@ func (c *Client) ComputeOutputsToUpload(execRoot, workingDir string, paths []str
 		}
 		// A directory.
 		fs := make(map[string]*fileSysNode)
-		if e := loadFiles(absPath, "", "", nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb), nodeProperties); e != nil {
+		if e := loadFiles(absPath, "", "", nil, []string{"."}, fs, cache, treeSymlinkOpts(c.TreeSymlinkOpts, sb), nodeProperties, int(c.FileHashConcurrency)); e != nil {
 			return nil, nil, e
 		}
 		ft, err := buildTree(fs)

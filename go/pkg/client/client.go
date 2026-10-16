@@ -181,6 +181,9 @@ type Client struct {
 	UnifiedDownloadTickDuration UnifiedDownloadTickDuration
 	// TreeSymlinkOpts controls how symlinks are handled when constructing a tree.
 	TreeSymlinkOpts *TreeSymlinkOpts
+	// FileHashConcurrency is the number of goroutines used to compute file metadata (including
+	// content digests) when constructing input/output trees. Values <= 1 mean serial.
+	FileHashConcurrency FileHashConcurrency
 
 	serverCaps          *repb.ServerCapabilities
 	useBatchOps         UseBatchOps
@@ -351,6 +354,17 @@ func (s UnifiedDownloadTickDuration) Apply(c *Client) {
 // Apply sets the client's TreeSymlinkOpts.
 func (o *TreeSymlinkOpts) Apply(c *Client) {
 	c.TreeSymlinkOpts = o
+}
+
+// FileHashConcurrency is the number of goroutines used to compute file metadata (including
+// content digests) when constructing input/output trees in ComputeMerkleTree and
+// ComputeOutputsToUpload. Values <= 1 disable concurrency. When > 1, the filemetadata.Cache
+// passed to those methods must be safe for concurrent use.
+type FileHashConcurrency int
+
+// Apply sets the client's FileHashConcurrency.
+func (f FileHashConcurrency) Apply(c *Client) {
+	c.FileHashConcurrency = f
 }
 
 // MaxBatchDigests is maximum amount of digests to batch in upload and download operations.
