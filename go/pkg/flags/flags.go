@@ -80,6 +80,8 @@ var (
 	KeepAliveTimeout = flag.Duration("grpc_keepalive_timeout", 20*time.Second, "After having pinged for keepalive check, the client waits for a duration of Timeout and if no activity is seen even after that the connection is closed. Default is 20s.")
 	// KeepAlivePermitWithoutStream specifies gRPCs keepalive permitWithoutStream parameter.
 	KeepAlivePermitWithoutStream = flag.Bool("grpc_keepalive_permit_without_stream", false, "If true, client sends keepalive pings even with no active RPCs; otherwise, doesn't send pings even if time and timeout are set. Default is false.")
+	// KeepAlivePermitWithoutStream specifies gRPCs keepalive permitWithoutStream parameter.
+	ExecutionPriority = flag.Int("execution_priority", 0, "The priority servers should use for executing action. See `ExecutionPolicy`.")
 )
 
 func init() {
@@ -111,7 +113,9 @@ func NewClientFromFlags(ctx context.Context, opts ...client.Opt) (*client.Client
 		opts = append(opts, client.RPCTimeouts(timeouts))
 	}
 	var perRPCCreds *client.PerRPCCreds
-	tOpts := []client.Opt{}
+	tOpts := []client.Opt{
+		client.ExecutionPriority(*ExecutionPriority),
+	}
 	for _, opt := range opts {
 		switch opt.(type) {
 		case *client.PerRPCCreds:
