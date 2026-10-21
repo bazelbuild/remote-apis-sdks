@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -22,6 +24,47 @@ const (
 	backoffFactor = 1.3 // backoff increases by this factor on each retry
 	backoffRange  = 0.4 // backoff is randomized downwards by this factor
 )
+
+// ErrRetryBudgetExhausted is the error type returned when the retry budget is exhausted.
+type ErrRetryBudgetExhausted struct {
+	Attempts Attempts
+	Err      error
+}
+
+func (e *ErrRetryBudgetExhausted) Error() string {
+	return fmt.Sprintf("retry budget exhausted (%d attempts): %v", e.Attempts, e.Err)
+}
+
+func (e *ErrRetryBudgetExhausted) Unwrap() error {
+	return e.Err
+}
+
+// GRPCStatus allows the error to be treated as a gRPC status error.
+func (e *ErrRetryBudgetExhausted) GRPCStatus() *status.Status {
+	// Use errors.As to find the first error in the chain that provides a gRPC status.
+	// This handles wrapped gRPC errors where status.FromError(e.Err) would fail.
+	var s interface{ GRPCStatus() *status.Status }
+	if errors.As(e.Err, &s) {
+		return s.GRPCStatus()
+	}
+
+	// Map common context and system errors to their corresponding gRPC codes.
+	if errors.Is(e.Err, context.DeadlineExceeded) || errors.Is(e.Err, os.ErrDeadlineExceeded) {
+		return status.New(codes.DeadlineExceeded, e.Error())
+	}
+	if errors.Is(e.Err, context.Canceled) {
+		return status.New(codes.Canceled, e.Error())
+	}
+
+	// Handle generic network timeouts if not already caught.
+	var netErr net.Error
+	if errors.As(e.Err, &netErr) && netErr.Timeout() {
+		return status.New(codes.DeadlineExceeded, e.Error())
+	}
+
+	// Fallback to ResourceExhausted when no better mapping exists.
+	return status.New(codes.ResourceExhausted, e.Error())
+}
 
 // BackoffPolicy describes how to back off when retrying, and how many times to retry.
 type BackoffPolicy struct {
@@ -104,15 +147,18 @@ func WithPolicy(ctx context.Context, shouldRetry ShouldRetry, bp BackoffPolicy, 
 
 		if attempts+1 == int(bp.maxAttempts) {
 			// Annotates the error message to indicate the retry budget was exhausted.
-			//
-			// This is a little hacky, but generic status annotation preserving status code doesn't exist
-			// in gRPC's status library yet, and it's overkill to implement it here for just this.
 			if s, ok := status.FromError(err); ok {
 				spb := s.Proto()
 				spb.Message = fmt.Sprintf("retry budget exhausted (%d attempts): ", bp.maxAttempts) + spb.Message
-				return status.ErrorProto(spb)
+				return &ErrRetryBudgetExhausted{
+					Attempts: bp.maxAttempts,
+					Err:      status.ErrorProto(spb),
+				}
 			}
-			return fmt.Errorf("retry budget exhausted (%d attempts): %w", bp.maxAttempts, err)
+			return &ErrRetryBudgetExhausted{
+				Attempts: bp.maxAttempts,
+				Err:      err,
+			}
 		}
 
 		select {
