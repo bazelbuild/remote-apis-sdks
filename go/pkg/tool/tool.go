@@ -204,7 +204,17 @@ func (c *Client) DownloadActionResult(ctx context.Context, actionDigest, pathPre
 	log.Infof("Downloading action results of %v to %v.", actionDigest, pathPrefix)
 	// We don't really need an in-memory filemetadata cache for debugging operations.
 	noopCache := filemetadata.NewNoopCache()
-	if _, err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, filepath.Join(pathPrefix, cmd.WorkingDir), noopCache); err != nil {
+	// cmd.WorkingDir originates from the server-supplied Command proto; reject
+	// non-local values (absolute paths or `..` traversal) so the join below
+	// cannot redirect outDir outside of the operator-supplied pathPrefix.
+	outDir := pathPrefix
+	if cmd.WorkingDir != "" {
+		if !filepath.IsLocal(cmd.WorkingDir) {
+			return fmt.Errorf("WorkingDirectory %q in command proto is not a local path", cmd.WorkingDir)
+		}
+		outDir = filepath.Join(pathPrefix, cmd.WorkingDir)
+	}
+	if _, err := c.GrpcClient.DownloadActionOutputs(ctx, resPb, outDir, noopCache); err != nil {
 		log.Errorf("Failed downloading action outputs: %v.", err)
 	}
 
