@@ -301,7 +301,7 @@ func (c *Client) ExecuteAndWaitProgress(ctx context.Context, req *repb.ExecuteRe
 		}
 		return nil
 	}
-	err = c.Retrier.Do(ctx, func() error { return c.CallWithTimeout(ctx, "Execute", closure) })
+	err = c.getRetrier("ExecuteAndWait").Do(ctx, func() error { return c.CallWithTimeout(ctx, "Execute", closure) })
 	if err != nil && !opError {
 		if st, ok := status.FromError(err); ok {
 			err = StatusDetailedError(st)

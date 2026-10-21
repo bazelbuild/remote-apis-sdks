@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"errors"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/actas"
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/balancer"
@@ -194,6 +193,7 @@ type Client struct {
 	casDownloaders      *semaphore.Weighted
 	casDownloadRequests chan *downloadRequest
 	rpcTimeouts         RPCTimeouts
+	rpcRetriers         map[string]*Retrier
 	remoteHeaders       map[string]string
 	creds               credentials.PerRPCCredentials
 	uploadOnce          sync.Once
@@ -829,6 +829,20 @@ func (d RPCTimeouts) Apply(c *Client) {
 	c.rpcTimeouts = map[string]time.Duration(d)
 }
 
+// RPCRetriers is an Opt that sets per-RPC retry policies.
+// The keys are RPC names.
+type RPCRetriers map[string]*Retrier
+
+// Apply applies the retry policies to a Client.
+func (r RPCRetriers) Apply(c *Client) {
+	if c.rpcRetriers == nil {
+		c.rpcRetriers = make(map[string]*Retrier)
+	}
+	for k, v := range r {
+		c.rpcRetriers[k] = v
+	}
+}
+
 // DefaultRPCTimeouts contains the default timeout of various RPC calls to RBE.
 var DefaultRPCTimeouts = map[string]time.Duration{
 	"default":          20 * time.Second,
@@ -915,6 +929,15 @@ func (r *Retrier) Do(ctx context.Context, f func() error) error {
 	return retry.WithPolicy(ctx, r.ShouldRetry, r.Backoff, f)
 }
 
+func (c *Client) getRetrier(rpcName string) *Retrier {
+	if c.rpcRetriers != nil {
+		if r, ok := c.rpcRetriers[rpcName]; ok {
+			return r
+		}
+	}
+	return c.Retrier
+}
+
 // RetryTransient is a default retry policy for transient status codes.
 func RetryTransient() *Retrier {
 	return &Retrier{
@@ -926,7 +949,7 @@ func RetryTransient() *Retrier {
 // GetActionResult wraps the underlying call with specific client options.
 func (c *Client) GetActionResult(ctx context.Context, req *repb.GetActionResultRequest) (res *repb.ActionResult, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("GetActionResult").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "GetActionResult", func(ctx context.Context) (e error) {
 			res, e = c.actionCache.GetActionResult(ctx, req, opts...)
 			return e
@@ -941,7 +964,7 @@ func (c *Client) GetActionResult(ctx context.Context, req *repb.GetActionResultR
 // UpdateActionResult wraps the underlying call with specific client options.
 func (c *Client) UpdateActionResult(ctx context.Context, req *repb.UpdateActionResultRequest) (res *repb.ActionResult, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("UpdateActionResult").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "UpdateActionResult", func(ctx context.Context) (e error) {
 			res, e = c.actionCache.UpdateActionResult(ctx, req, opts...)
 			return e
@@ -972,7 +995,7 @@ func (c *Client) Write(ctx context.Context) (res bsgrpc.ByteStream_WriteClient, 
 // QueryWriteStatus wraps the underlying call with specific client options.
 func (c *Client) QueryWriteStatus(ctx context.Context, req *bspb.QueryWriteStatusRequest) (res *bspb.QueryWriteStatusResponse, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("QueryWriteStatus").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "QueryWriteStatus", func(ctx context.Context) (e error) {
 			res, e = c.byteStream.QueryWriteStatus(ctx, req, opts...)
 			return e
@@ -987,7 +1010,7 @@ func (c *Client) QueryWriteStatus(ctx context.Context, req *bspb.QueryWriteStatu
 // FindMissingBlobs wraps the underlying call with specific client options.
 func (c *Client) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (res *repb.FindMissingBlobsResponse, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("FindMissingBlobs").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "FindMissingBlobs", func(ctx context.Context) (e error) {
 			res, e = c.cas.FindMissingBlobs(ctx, req, opts...)
 			return e
@@ -1004,7 +1027,7 @@ func (c *Client) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlob
 // to use BatchWriteBlobs() instead.
 func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlobsRequest) (res *repb.BatchUpdateBlobsResponse, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("BatchUpdateBlobs").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "BatchUpdateBlobs", func(ctx context.Context) (e error) {
 			res, e = c.cas.BatchUpdateBlobs(ctx, req, opts...)
 			return e
@@ -1021,7 +1044,7 @@ func (c *Client) BatchUpdateBlobs(ctx context.Context, req *repb.BatchUpdateBlob
 // It is recommended to use BatchDownloadBlobs instead.
 func (c *Client) BatchReadBlobs(ctx context.Context, req *repb.BatchReadBlobsRequest) (res *repb.BatchReadBlobsResponse, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("BatchReadBlobs").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "BatchReadBlobs", func(ctx context.Context) (e error) {
 			res, e = c.cas.BatchReadBlobs(ctx, req, opts...)
 			return e
@@ -1061,7 +1084,7 @@ func (c *Client) WaitExecution(ctx context.Context, req *repb.WaitExecutionReque
 // (either the main connection or the CAS connection).
 func (c *Client) GetBackendCapabilities(ctx context.Context, conn grpc.ClientConnInterface, req *repb.GetCapabilitiesRequest) (res *repb.ServerCapabilities, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("GetCapabilities").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "GetCapabilities", func(ctx context.Context) (e error) {
 			res, e = regrpc.NewCapabilitiesClient(conn).GetCapabilities(ctx, req, opts...)
 			return e
@@ -1076,7 +1099,7 @@ func (c *Client) GetBackendCapabilities(ctx context.Context, conn grpc.ClientCon
 // GetOperation wraps the underlying call with specific client options.
 func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest) (res *oppb.Operation, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("GetOperation").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "GetOperation", func(ctx context.Context) (e error) {
 			res, e = c.operations.GetOperation(ctx, req, opts...)
 			return e
@@ -1091,7 +1114,7 @@ func (c *Client) GetOperation(ctx context.Context, req *oppb.GetOperationRequest
 // ListOperations wraps the underlying call with specific client options.
 func (c *Client) ListOperations(ctx context.Context, req *oppb.ListOperationsRequest) (res *oppb.ListOperationsResponse, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("ListOperations").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "ListOperations", func(ctx context.Context) (e error) {
 			res, e = c.operations.ListOperations(ctx, req, opts...)
 			return e
@@ -1106,7 +1129,7 @@ func (c *Client) ListOperations(ctx context.Context, req *oppb.ListOperationsReq
 // CancelOperation wraps the underlying call with specific client options.
 func (c *Client) CancelOperation(ctx context.Context, req *oppb.CancelOperationRequest) (res *emptypb.Empty, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("CancelOperation").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "CancelOperation", func(ctx context.Context) (e error) {
 			res, e = c.operations.CancelOperation(ctx, req, opts...)
 			return e
@@ -1121,7 +1144,7 @@ func (c *Client) CancelOperation(ctx context.Context, req *oppb.CancelOperationR
 // DeleteOperation wraps the underlying call with specific client options.
 func (c *Client) DeleteOperation(ctx context.Context, req *oppb.DeleteOperationRequest) (res *emptypb.Empty, err error) {
 	opts := c.RPCOpts()
-	err = c.Retrier.Do(ctx, func() (e error) {
+	err = c.getRetrier("DeleteOperation").Do(ctx, func() (e error) {
 		return c.CallWithTimeout(ctx, "DeleteOperation", func(ctx context.Context) (e error) {
 			res, e = c.operations.DeleteOperation(ctx, req, opts...)
 			return e

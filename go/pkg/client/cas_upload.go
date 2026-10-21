@@ -177,7 +177,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 			st := status.FromProto(r.Status)
 			if st.Code() != codes.OK {
 				e := StatusDetailedError(st)
-				if c.Retrier.ShouldRetry(e) {
+				if c.getRetrier("BatchUpdateBlobs").ShouldRetry(e) {
 					failedReqs = append(failedReqs, &repb.BatchUpdateBlobsRequest_Request{
 						Digest: r.Digest,
 						Data:   blobs[digest.NewFromProtoUnvalidated(r.Digest)],
@@ -200,7 +200,7 @@ func (c *Client) BatchWriteBlobs(ctx context.Context, blobs map[digest.Digest][]
 		}
 		return nil
 	}
-	return c.Retrier.Do(ctx, closure)
+	return c.getRetrier("BatchUpdateBlobs").Do(ctx, closure)
 }
 
 // ResourceNameWrite generates a valid write resource name.
