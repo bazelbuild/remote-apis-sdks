@@ -202,16 +202,18 @@ func TestTool_DownloadAction(t *testing.T) {
 			path:     "input/a/b/i2",
 			contents: "i2",
 		},
-		// Note that we have to use proper quotes around the --cfg args' key-value
-		// pairs, these are valid examples: '--cfg=key="value"', --cfg='key="value"'
-		// and --cfg=key=\"value\" but --cfg=key="value" is invalid.
+		// All server-controlled fields (Arguments, OutputDirectories,
+		// OutputFiles, WorkingDirectory, env vars) are POSIX single-quote
+		// escaped to prevent shell injection when the operator runs the
+		// generated script. Embedded single quotes round-trip via the
+		// `'\''` form.
 		{
 			path: "run_command.sh",
 			contents: fmt.Sprintf(`#!/bin/bash
 
 # This script is meant to be called by %s/run_locally.sh.
-mkdir -p a/b
-foo bar baz @rust_api_level_cfg_flags.txt '--cfg=feature="debug"' '--cfg=__rust_toolchain="ZYWVoLo8XHwkRcwBUtl83-8E559gSwiuYrDOsvNULggC'
+mkdir -p 'a/b'
+'foo' 'bar' 'baz' '@rust_api_level_cfg_flags.txt' '--cfg=feature="debug"' '--cfg=__rust_toolchain="ZYWVoLo8XHwkRcwBUtl83-8E559gSwiuYrDOsvNULggC'
 bash
 `, tmpDir),
 		},
