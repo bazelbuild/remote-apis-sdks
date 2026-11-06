@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/bazelbuild/remote-apis-sdks/go/pkg/contextmd"
@@ -161,13 +162,27 @@ func copyFile(srcOutDir, dstOutDir, from, to string, mode os.FileMode) error {
 	defer srcRoot.Close() // nolint:errcheck
 	defer s.Close()
 
+	absTo, err := getAbsPath(dstOutDir, to)
+	if err != nil {
+		return err
+	}
+	cleanTo, err := filepath.Rel(dstOutDir, absTo)
+	if err != nil {
+		return err
+	}
 	t, dstRoot, err := openFileUnder(dstOutDir, to, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
 	defer dstRoot.Close() // nolint:errcheck
-	defer t.Close()
 
 	_, err = io.Copy(t, s)
-	return err
+	if closeErr := t.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		dstRoot.Remove(cleanTo) // nolint:errcheck
+		return err
+	}
+	return nil
 }

@@ -453,6 +453,39 @@ func TestReadToFileRetries(t *testing.T) {
 	}
 }
 
+func TestReadToFileRetriesExhaustedRemovesPartialFile(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	defer f.shutDown()
+	// Allow enough attempts to reach numCalls == 3 (which streams partial "bl" bytes and fails),
+	// then exhaust the retry budget on numCalls == 4 so ReadBlobToFile fails after writing partial data.
+	(&client.Retrier{Backoff: retry.Immediately(retry.Attempts(4)), ShouldRetry: retry.TransientOnly}).Apply(f.client)
+
+	blob := []byte("blob")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "partial_blob")
+	if _, err := f.client.ReadBlobToFile(f.ctx, digest.NewFromBlob(blob), path); err == nil {
+		t.Fatalf("client.ReadBlobToFile(ctx, digest) succeeded, want error after retry exhaustion")
+	}
+	if fi, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("expected partial file %s to be removed on failure, got info=%v, err=%v", path, fi, err)
+	}
+
+	outPath := "action_out"
+	if err := os.WriteFile(filepath.Join(dir, outPath), []byte("existing"), 0644); err != nil {
+		t.Fatalf("failed to write existing file: %v", err)
+	}
+	dg := digest.NewFromBlob(blob)
+	if _, err := f.client.DownloadFiles(f.ctx, dir, map[digest.Digest]*client.TreeOutput{
+		dg: {Digest: dg, Path: outPath},
+	}); err == nil {
+		t.Fatalf("client.DownloadFiles(ctx, dir, outputs) succeeded, want error after retry exhaustion")
+	}
+	if fi, err := os.Stat(filepath.Join(dir, outPath)); !os.IsNotExist(err) {
+		t.Errorf("expected truncated file %s to be removed on failure, got info=%v, err=%v", outPath, fi, err)
+	}
+}
+
 // Verify for one arbitrary method that when retries are exhausted, we get the retriable error code
 // back.
 func TestBatchWriteBlobsRpcRetriesExhausted(t *testing.T) {
