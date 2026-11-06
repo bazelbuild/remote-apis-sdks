@@ -285,11 +285,25 @@ func (c *Client) BatchDownloadBlobsWithStats(ctx context.Context, dgs []digest.D
 					allRetriable = false
 					continue
 				}
+				// Verify that the returned content actually hashes to the
+				// requested digest. The streaming download path performs the
+				// equivalent check; without it here, a compromised, misbehaving,
+				// or (over a non-TLS channel) MITM'd CAS could return arbitrary
+				// bytes for a requested digest and poison the downloaded blob,
+				// since the map below is keyed by the server-claimed digest.
+				wantDg := digest.NewFromProtoUnvalidated(r.Digest)
+				if gotDg := digest.NewFromBlob(r.Data); gotDg != wantDg {
+					errDg = r.Digest
+					errMsg = fmt.Sprintf("calculated digest %s != expected digest %s", gotDg, wantDg)
+					numErrs++
+					allRetriable = false
+					continue
+				}
 				bi := CompressedBlobInfo{
 					CompressedSize: int64(CompressedSize),
 					Data:           r.Data,
 				}
-				res[digest.NewFromProtoUnvalidated(r.Digest)] = bi
+				res[wantDg] = bi
 			}
 		}
 		req.Digests = failedDgs
