@@ -1439,23 +1439,40 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 	ar := &repb.ActionResult{}
 	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "foo", Digest: digest.NewFromBlob([]byte("foo")).ToProto()})
 	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "bar", Digest: digest.NewFromBlob([]byte("bar")).ToProto()})
-	execRoot := t.TempDir()
 
 	for _, ub := range []client.UseBatchOps{false, true} {
-		ub := ub
-		t.Run(fmt.Sprintf("%sUsingBatch:%t", t.Name(), ub), func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			e, cleanup := fakes.NewTestEnv(t)
-			defer cleanup()
-			c := e.Client.GrpcClient
-			ub.Apply(c)
+		for _, uo := range []client.UnifiedDownloads{false, true} {
+			ub, uo := ub, uo
+			t.Run(fmt.Sprintf("%sUsingBatch:%t,UnifiedDownloads:%t", t.Name(), ub, uo), func(t *testing.T) {
+				t.Parallel()
+				execRoot := t.TempDir()
+				// Pre-populate "bar" to verify that a failed download removes the truncated file
+				// rather than leaving a 0-length file on disk.
+				if err := os.WriteFile(filepath.Join(execRoot, "bar"), []byte("stale"), 0644); err != nil {
+					t.Fatalf("failed to write pre-existing file: %v", err)
+				}
+				ctx := context.Background()
+				e, cleanup := fakes.NewTestEnv(t)
+				defer cleanup()
+				c := e.Client.GrpcClient
+				ub.Apply(c)
+				uo.Apply(c)
+				c.RunBackgroundTasks(ctx)
 
-			_, err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
-			if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found") {
-				t.Errorf("expected 'not found' error in DownloadActionOutputs, got: %v", err)
-			}
-		})
+				_, err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
+				if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found") {
+					t.Errorf("expected 'not found' error in DownloadActionOutputs, got: %v", err)
+				}
+				fooPath := filepath.Join(execRoot, "foo")
+				if fi, statErr := os.Stat(fooPath); !os.IsNotExist(statErr) {
+					t.Errorf("expected failed download output %s not to exist, got info=%v, err=%v", fooPath, fi, statErr)
+				}
+				barPath := filepath.Join(execRoot, "bar")
+				if fi, statErr := os.Stat(barPath); statErr == nil && fi.Size() == 0 {
+					t.Errorf("expected failed download output %s not to be truncated to 0 bytes", barPath)
+				}
+			})
+		}
 	}
 }
 

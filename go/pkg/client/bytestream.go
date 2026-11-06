@@ -147,8 +147,15 @@ func (c *Client) readToFile(ctx context.Context, name string, fpath string) (int
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
-	return c.readStreamedRetried(ctx, name, 0, 0, f)
+	n, err := c.readStreamedRetried(ctx, name, 0, 0, f)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(fpath) // nolint:errcheck
+		return n, err
+	}
+	return n, nil
 }
 
 // readStreamed reads from a bytestream and copies the result to the provided Writer, starting

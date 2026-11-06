@@ -62,20 +62,23 @@ func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[d
 	}
 
 	// Wait for all downloads to finish.
+	var firstErr error
 	for count > 0 {
 		select {
 		case <-ctx.Done():
 			contextmd.Infof(ctx, log.Level(2), "Download canceled")
 			return stats, ctx.Err()
 		case resp := <-wait:
-			if resp.err != nil {
-				return stats, resp.err
+			if resp.err != nil && firstErr == nil {
+				firstErr = resp.err
 			}
-			stats.addFrom(resp.stats)
+			if resp.stats != nil {
+				stats.addFrom(resp.stats)
+			}
 			count--
 		}
 	}
-	return stats, nil
+	return stats, firstErr
 }
 
 // DownloadOutputs downloads the specified outputs. It returns the amount of downloaded bytes.
@@ -338,8 +341,15 @@ func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath stri
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	return c.readBlobStreamed(ctx, d, 0, 0, f)
+	stats, err := c.readBlobStreamed(ctx, d, 0, 0, f)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(fpath) // nolint:errcheck
+		return stats, err
+	}
+	return stats, nil
 }
 
 // ReadProto reads a blob from the CAS and unmarshals it into the given message.
@@ -866,7 +876,14 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 		return
 	}
 	for _, dg := range batch {
-		bi := bchMap[dg]
+		bi, ok := bchMap[dg]
+		if !ok {
+			err := fmt.Errorf("digest %s not found in batch response", dg)
+			for _, r := range reqs[dg] {
+				r.wait <- &downloadResponse{stats: &MovedBytesMetadata{}, err: err}
+			}
+			continue
+		}
 		stats := &MovedBytesMetadata{
 			Requested:    dg.Size,
 			LogicalMoved: dg.Size,
@@ -903,20 +920,27 @@ func (c *Client) readBlobToFileUnder(ctx context.Context, d digest.Digest, baseD
 	if err != nil {
 		return nil, err
 	}
+	cleanRel, err := filepath.Rel(baseDir, absPath)
+	if err != nil {
+		return nil, err
+	}
 	contextmd.Infof(ctx, log.Level(3), "Downloading single file with digest %s to %s", d, absPath)
 	f, root, err := openFileUnder(baseDir, relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, c.RegularMode)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close() // nolint:errcheck
-	defer f.Close()    // nolint:errcheck
 	stats, err := c.readBlobStreamed(ctx, d, 0, 0, f)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
+		root.Remove(cleanRel) // nolint:errcheck
 		return nil, err
 	}
 	if mode != c.RegularMode {
-		cleanRel, _ := filepath.Rel(baseDir, absPath)
 		if err := root.Chmod(cleanRel, mode); err != nil {
+			root.Remove(cleanRel) // nolint:errcheck
 			return nil, err
 		}
 	}
@@ -1014,8 +1038,14 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 			if len(batch) > 1 {
 				contextmd.Infof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 				bchMap, err := c.BatchDownloadBlobsWithStats(eCtx, batch)
+				if err != nil {
+					return err
+				}
 				for _, dg := range batch {
-					bi := bchMap[dg]
+					bi, ok := bchMap[dg]
+					if !ok {
+						return fmt.Errorf("digest %s not found in batch response", dg)
+					}
 					out := outputs[dg]
 					perm := c.RegularMode
 					if out.IsExecutable {
@@ -1028,9 +1058,6 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 					fullStats.LogicalMoved += int64(len(bi.Data))
 					fullStats.RealMoved += bi.CompressedSize
 					statsMu.Unlock()
-				}
-				if err != nil {
-					return err
 				}
 			} else {
 				out := outputs[batch[0]]
@@ -1070,8 +1097,10 @@ func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequ
 		}
 		stats, ok := bytesMoved[dg]
 		if !ok {
-			log.Errorf("Internal tool error - matching map entry")
-			continue
+			if err == nil {
+				log.Errorf("Internal tool error - matching map entry")
+			}
+			stats = &MovedBytesMetadata{}
 		}
 		// If there's no real bytes moved it likely means there was an error moving these.
 		for i, r := range rs {
