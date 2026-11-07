@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -338,8 +339,35 @@ func (c *Client) ReadBlobToFile(ctx context.Context, d digest.Digest, fpath stri
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	return c.writeBlobAndCleanup(ctx, d, f, nil, fpath)
+}
+
+func (c *Client) writeBlobAndCleanup(ctx context.Context, d digest.Digest, f *os.File, root *os.Root, path string) (stats *MovedBytesMetadata, err error) {
+	defer func() {
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			stats = nil
+			if rmErr := removeFile(root, path); rmErr != nil {
+				err = errors.Join(err, rmErr)
+			}
+		}
+	}()
 	return c.readBlobStreamed(ctx, d, 0, 0, f)
+}
+
+func removeFile(root *os.Root, path string) error {
+	var err error
+	if root != nil {
+		err = root.Remove(path)
+	} else {
+		err = os.Remove(path)
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("cleanup %q: %w", path, err)
+	}
+	return nil
 }
 
 // ReadProto reads a blob from the CAS and unmarshals it into the given message.
@@ -909,14 +937,16 @@ func (c *Client) readBlobToFileUnder(ctx context.Context, d digest.Digest, baseD
 		return nil, err
 	}
 	defer root.Close() // nolint:errcheck
-	defer f.Close()    // nolint:errcheck
-	stats, err := c.readBlobStreamed(ctx, d, 0, 0, f)
+	cleanRel, _ := filepath.Rel(baseDir, absPath)
+	stats, err := c.writeBlobAndCleanup(ctx, d, f, root, cleanRel)
 	if err != nil {
 		return nil, err
 	}
 	if mode != c.RegularMode {
-		cleanRel, _ := filepath.Rel(baseDir, absPath)
 		if err := root.Chmod(cleanRel, mode); err != nil {
+			if rmErr := removeFile(root, cleanRel); rmErr != nil {
+				err = errors.Join(err, rmErr)
+			}
 			return nil, err
 		}
 	}
@@ -1014,8 +1044,14 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 			if len(batch) > 1 {
 				contextmd.Infof(ctx, log.Level(3), "Downloading batch of %d files", len(batch))
 				bchMap, err := c.BatchDownloadBlobsWithStats(eCtx, batch)
+				if err != nil {
+					return err
+				}
 				for _, dg := range batch {
-					bi := bchMap[dg]
+					bi, ok := bchMap[dg]
+					if !ok {
+						return fmt.Errorf("failed precondition: cannot find %v in batch result", dg)
+					}
 					out := outputs[dg]
 					perm := c.RegularMode
 					if out.IsExecutable {
@@ -1029,16 +1065,13 @@ func (c *Client) downloadNonUnified(ctx context.Context, outDir string, outputs 
 					fullStats.RealMoved += bi.CompressedSize
 					statsMu.Unlock()
 				}
-				if err != nil {
-					return err
-				}
 			} else {
 				out := outputs[batch[0]]
 				perm := c.RegularMode
 				if out.IsExecutable {
 					perm = c.ExecutableMode
 				}
-				stats, err := c.readBlobToFileUnder(ctx, out.Digest, outDir, out.Path, perm)
+				stats, err := c.readBlobToFileUnder(eCtx, out.Digest, outDir, out.Path, perm)
 				if err != nil {
 					return err
 				}

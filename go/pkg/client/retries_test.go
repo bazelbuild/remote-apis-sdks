@@ -453,6 +453,65 @@ func TestReadToFileRetries(t *testing.T) {
 	}
 }
 
+func TestRetryExhaustionCleanup(t *testing.T) {
+	t.Parallel()
+
+	dg := digest.NewFromBlob([]byte("blob"))
+
+	tests := []struct {
+		name     string
+		seedFile bool
+		run      func(f *flakyFixture, dst string) error
+	}{
+		{
+			name:     "ReadBlobToFile",
+			seedFile: false,
+			run: func(f *flakyFixture, dst string) error {
+				_, err := f.client.ReadBlobToFile(f.ctx, dg, dst)
+				return err
+			},
+		},
+		{
+			name:     "DownloadFiles",
+			seedFile: true,
+			run: func(f *flakyFixture, dst string) error {
+				outputs := map[digest.Digest]*client.TreeOutput{dg: {Digest: dg, Path: filepath.Base(dst)}}
+				_, err := f.client.DownloadFiles(f.ctx, filepath.Dir(dst), outputs)
+				return err
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := setup(t)
+			defer f.shutDown()
+
+			// Attempts(4) reaches numCalls == 3 (streams partial "bl") then exhausts retries on numCalls == 4.
+			(&client.Retrier{
+				Backoff:     retry.Immediately(retry.Attempts(4)),
+				ShouldRetry: retry.TransientOnly,
+			}).Apply(f.client)
+
+			dst := filepath.Join(t.TempDir(), "out")
+			if tc.seedFile {
+				if err := os.WriteFile(dst, []byte("existing"), 0644); err != nil {
+					t.Fatalf("failed seeding file: %v", err)
+				}
+			}
+
+			if err := tc.run(f, dst); err == nil {
+				t.Fatal("expected error after retry exhaustion, got nil")
+			}
+			if _, err := os.Stat(dst); !os.IsNotExist(err) {
+				t.Errorf("expected %s to be deleted on failure, got err=%v", dst, err)
+			}
+		})
+	}
+}
+
 // Verify for one arbitrary method that when retries are exhausted, we get the retriable error code
 // back.
 func TestBatchWriteBlobsRpcRetriesExhausted(t *testing.T) {
