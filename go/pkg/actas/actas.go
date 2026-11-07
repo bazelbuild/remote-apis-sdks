@@ -180,7 +180,10 @@ func (s *TokenSource) getSignedJWT(headers map[string]string) (*signaturePayload
 
 	payload := &signaturePayload{}
 	if err := json.Unmarshal(signatureBody, payload); err != nil {
-		return nil, fmt.Errorf("failed to parse sign jwt payload %q: %v", string(signatureBody), err)
+		// Deliberately not including the raw response body here: on a 200 response it
+		// may already contain a live signedJwt even though it failed to unmarshal (e.g.
+		// a truncated response), and that value should not end up in logs/error output.
+		return nil, fmt.Errorf("failed to parse sign jwt payload: %v", err)
 	}
 
 	log.V(1).Infof("Payload: %+v", payload)
@@ -243,7 +246,11 @@ func (s TokenSource) getToken(headers map[string]string, signature *signaturePay
 	payload := &tokenPayload{}
 	err = json.Unmarshal(tokenBody, payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse access token payload %q: %v", string(tokenBody), err)
+		// Deliberately not including the raw response body here: on a 200 response it
+		// may already contain a live access_token even though it failed to unmarshal
+		// (e.g. an unexpected field type or a truncated response), and that value
+		// should not end up in logs/error output.
+		return nil, fmt.Errorf("failed to parse access token payload: %v", err)
 	}
 
 	log.V(1).Infof("Payload: %+v", payload)
