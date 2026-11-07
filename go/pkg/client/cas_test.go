@@ -1052,6 +1052,28 @@ func TestFlattenActionOutputs(t *testing.T) {
 	}
 }
 
+func TestFlattenActionOutputsEmptyTreeDigest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+	c := e.Client.GrpcClient
+
+	// A server may report an output directory whose TreeDigest is the empty
+	// digest, i.e. a zero-byte tree blob. That unmarshals into a Tree with a
+	// nil root, which must result in an error, not a crash.
+	ar := &repb.ActionResult{
+		OutputDirectories: []*repb.OutputDirectory{
+			{Path: "dir", TreeDigest: digest.Empty.ToProto()},
+		},
+	}
+	if _, err := c.FlattenActionOutputs(ctx, ar); err == nil {
+		t.Errorf("FlattenActionOutputs of empty tree digest gave no error")
+	} else if !strings.Contains(err.Error(), "has no root") {
+		t.Errorf("FlattenActionOutputs of empty tree digest gave error %v, want it to mention missing root", err)
+	}
+}
+
 func TestDownloadActionOutputs(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

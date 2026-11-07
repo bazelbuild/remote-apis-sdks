@@ -1816,6 +1816,19 @@ func TestFlattenTreeRepeated(t *testing.T) {
 	}
 }
 
+func TestFlattenTreeNoRoot(t *testing.T) {
+	// A zero-byte tree blob unmarshals into a Tree with a nil root.
+	// FlattenTree must return an error instead of crashing.
+	e, cleanup := fakes.NewTestEnv(t)
+	defer cleanup()
+
+	if _, err := e.Client.GrpcClient.FlattenTree(&repb.Tree{}, "x"); err == nil {
+		t.Errorf("FlattenTree of a tree with no root gave no error")
+	} else if !strings.Contains(err.Error(), "has no root") {
+		t.Errorf("FlattenTree of a tree with no root gave error %v, want it to mention missing root", err)
+	}
+}
+
 func TestComputeOutputsToUploadFiles(t *testing.T) {
 	tests := []struct {
 		desc           string

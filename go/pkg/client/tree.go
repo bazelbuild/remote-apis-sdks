@@ -735,6 +735,12 @@ type TreeOutput struct {
 // the tree root. Note that only files/symlinks/empty directories are included in the returned slice,
 // not the intermediate directories. Directories containing only other directories will be omitted.
 func (c *Client) FlattenTree(tree *repb.Tree, rootPath string) (map[string]*TreeOutput, error) {
+	if tree.GetRoot() == nil {
+		// A tree blob of zero bytes (e.g. an output directory whose TreeDigest
+		// is the empty digest) unmarshals into a Tree with no root. Report it
+		// instead of dereferencing the nil root in flattenTree.
+		return nil, fmt.Errorf("tree for directory %s has no root", rootPath)
+	}
 	root, err := digest.NewFromMessage(tree.Root)
 	if err != nil {
 		return nil, err
@@ -768,7 +774,7 @@ func flattenTree(root digest.Digest, rootPath string, dirs map[digest.Digest]*re
 		queue = queue[1:]
 
 		dir, ok := dirs[flatDir.d]
-		if !ok {
+		if !ok || dir == nil {
 			return nil, fmt.Errorf("couldn't find directory %s with digest %s", flatDir.p, flatDir.d)
 		}
 
