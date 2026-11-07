@@ -42,11 +42,13 @@ func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[d
 	if err != nil {
 		return stats, err
 	}
+	dlCtx, dlCancel := context.WithCancel(ctx)
+	defer dlCancel()
 	wait := make(chan *downloadResponse, count)
 	for dg, out := range outputs {
 		r := &downloadRequest{
 			digest:  dg,
-			context: ctx,
+			context: dlCtx,
 			outDir:  outDir,
 			output:  out,
 			meta:    meta,
@@ -62,6 +64,7 @@ func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[d
 	}
 
 	// Wait for all downloads to finish.
+	var firstErr error
 	for count > 0 {
 		select {
 		case <-ctx.Done():
@@ -69,13 +72,16 @@ func (c *Client) DownloadFiles(ctx context.Context, outDir string, outputs map[d
 			return stats, ctx.Err()
 		case resp := <-wait:
 			if resp.err != nil {
-				return stats, resp.err
+				if firstErr == nil {
+					firstErr = resp.err
+				}
+				dlCancel()
 			}
 			stats.addFrom(resp.stats)
 			count--
 		}
 	}
-	return stats, nil
+	return stats, firstErr
 }
 
 // DownloadOutputs downloads the specified outputs. It returns the amount of downloaded bytes.
@@ -866,7 +872,11 @@ func (c *Client) downloadBatch(ctx context.Context, batch []digest.Digest, reqs 
 		return
 	}
 	for _, dg := range batch {
-		bi := bchMap[dg]
+		bi, ok := bchMap[dg]
+		if !ok {
+			afterDownload([]digest.Digest{dg}, reqs, nil, fmt.Errorf("digest %s not found in batch response", dg))
+			continue
+		}
 		stats := &MovedBytesMetadata{
 			Requested:    dg.Size,
 			LogicalMoved: dg.Size,
@@ -1069,16 +1079,15 @@ func afterDownload(batch []digest.Digest, reqs map[digest.Digest][]*downloadRequ
 			log.Errorf("Precondition failed: download request not found in input %v.", dg)
 		}
 		stats, ok := bytesMoved[dg]
-		if !ok {
+		if !ok && err == nil {
 			log.Errorf("Internal tool error - matching map entry")
-			continue
 		}
 		// If there's no real bytes moved it likely means there was an error moving these.
 		for i, r := range rs {
 			// bytesMoved will be zero for error cases.
 			// We only report it to the first client to prevent double accounting.
 			r.wait <- &downloadResponse{stats: stats, err: err}
-			if i == 0 {
+			if i == 0 && stats != nil {
 				// Prevent races by not writing to the original stats.
 				newStats := &MovedBytesMetadata{}
 				newStats.Requested = stats.Requested

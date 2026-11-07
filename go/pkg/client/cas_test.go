@@ -1459,6 +1459,55 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 	}
 }
 
+func TestUnifiedDownloadsErrorHandling(t *testing.T) {
+	fooBlob, barBlob := []byte("foo"), []byte("bar")
+	fooDg, barDg := digest.NewFromBlob(fooBlob), digest.NewFromBlob(barBlob)
+	outputs := map[digest.Digest]*client.TreeOutput{
+		fooDg: {Digest: fooDg, Path: "foo"},
+		barDg: {Digest: barDg, Path: "bar"},
+	}
+
+	tests := []struct {
+		name     string
+		useBatch client.UseBatchOps
+		blockFoo bool
+	}{
+		{name: "missing_blobs", useBatch: false},
+		{name: "missing_blobs_batch", useBatch: true},
+		{name: "partial_failure_cancels_active_download", blockFoo: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+
+			e, cleanup := fakes.NewTestEnv(t)
+			t.Cleanup(cleanup)
+
+			if tc.blockFoo {
+				e.Server.CAS.Put(fooBlob)
+				started, block := make(chan struct{}), make(chan struct{})
+				t.Cleanup(func() { close(block) })
+				e.Server.CAS.PerDigestBlockFn[fooDg] = func() { close(started); <-block }
+				e.Server.CAS.PerDigestBlockFn[barDg] = func() { <-started }
+			}
+
+			c := e.Client.GrpcClient
+			tc.useBatch.Apply(c)
+			client.UnifiedDownloads(true).Apply(c)
+			c.RunBackgroundTasks(ctx)
+
+			_, err := c.DownloadFiles(ctx, e.ExecRoot, outputs)
+			if err == nil || (status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found")) {
+				t.Errorf("DownloadFiles() error = %v, want NotFound", err)
+			}
+		})
+	}
+}
+
 func TestDownloadActionOutputsBatching(t *testing.T) {
 	tests := []struct {
 		name      string
