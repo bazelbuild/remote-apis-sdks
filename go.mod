@@ -9,7 +9,7 @@ require (
 	github.com/golang/glog v1.2.5
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
-	github.com/klauspost/compress v1.18.3
+	github.com/klauspost/compress v1.18.7
 	github.com/pkg/xattr v0.4.12
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
