@@ -551,7 +551,7 @@ func (c *Client) FlattenActionOutputs(ctx context.Context, ar *repb.ActionResult
 		}
 		dirouts, err := c.FlattenTree(t, dir.Path)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error flattening tree of output directory %s with tree digest %s: %v", dir.Path, dir.TreeDigest, err)
 		}
 		for _, out := range dirouts {
 			outs[out.Path] = out
