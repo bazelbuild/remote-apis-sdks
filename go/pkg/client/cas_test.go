@@ -1439,21 +1439,42 @@ func TestDownloadActionOutputsErrors(t *testing.T) {
 	ar := &repb.ActionResult{}
 	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "foo", Digest: digest.NewFromBlob([]byte("foo")).ToProto()})
 	ar.OutputFiles = append(ar.OutputFiles, &repb.OutputFile{Path: "bar", Digest: digest.NewFromBlob([]byte("bar")).ToProto()})
-	execRoot := t.TempDir()
 
 	for _, ub := range []client.UseBatchOps{false, true} {
 		ub := ub
 		t.Run(fmt.Sprintf("%sUsingBatch:%t", t.Name(), ub), func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			execRoot := t.TempDir()
+			// Pre-populate "bar" to verify that a failed download removes the truncated file
+			// rather than leaving a 0-length file on disk.
+			if err := os.WriteFile(filepath.Join(execRoot, "bar"), []byte("stale"), 0644); err != nil {
+				t.Fatalf("failed to write pre-existing file: %v", err)
+			}
+			ctx := t.Context()
 			e, cleanup := fakes.NewTestEnv(t)
 			defer cleanup()
 			c := e.Client.GrpcClient
 			ub.Apply(c)
 
 			_, err := c.DownloadActionOutputs(ctx, ar, execRoot, filemetadata.NewSingleFlightCache())
-			if status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found") {
+			if err == nil || (status.Code(err) != codes.NotFound && !strings.Contains(err.Error(), "not found")) {
 				t.Errorf("expected 'not found' error in DownloadActionOutputs, got: %v", err)
+			}
+			fooPath := filepath.Join(execRoot, "foo")
+			if _, statErr := os.Stat(fooPath); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("expected failed download output %s not to exist, got err=%v", fooPath, statErr)
+			}
+			barPath := filepath.Join(execRoot, "bar")
+			if !ub {
+				// Streaming opens with O_TRUNC before reading, so cleanup must delete it on error.
+				if _, statErr := os.Stat(barPath); !errors.Is(statErr, os.ErrNotExist) {
+					t.Errorf("expected failed streamed output %s to be deleted, got err=%v", barPath, statErr)
+				}
+			} else {
+				// Batch download fails on RPC before touching disk, so pre-existing file stays intact.
+				if got, readErr := os.ReadFile(barPath); readErr != nil || !bytes.Equal(got, []byte("stale")) {
+					t.Errorf("expected pre-existing %s to remain intact as %q, got %q (err=%v)", barPath, "stale", got, readErr)
+				}
 			}
 		})
 	}
@@ -1944,6 +1965,53 @@ func TestDownloadFilesCancel(t *testing.T) {
 			}
 			close(wait)
 		})
+	}
+}
+
+func TestCancelOnSiblingError(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	e, cleanup := fakes.NewTestEnv(t)
+	t.Cleanup(cleanup)
+
+	fooBlob, barBlob := []byte("foo"), []byte("bar")
+	fooDg, barDg := digest.NewFromBlob(fooBlob), digest.NewFromBlob(barBlob)
+	e.Server.CAS.Put(fooBlob) // barBlob deliberately omitted so bar fails with NotFound.
+
+	started, unblock := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(unblock) })
+	e.Server.CAS.PerDigestBlockFn[fooDg] = func() { close(started); <-unblock }
+	e.Server.CAS.PerDigestBlockFn[barDg] = func() { <-started }
+
+	c := e.Client.GrpcClient
+	client.UnifiedDownloads(false).Apply(c)
+	client.UseBatchOps(false).Apply(c)
+
+	execRoot := t.TempDir()
+	stats, err := c.DownloadFiles(ctx, execRoot, map[digest.Digest]*client.TreeOutput{
+		fooDg: {Digest: fooDg, Path: "foo"},
+		barDg: {Digest: barDg, Path: "bar"},
+	})
+
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("DownloadFiles() code = %v, want %v (err: %v)", status.Code(err), codes.NotFound, err)
+	}
+
+	// Metrics validation: requested equals sum of targets, but no bytes committed on failure.
+	wantRequested := fooDg.Size + barDg.Size
+	if stats == nil {
+		t.Errorf("stats is nil, want Requested = %d", wantRequested)
+	} else if stats.Requested != wantRequested || stats.LogicalMoved != 0 {
+		t.Errorf("stats = %+v, want Requested=%d, LogicalMoved=0", stats, wantRequested)
+	}
+
+	// Disk validation: neither the canceled stream nor the failed target may leave orphan files.
+	for _, name := range []string{"foo", "bar"} {
+		if _, statErr := os.Stat(filepath.Join(execRoot, name)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("expected file %q to be deleted, got %v", name, statErr)
+		}
 	}
 }
 
